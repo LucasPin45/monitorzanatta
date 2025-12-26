@@ -143,6 +143,20 @@ def needs_relator_info(situacao: str, andamento: str) -> bool:
     return any(t in combo for t in triggers)
 
 
+def canonical_situacao(situacao: str) -> str:
+    """Normaliza rótulos de Situação atual para evitar duplicidades e facilitar filtros."""
+    s_raw = (situacao or "").strip()
+    s = normalize_text(s_raw)
+    # Unificar variações de "aguardando parecer"
+    if "aguardando" in s and "parecer" in s:
+        # inclui "aguardando parecer", "aguardando o parecer", "aguardando parecer do relator"
+        return "Aguardando Parecer de Relator(a)"
+    if "parecer" in s and "relator" in s:
+        return "Aguardando Parecer de Relator(a)"
+    # Outras normalizações leves (se quiser expandir depois)
+    return s_raw
+
+
 # ============================================================
 # HTTP ROBUSTO (retry/backoff)
 # ============================================================
@@ -214,6 +228,47 @@ def resolve_relator_info(uri_ultimo_relator: str) -> tuple[str, str, str, str]:
         return "", "", "", ""
     info = fetch_deputado_info_by_id(rid)
     return rid, info.get("nome", ""), info.get("siglaPartido", ""), info.get("siglaUf", "")
+
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_relator_atual_from_relatores(id_proposicao: str) -> tuple[str, str, str, str]:
+    """Fallback: tenta descobrir relator(a) via endpoint /relatores quando statusProposicao não traz uriUltimoRelator.
+    Retorna (relator_id, nome, partido, uf) ou ("","","","").
+    """
+    try:
+        pid = str(id_proposicao).strip()
+        if not pid:
+            return "", "", "", ""
+        data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores", params={"itens": 100, "ordem": "DESC"})
+        if data is None or "__error__" in data:
+            return "", "", "", ""
+        items = data.get("dados", []) or []
+        if not items:
+            return "", "", "", ""
+
+        # pega o mais recente que tenha algum vínculo de deputado
+        for it in items:
+            uri_dep = it.get("uriDeputado") or it.get("uriParlamentar") or it.get("uriDeputadoRelator") or ""
+            rid = extract_id_from_uri(uri_dep)
+            if rid:
+                info = fetch_deputado_info_by_id(rid)
+                nome = (info.get("nome") or "").strip()
+                part = (info.get("siglaPartido") or "").strip()
+                uf = (info.get("siglaUf") or "").strip()
+                return rid, nome, part, uf
+
+            # fallback: alguns retornos já trazem nome/partido/uf no item
+            nome = (it.get("nome") or it.get("nomeDeputado") or "").strip()
+            part = (it.get("siglaPartido") or it.get("partido") or "").strip()
+            uf = (it.get("siglaUf") or it.get("uf") or "").strip()
+            if nome:
+                return "", nome, part, uf
+
+        return "", "", "", ""
+    except Exception:
+        return "", "", "", ""
+
 
 
 # ============================================================
@@ -622,6 +677,12 @@ def fetch_status_proposicao(id_proposicao):
     uri_ultimo_relator = status.get("uriUltimoRelator") or ""
     relator_id, relator_nome, relator_partido, relator_uf = resolve_relator_info(uri_ultimo_relator)
 
+    # Fallback: há casos em que o status não preenche uriUltimoRelator, mas já existe relatoria registrada no endpoint /relatores
+    if not relator_nome:
+        rid2, nome2, part2, uf2 = fetch_relator_atual_from_relatores(str(id_proposicao))
+        if nome2:
+            relator_id, relator_nome, relator_partido, relator_uf = rid2, nome2, part2, uf2
+
     return {
         "id": str(d.get("id") or id_proposicao),
         "sigla": (d.get("siglaTipo") or "").strip(),
@@ -633,7 +694,7 @@ def fetch_status_proposicao(id_proposicao):
         "status_siglaOrgao": status.get("siglaOrgao") or "",
         "status_uriOrgao": status.get("uriOrgao") or "",
         "status_descricaoTramitacao": status.get("descricaoTramitacao") or "",
-        "status_descricaoSituacao": status.get("descricaoSituacao") or "",
+        "status_descricaoSituacao": canonical_situacao(status.get("descricaoSituacao") or ""),
         "status_despacho": status.get("despacho") or "",
         "status_uriUltimoRelator": uri_ultimo_relator,
         "status_ultimoRelator_id": relator_id,
@@ -754,7 +815,7 @@ def build_status_map(ids: list[str]) -> dict:
     out = {}
     for pid in ids:
         s = fetch_status_proposicao(str(pid))
-        situacao = (s.get("status_descricaoSituacao") or "").strip()
+        situacao = canonical_situacao((s.get("status_descricaoSituacao") or "").strip())
         andamento = (s.get("status_descricaoTramitacao") or "").strip()
 
         relator_nome = ""
@@ -780,47 +841,43 @@ def build_status_map(ids: list[str]) -> dict:
 
 def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df = df_base.copy()
+    df["Situação atual"] = df["id"].astype(str).map(lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", "")))
+    df["Andamento (status)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("andamento", ""))
+    df["Data do status (raw)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("status_dataHora", ""))
+    df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
+    df["Relator(a)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_nome", ""))
+df["Relator(a) Partido"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_partido", ""))
+df["Relator(a) UF"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_uf", ""))
 
-    df["Situação atual"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("situacao", "")
-    )
-    df["Andamento (status)"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("andamento", "")
-    )
-    df["Data do status (raw)"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("status_dataHora", "")
-    )
-    df["Órgão (sigla)"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("siglaOrgao", "")
-    )
-
-    # Relator (com partido/UF)
-    df["Relator(a)"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("relator_nome", "")
-    )
-    df["Relator(a) Partido"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("relator_partido", "")
-    )
-    df["Relator(a) UF"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("relator_uf", "")
-    )
-
-    # Normalizações
+    # normaliza relator vazio
     df["Relator(a)"] = df["Relator(a)"].fillna("").astype(str)
-    df["Relator(a) Partido"] = df["Relator(a) Partido"].fillna("").astype(str)
-    df["Relator(a) UF"] = df["Relator(a) UF"].fillna("").astype(str)
 
-    # Datas
     dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
     df["DataStatus_dt"] = dt
     df["AnoStatus"] = dt.dt.year
     df["MesStatus"] = dt.dt.month
 
-    # Indicador leve de inércia
+    # indicador leve: dias desde o último status (proxy para "parado há X dias")
     df["Parado (dias)"] = df["DataStatus_dt"].apply(days_since)
 
-    return df
+    def _sinal(d):
+        try:
+            if d is None or pd.isna(d):
+                return "—"
+            d = int(d)
+            if d >= 30:
+                return "🔴"
+            if d >= 15:
+                return "🟠"
+            if d >= 7:
+                return "🟡"
+            return "🟢"
+        except Exception:
+            return "—"
 
+    df["Sinal"] = df["Parado (dias)"].apply(_sinal)
+
+    return df
 
 
 def merge_status_options(dynamic_opts: list[str]) -> list[str]:
@@ -1177,7 +1234,7 @@ def main():
                 st.markdown("**Lista filtrada (Link = Ficha de Tramitação + Relator quando aplicável)**")
 
                 df_tbl_status = df_fil[
-                    ["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "DataStatus_dt", "Parado (dias)", "Relator(a)", "Relator(a) Partido", "Relator(a) UF", "id", "ementa"]
+                    ["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "DataStatus_dt", "Parado (dias)", "Sinal", "Relator(a)", "Relator(a) Partido", "Relator(a) UF", "id", "ementa"]
                 ].rename(columns={
                     "Proposicao": "Proposição",
                     "siglaTipo": "Tipo",
@@ -1206,7 +1263,7 @@ def main():
                 df_tbl_status["LinkTramitacao"] = df_tbl_status["id"].astype(str).apply(camara_link_tramitacao)
 
                 df_tbl_status = df_tbl_status[
-                    ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Parado há", "Relator(a)", "id", "LinkTramitacao", "Ementa"]
+                    ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Sinal", "Parado há", "Relator(a)", "id", "LinkTramitacao", "Ementa"]
                 ]
 
                 st.dataframe(
