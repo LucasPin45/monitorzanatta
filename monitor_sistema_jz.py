@@ -1,4 +1,5 @@
 import datetime
+import concurrent.futures
 import time
 import unicodedata
 from functools import lru_cache
@@ -147,13 +148,15 @@ def canonical_situacao(situacao: str) -> str:
     """Normaliza rótulos de Situação atual para evitar duplicidades e facilitar filtros."""
     s_raw = (situacao or "").strip()
     s = normalize_text(s_raw)
-    # Unificar variações de "aguardando parecer"
-    if "aguardando" in s and "parecer" in s:
-        # inclui "aguardando parecer", "aguardando o parecer", "aguardando parecer do relator"
-        return "Aguardando Parecer de Relator(a)"
-    if "parecer" in s and "relator" in s:
-        return "Aguardando Parecer de Relator(a)"
-    # Outras normalizações leves (se quiser expandir depois)
+
+    # Unificar TODAS as variações de "aguardando parecer" (inclusive sem a palavra 'aguardando')
+    # Ex.: "Aguardando Parecer", "Aguardando o Parecer", "Aguardando Parecer do Relator",
+    #      "Aguardando Parecer de Relator(a)", "Parecer do Relator" etc.
+    if "parecer" in s:
+        if ("aguard" in s) or ("relator" in s) or s.startswith("parecer"):
+            return "Aguardando Parecer de Relator(a)"
+
+    # Outras normalizações leves (expanda conforme necessidade)
     return s_raw
 
 
@@ -161,23 +164,24 @@ def canonical_situacao(situacao: str) -> str:
 # HTTP ROBUSTO (retry/backoff)
 # ============================================================
 
+# Reuse HTTP connections (faster / fewer handshakes on Streamlit Cloud)
+_SESSION = requests.Session()
+_SESSION.headers.update(HEADERS)
+
 def _request_json(url: str, params=None, timeout=30, max_retries=3):
     params = params or {}
-    backoffs = [0.6, 1.2, 2.4]
+    backoffs = [0.5, 1.0, 2.0, 4.0]
     last_err = None
 
     for attempt in range(max_retries):
         try:
-            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            resp = _SESSION.get(url, params=params, timeout=timeout)
 
             if resp.status_code == 404:
                 return None
 
-            if resp.status_code == 429:
-                time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
-                continue
-
-            if 500 <= resp.status_code <= 599:
+            # Rate limit / instabilidade (retry)
+            if resp.status_code in (429,) or (500 <= resp.status_code <= 599):
                 time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
                 continue
 
@@ -674,14 +678,24 @@ def fetch_status_proposicao(id_proposicao):
     d = data.get("dados", {}) or {}
     status = d.get("statusProposicao", {}) or {}
 
-    uri_ultimo_relator = status.get("uriUltimoRelator") or ""
-    relator_id, relator_nome, relator_partido, relator_uf = resolve_relator_info(uri_ultimo_relator)
+    # Relator: só buscar quando fizer sentido (evita ficar lento)
+    situacao_txt = (status.get("descricaoSituacao") or "").strip()
+    andamento_txt = (status.get("descricaoTramitacao") or "").strip()
 
-    # Fallback: há casos em que o status não preenche uriUltimoRelator, mas já existe relatoria registrada no endpoint /relatores
-    if not relator_nome:
-        rid2, nome2, part2, uf2 = fetch_relator_atual_from_relatores(str(id_proposicao))
-        if nome2:
-            relator_id, relator_nome, relator_partido, relator_uf = rid2, nome2, part2, uf2
+    relator_id = ""
+    relator_nome = ""
+    relator_partido = ""
+    relator_uf = ""
+    uri_ultimo_relator = status.get("uriUltimoRelator") or ""
+
+    if needs_relator_info(situacao_txt, andamento_txt):
+        relator_id, relator_nome, relator_partido, relator_uf = resolve_relator_info(uri_ultimo_relator)
+
+        # Fallback: há casos em que o status não preenche uriUltimoRelator, mas já existe relatoria em /relatores
+        if not relator_nome:
+            rid2, nome2, part2, uf2 = fetch_relator_atual_from_relatores(str(id_proposicao))
+            if nome2:
+                relator_id, relator_nome, relator_partido, relator_uf = rid2, nome2, part2, uf2
 
     return {
         "id": str(d.get("id") or id_proposicao),
@@ -812,22 +826,27 @@ def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, desp
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def build_status_map(ids: list[str]) -> dict:
-    out = {}
-    for pid in ids:
-        s = fetch_status_proposicao(str(pid))
+    """Busca status (e relator quando aplicável) com paralelismo leve para ficar rápido."""
+    out: dict = {}
+    ids = [str(x) for x in (ids or []) if str(x).strip()]
+    if not ids:
+        return out
+
+    # worker
+    def _one(pid: str):
+        s = fetch_status_proposicao(pid)
         situacao = canonical_situacao((s.get("status_descricaoSituacao") or "").strip())
         andamento = (s.get("status_descricaoTramitacao") or "").strip()
 
         relator_nome = ""
         relator_partido = ""
         relator_uf = ""
-        # Só carrega/expõe relator quando fizer sentido (aguardando parecer/relator etc.)
         if needs_relator_info(situacao, andamento):
             relator_nome = (s.get("status_ultimoRelator_nome") or "").strip()
             relator_partido = (s.get("status_ultimoRelator_partido") or "").strip()
             relator_uf = (s.get("status_ultimoRelator_uf") or "").strip()
 
-        out[str(pid)] = {
+        return pid, {
             "situacao": situacao,
             "andamento": andamento,
             "status_dataHora": (s.get("status_dataHora") or "").strip(),
@@ -836,6 +855,13 @@ def build_status_map(ids: list[str]) -> dict:
             "relator_partido": relator_partido,
             "relator_uf": relator_uf,
         }
+
+    # Paralelismo moderado (evita estourar rate limit)
+    max_workers = 10 if len(ids) >= 40 else 6
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for pid, payload in ex.map(_one, ids):
+            out[str(pid)] = payload
+
     return out
 
 
