@@ -1402,15 +1402,12 @@ def main():
                 relator_partido = ""
                 relator_uf = ""
 
-            c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.1, 1.2, 1.2, 1.0, 1.3])
+            c1, c2, c3, c4, c5 = st.columns([1.2, 1.1, 1.2, 1.2, 1.0])
             c1.metric("Proposição", proposicao_fmt or "—")
             c2.metric("Órgão", org_sigla)
             c3.metric("Data do Status", fmt_dt_br(status_dt))
             c4.metric("Última mov.", fmt_dt_br(ultima_dt))
             c5.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
-
-            c6.metric(relator_fmt)
-
             st.markdown("**Link da tramitação**")
             st.write(camara_link_tramitacao(selected_id))
 
