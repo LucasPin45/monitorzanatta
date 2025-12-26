@@ -135,16 +135,11 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
 
 
 def needs_relator_info(situacao: str, andamento: str) -> bool:
-    combo = normalize_text(f"{situacao} {andamento}")
-    # gatilhos típicos
-    triggers = [
-        "aguardando parecer", "aguarda parecer", "aguardando o parecer",
-        "parecer de relator", "parecer do relator", "designacao de relator", "designação de relator"
-    ]
-    return any(t in combo for t in triggers)
+    # Relator removido do sistema (performance e consistência)
+    return False
 
 
-def canonical_situacao(situacao: str) -> str:
+def normalize_situacao(situacao: str) -> str:
     """Normaliza rótulos de Situação atual para evitar duplicidades e facilitar filtros."""
     s_raw = (situacao or "").strip()
     s = normalize_text(s_raw)
@@ -167,6 +162,11 @@ def canonical_situacao(situacao: str) -> str:
 # Reuse HTTP connections (faster / fewer handshakes on Streamlit Cloud)
 _SESSION = requests.Session()
 _SESSION.headers.update(HEADERS)
+
+
+def normalize_situacao(s: str) -> str:
+    # compat: alias para evitar NameError em versões anteriores
+    return normalize_situacao(s)
 
 def _request_json(url: str, params=None, timeout=30, max_retries=3):
     params = params or {}
@@ -708,7 +708,7 @@ def fetch_status_proposicao(id_proposicao):
         "status_siglaOrgao": status.get("siglaOrgao") or "",
         "status_uriOrgao": status.get("uriOrgao") or "",
         "status_descricaoTramitacao": status.get("descricaoTramitacao") or "",
-        "status_descricaoSituacao": canonical_situacao(status.get("descricaoSituacao") or ""),
+        "status_descricaoSituacao": normalize_situacao(status.get("descricaoSituacao") or ""),
         "status_despacho": status.get("despacho") or "",
         "status_uriUltimoRelator": uri_ultimo_relator,
         "status_ultimoRelator_id": relator_id,
@@ -835,7 +835,7 @@ def build_status_map(ids: list[str]) -> dict:
     # worker
     def _one(pid: str):
         s = fetch_status_proposicao(pid)
-        situacao = canonical_situacao((s.get("status_descricaoSituacao") or "").strip())
+        situacao = normalize_situacao((s.get("status_descricaoSituacao") or "").strip())
         andamento = (s.get("status_descricaoTramitacao") or "").strip()
 
         relator_nome = ""
@@ -866,7 +866,7 @@ def build_status_map(ids: list[str]) -> dict:
 
 
 def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
-    """Enriquece a base com status (situação/órgão/data) + relator (quando aplicável) e sinais de inércia.
+    """Enriquece a base com status (situação/órgão/data)  (quando aplicável) e sinais de inércia.
 
     Observação: 'Parado (dias)' é um proxy leve calculado pela data do status. Evita chamadas massivas
     ao endpoint de tramitações.
@@ -874,7 +874,7 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df = df_base.copy()
 
     df["Situação atual"] = df["id"].astype(str).map(
-        lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", ""))
+        lambda x: normalize_situacao(status_map.get(str(x), {}).get("situacao", ""))
     )
     df["Andamento (status)"] = df["id"].astype(str).map(
         lambda x: status_map.get(str(x), {}).get("andamento", "")
@@ -947,14 +947,12 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
 
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
-    st.markdown("""
-    <style>
-    /* Fonte menor e quebra de linha nas tabelas */
-    div[data-testid="stDataFrame"] * { font-size: 12px; }
-    div[data-testid="stDataFrame"] td { white-space: normal !important; }
-    div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
-    </style>
-    """, unsafe_allow_html=True)
+
+
+    st.markdown("""<style>
+div[data-testid="stDataFrame"] td { white-space: normal !important; }
+div[data-testid="stDataFrame"] * { font-size: 12px; }
+</style>""", unsafe_allow_html=True)
 
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
 
@@ -1149,7 +1147,7 @@ def main():
         # filtros base (lista de proposições)
         col1, col2, col3 = st.columns([2.2, 1.1, 1.1])
         with col1:
-            st.caption("🔎 A busca por texto fica no *Rastreador individual* abaixo.")
+            q = st.text_input("🔎 Buscar por sigla/número/ano OU ementa", value="", placeholder="Ex.: RIC 123/2025 | 'pix' | 'conanda'")
         with col2:
             anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
             anos_sel = st.multiselect("Ano (da proposição)", options=anos, default=anos[:3] if len(anos) >= 3 else anos)
@@ -1163,21 +1161,24 @@ def main():
         if tipos_sel:
             df_f = df_f[df_f["siglaTipo"].isin(tipos_sel)].copy()
 
+        if q.strip():
+            qn = normalize_text(q)
+            df_f["_search"] = (df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)).apply(normalize_text)
+            df_f = df_f[df_f["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
+
         st.caption(f"Resultados: {len(df_f)} proposições")
 
         # ============================================================
         # CARTEIRA POR STATUS + Toggle na contagem + Relator(a)
         # ============================================================
         st.markdown("---")
-        st.markdown("## 📌 Carteira por Situação atual (status) — filtros por órgão/mês/ano + clique (toggle)")
+        st.markdown("## 📌 Carteira por Situação atual (status) — filtros por órgão/mês/ano + clique (toggle) ")
 
         cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
         with cS1:
             bt_status = st.button("📥 Carregar/Atualizar status da lista filtrada", type="primary")
         with cS2:
-            max_default = max(20, min(200, len(df_f)))
-            max_allowed = max(20, min(600, len(df_f)))
-            max_status = st.number_input("Limite (performance)", min_value=20, max_value=max_allowed, value=max_default, step=20)
+            max_status = st.number_input("Limite (performance)", min_value=20, max_value=600, value=min(200, len(df_f)), step=20)
         with cS3:
             st.caption("Aplique filtros acima (Ano/Tipo/Busca) e depois carregue o status.")
         with cS4:
@@ -1286,7 +1287,7 @@ def main():
                 )
 
             with cC2:
-                st.markdown("**Lista filtrada (Link = Ficha de Tramitação)**")
+                st.markdown("**Lista filtrada (Link = Ficha de Tramitação + Link = Ficha de Tramitação)**")
 
                 df_tbl_status = df_fil[
                     ["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "DataStatus_dt", "Parado (dias)", "Sinal", "Relator(a) Partido", "Relator(a) UF", "id", "ementa"]
@@ -1307,6 +1308,8 @@ def main():
                     p = (r.get("Relator(a) Partido") or "").strip()
                     u = (r.get("Relator(a) UF") or "").strip()
                     return f"{nome} ({p}-{u})" if (p or u) else nome
+
+                df_tbl_status["Relator(a)"] = df_tbl_status.apply(_fmt_relator_row, axis=1)
                 df_tbl_status.drop(columns=["Relator(a) Partido", "Relator(a) UF"], inplace=True, errors="ignore")
 
                 df_tbl_status["Parado (dias)"] = df_tbl_status["Parado (dias)"].apply(lambda x: int(x) if isinstance(x, (int, float)) and pd.notna(x) else None)
@@ -1342,15 +1345,10 @@ def main():
         # ============================================================
         st.markdown("---")
         st.markdown("## 🔎 Rastreador individual (clique em uma linha da tabela abaixo)")
-        q_ind = st.text_input("🔎 Buscar no rastreador (sigla/número/ano OU ementa)", value="", placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'")
 
         df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
             columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
         ).copy()
-        if q_ind.strip():
-            qn = normalize_text(q_ind)
-            df_tbl["_search"] = (df_tbl["Proposição"].fillna("").astype(str) + " " + df_tbl["Ementa"].fillna("").astype(str)).apply(normalize_text)
-            df_tbl = df_tbl[df_tbl["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
 
         df_tbl_view = df_tbl.head(400).copy()
@@ -1389,10 +1387,11 @@ def main():
 
             proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or ""
             org_sigla = status.get("status_siglaOrgao") or "—"
-            situacao = normalize_situacao(status.get("status_descricaoSituacao") or "—")
+            situacao = status.get("status_descricaoSituacao") or "—"
             andamento = status.get("status_descricaoTramitacao") or "—"
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
+            relator_nome = (status.get("status_ultimoRelator_nome") or "").strip()
             relator_partido = (status.get("status_ultimoRelator_partido") or "").strip()
             relator_uf = (status.get("status_ultimoRelator_uf") or "").strip()
 
@@ -1409,6 +1408,7 @@ def main():
             c4.metric("Última mov.", fmt_dt_br(ultima_dt))
             c5.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
             relator_fmt = (f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome and (relator_partido or relator_uf) else (relator_nome or "—"))
+            # c6.metric(relator_fmt)
 
             st.markdown("**Link da tramitação**")
             st.write(camara_link_tramitacao(selected_id))
@@ -1418,10 +1418,6 @@ def main():
 
             st.markdown("**Situação atual**")
             st.write(situacao)
-
-            st.markdown("**Estratégia sugerida (por status):**")
-            for item in estrategia_por_situacao(situacao):
-                st.markdown(f"- {item}")
 
             st.markdown("**Último andamento**")
             st.write(andamento)
@@ -1433,6 +1429,10 @@ def main():
             if status.get("urlInteiroTeor"):
                 st.markdown("**Inteiro teor**")
                 st.write(status["urlInteiroTeor"])
+
+            st.markdown("### 🧠 Estratégia (tabela)")
+            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias, relator_nome, relator_partido, relator_uf)
+            st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             st.markdown("### 🧭 Linha do tempo (tramitações)")
             if df_tram.empty:
