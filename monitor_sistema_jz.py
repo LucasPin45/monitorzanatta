@@ -1,4 +1,5 @@
 import datetime
+import time
 import unicodedata
 from functools import lru_cache
 from io import BytesIO
@@ -20,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/3.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/3.1 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -52,12 +53,6 @@ def format_sigla_num_ano(sigla, numero, ano) -> str:
     return ""
 
 
-def safe_get(url, params=None):
-    resp = requests.get(url, params=params or {}, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
-
-
 def extract_id_from_uri(uri: str):
     if not uri:
         return None
@@ -82,7 +77,6 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
 
 
 def parse_dt(iso_str: str):
-    # Ex.: "2025-12-26T14:23"
     return pd.to_datetime(iso_str, errors="coerce")
 
 
@@ -90,6 +84,61 @@ def days_since(dt: pd.Timestamp):
     if pd.isna(dt):
         return None
     return (pd.Timestamp(datetime.date.today()) - dt.normalize()).days
+
+
+# ============================================================
+# HTTP ROBUSTO (retry/backoff)
+# ============================================================
+
+def _request_json(url: str, params=None, timeout=30, max_retries=3):
+    """
+    Faz GET e devolve JSON.
+    - 404: retorna None
+    - 429/5xx/timeouts: tenta retry curto com backoff
+    """
+    params = params or {}
+    backoffs = [0.6, 1.2, 2.4]  # curto para Streamlit Cloud
+    last_err = None
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+
+            # 404 -> não existe
+            if resp.status_code == 404:
+                return None
+
+            # 429 -> rate limit: retry
+            if resp.status_code == 429:
+                time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+                continue
+
+            # 5xx -> retry
+            if 500 <= resp.status_code <= 599:
+                time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+                continue
+
+            resp.raise_for_status()
+            return resp.json()
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_err = e
+            time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+            continue
+        except requests.exceptions.HTTPError as e:
+            last_err = e
+            # outros 4xx (exceto 404/429) não adianta insistir
+            break
+        except Exception as e:
+            last_err = e
+            break
+
+    # se falhou, não derruba o app
+    return {"__error__": str(last_err) if last_err else "unknown_error"}
+
+
+def safe_get(url, params=None):
+    return _request_json(url, params=params, timeout=30, max_retries=3)
 
 
 # ============================================================
@@ -110,10 +159,14 @@ def fetch_eventos(start_date, end_date):
             "ordenarPor": "dataHoraInicio",
         }
         data = safe_get(f"{BASE_URL}/eventos", params=params)
+        if data is None or "__error__" in data:
+            break
+
         dados = data.get("dados", [])
         if not dados:
             break
         eventos.extend(dados)
+
         links = data.get("links", [])
         if not any(link.get("rel") == "next" for link in links):
             break
@@ -124,6 +177,8 @@ def fetch_eventos(start_date, end_date):
 @st.cache_data(show_spinner=False)
 def fetch_pauta_evento(event_id):
     data = safe_get(f"{BASE_URL}/eventos/{event_id}/pauta")
+    if data is None or "__error__" in data:
+        return []
     return data.get("dados", [])
 
 
@@ -160,18 +215,17 @@ def get_proposicao_id_from_item(item):
 
 @lru_cache(maxsize=4096)
 def fetch_proposicao_info(id_proposicao):
-    try:
-        data = safe_get(f"{BASE_URL}/proposicoes/{id_proposicao}")
-        d = data.get("dados", {}) or {}
-        return {
-            "id": str(d.get("id") or id_proposicao),
-            "sigla": (d.get("siglaTipo") or "").strip(),
-            "numero": str(d.get("numero") or "").strip(),
-            "ano": str(d.get("ano") or "").strip(),
-            "ementa": (d.get("ementa") or "").strip(),
-        }
-    except Exception:
+    data = safe_get(f"{BASE_URL}/proposicoes/{id_proposicao}")
+    if data is None or "__error__" in data:
         return {"id": str(id_proposicao), "sigla": "", "numero": "", "ano": "", "ementa": ""}
+    d = data.get("dados", {}) or {}
+    return {
+        "id": str(d.get("id") or id_proposicao),
+        "sigla": (d.get("siglaTipo") or "").strip(),
+        "numero": str(d.get("numero") or "").strip(),
+        "ano": str(d.get("ano") or "").strip(),
+        "ementa": (d.get("ementa") or "").strip(),
+    }
 
 
 def pauta_item_tem_relatoria_deputada(item, alvo_nome, alvo_partido, alvo_uf):
@@ -221,13 +275,16 @@ def fetch_ids_autoria_deputada(id_deputada):
     ids = set()
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "ASC", "ordenarPor": "id"}
+
     while True:
-        resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        data = safe_get(url, params=params)
+        if data is None or "__error__" in data:
+            break
+
         for d in data.get("dados", []):
             if d.get("id"):
                 ids.add(str(d["id"]))
+
         next_link = None
         for link in data.get("links", []):
             if link.get("rel") == "next":
@@ -235,8 +292,10 @@ def fetch_ids_autoria_deputada(id_deputada):
                 break
         if not next_link:
             break
+
         url = next_link
         params = {}
+
     return ids
 
 
@@ -275,10 +334,7 @@ def escanear_eventos(
         if not orgaos:
             orgaos = [{"sigla": "", "nome": "", "id": None}]
 
-        try:
-            pauta = fetch_pauta_evento(event_id)
-        except Exception:
-            pauta = []
+        pauta = fetch_pauta_evento(event_id)
 
         proposicoes_relatoria = set()
         proposicoes_autoria = set()
@@ -375,9 +431,9 @@ def fetch_lista_proposicoes_autoria(id_deputada):
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "DESC", "ordenarPor": "ano"}
 
     while True:
-        resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        data = safe_get(url, params=params)
+        if data is None or "__error__" in data:
+            break
 
         for d in data.get("dados", []):
             rows.append(
@@ -413,17 +469,34 @@ def fetch_lista_proposicoes_autoria(id_deputada):
 def fetch_orgao_by_uri(uri_orgao: str):
     if not uri_orgao:
         return {"sigla": "", "nome": "", "id": ""}
-    try:
-        data = safe_get(uri_orgao)
-        d = data.get("dados", {}) or {}
-        return {"sigla": (d.get("sigla") or "").strip(), "nome": (d.get("nome") or "").strip(), "id": str(d.get("id") or "")}
-    except Exception:
+    data = safe_get(uri_orgao)
+    if data is None or "__error__" in data:
         return {"sigla": "", "nome": "", "id": ""}
+    d = data.get("dados", {}) or {}
+    return {"sigla": (d.get("sigla") or "").strip(), "nome": (d.get("nome") or "").strip(), "id": str(d.get("id") or "")}
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_status_proposicao(id_proposicao):
     data = safe_get(f"{BASE_URL}/proposicoes/{id_proposicao}")
+    if data is None or "__error__" in data:
+        # não derruba o app
+        return {
+            "id": str(id_proposicao),
+            "sigla": "",
+            "numero": "",
+            "ano": "",
+            "ementa": "",
+            "urlInteiroTeor": "",
+            "status_dataHora": "",
+            "status_siglaOrgao": "",
+            "status_uriOrgao": "",
+            "status_descricaoTramitacao": "",
+            "status_descricaoSituacao": "",
+            "status_despacho": "",
+            "status_sequencia": "",
+        }
+
     d = data.get("dados", {}) or {}
     status = d.get("statusProposicao", {}) or {}
 
@@ -446,14 +519,21 @@ def fetch_status_proposicao(id_proposicao):
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_tramitacoes_proposicao(id_proposicao):
+    """
+    Endpoint mais instável (404/429/5xx). Nunca deve derrubar o app.
+    """
     rows = []
     url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
     params = {"itens": 100, "ordem": "ASC", "ordenarPor": "dataHora"}
 
     while True:
-        resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        data = safe_get(url, params=params)
+        if data is None:
+            # 404: sem tramitações / não existe
+            break
+        if "__error__" in data:
+            # falha momentânea: devolve vazio (não derruba)
+            break
 
         for t in data.get("dados", []):
             rows.append(
@@ -475,6 +555,8 @@ def fetch_tramitacoes_proposicao(id_proposicao):
 
         if not next_link:
             break
+
+        # next_link já vem completo
         url = next_link
         params = {}
 
@@ -501,99 +583,44 @@ def calc_ultima_mov(df_tram: pd.DataFrame):
     return (last, days_since(last))
 
 
-def gerar_estrategia_curta(org_sigla: str, org_nome: str, situacao: str, andamento: str, despacho: str, parado_dias: int | None):
+def gerar_estrategia_curta(org_sigla: str, org_nome: str, situacao: str, andamento: str, despacho: str, parado_dias):
     org_sigla_u = (org_sigla or "").upper()
+    org_nome_u = (org_nome or "").upper()
+    despacho_u = (despacho or "").upper()
 
-    # Heurísticas simples e úteis (sem firula):
-    # - despacho/mesa
-    if "DESPACHO" in (despacho or "").upper() or "MESA" in org_sigla_u or "MESA" in (org_nome or "").upper():
-        return (
-            "• *Estratégia:* está em fase de *despacho/encaminhamento*. "
-            "Ação: checar tramitação na *Mesa/SGM*, monitorar novo despacho e confirmar *comissões designadas*."
+    if "DESPACHO" in despacho_u or "MESA" in org_sigla_u or "MESA" in org_nome_u:
+        msg = (
+            "• *Estratégia:* fase de *despacho/encaminhamento*. "
+            "Ação: checar *Mesa/SGM* e confirmar *comissões designadas* no despacho."
         )
-
-    # - plenário
-    if org_sigla_u in {"PLEN", "PLENÁRIO"} or "PLEN" in org_sigla_u or "PLENÁRIO" in (org_nome or "").upper():
-        return (
-            "• *Estratégia:* chegou ao *Plenário*. "
-            "Ação: mapear líder/governo, avaliar urgência, preparar *orientação de bancada* e falar com a Mesa para pauta."
+    elif "PLEN" in org_sigla_u or "PLENÁRIO" in org_nome_u:
+        msg = (
+            "• *Estratégia:* está no *Plenário*. "
+            "Ação: mapear líderes, avaliar urgência, preparar orientação e falar com a Mesa sobre janela de pauta."
         )
-
-    # - comissão (CCJC, CDC etc.)
-    if org_sigla_u:
+    elif org_sigla_u:
         msg = (
             f"• *Estratégia:* tramita no órgão *{org_sigla_u}* ({org_nome}). "
-            "Ação: identificar secretário(a) e relatoria/relator(a), "
-            "pedir atualização de estágio (relator designado? parecer? inclusão em pauta?)."
+            "Ação: identificar secretaria e status (relator? parecer? inclusão em pauta?) e acionar o fluxo correto."
         )
     else:
         msg = (
-            "• *Estratégia:* órgão atual não identificado com clareza. "
-            "Ação: abrir o status completo e confirmar o órgão pelo despacho/última movimentação."
+            "• *Estratégia:* órgão atual não está claro. "
+            "Ação: conferir despacho e última tramitação para identificar onde travou."
         )
 
-    if parado_dias is not None and parado_dias >= 30:
-        msg += f" *Alerta:* parado há {parado_dias} dias → priorizar cobrança de andamento e mapa de entraves."
+    if isinstance(parado_dias, int) and parado_dias >= 30:
+        msg += f" *Alerta:* parado há {parado_dias} dias → priorizar cobrança e mapa de entraves."
 
-    # Situação/andamento podem indicar “aguarda designação”, “aguarda parecer”, etc.
     combo = normalize_text(f"{situacao} {andamento} {despacho}")
     if "aguard" in combo and "relator" in combo:
         msg += " Sinal: *aguarda relator* → pressionar designação (presidência/secretaria)."
     if "parecer" in combo and "aguard" in combo:
-        msg += " Sinal: *aguarda parecer* → alinhar com relator e tentar calendarizar entrega."
+        msg += " Sinal: *aguarda parecer* → alinhar com relator e calendarizar entrega."
     if "arquiv" in combo:
-        msg += " Sinal: *arquivamento* → checar possibilidade de desarquivamento/reapresentação."
+        msg += " Sinal: *arquivamento* → checar desarquivamento/reapresentação."
 
     return msg
-
-
-def build_carteira_status(df_base: pd.DataFrame):
-    """
-    Monta carteira com status por proposição.
-    (Chamado sob demanda pelo usuário; pode demorar conforme volume.)
-    """
-    rows = []
-    for _, r in df_base.iterrows():
-        pid = str(r["id"])
-        status = fetch_status_proposicao(pid)
-        org = fetch_orgao_by_uri(status.get("status_uriOrgao") or "")
-
-        df_tram = fetch_tramitacoes_proposicao(pid)
-        last_dt, parado_dias = calc_ultima_mov(df_tram)
-
-        sigla = status.get("sigla") or r.get("siglaTipo") or ""
-        numero = status.get("numero") or r.get("numero") or ""
-        ano = status.get("ano") or r.get("ano") or ""
-        prop_fmt = format_sigla_num_ano(sigla, numero, ano) or r.get("Proposicao") or ""
-
-        situacao = status.get("status_descricaoSituacao") or ""
-        andamento = status.get("status_descricaoTramitacao") or ""
-        despacho = status.get("status_despacho") or ""
-        org_sigla = status.get("status_siglaOrgao") or org.get("sigla") or ""
-        org_nome = org.get("nome") or ""
-
-        rows.append({
-            "ID": pid,
-            "Proposição": prop_fmt,
-            "Tipo": r.get("siglaTipo") or sigla,
-            "Ano": r.get("ano") or ano,
-            "Ementa": status.get("ementa") or r.get("ementa") or "",
-            "Órgão atual (sigla)": org_sigla,
-            "Órgão atual (nome)": org_nome,
-            "Situação atual": situacao,
-            "Último andamento": andamento,
-            "Última mov. (dataHora)": last_dt.strftime("%Y-%m-%d %H:%M") if isinstance(last_dt, pd.Timestamp) and not pd.isna(last_dt) else "",
-            "Parado há (dias)": parado_dias if parado_dias is not None else "",
-            "Inteiro teor": status.get("urlInteiroTeor") or "",
-            "Despacho (status)": despacho,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        # ordena: mais parados primeiro
-        df["_parado_sort"] = pd.to_numeric(df["Parado há (dias)"], errors="coerce").fillna(-1)
-        df = df.sort_values(["_parado_sort", "Ano", "Tipo", "Proposição"], ascending=[False, False, True, True]).drop(columns=["_parado_sort"])
-    return df
 
 
 # ============================================================
@@ -653,7 +680,6 @@ def main():
         ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Rastreador + Carteira (Autoria)"]
     )
 
-    # ---------------- TAB 1-3 dependem do monitoramento ----------------
     df = pd.DataFrame()
     if bt_rodar_monitor:
         if dt_inicio > dt_fim:
@@ -661,19 +687,11 @@ def main():
             return
 
         with st.spinner("Consultando eventos/pauta e analisando..."):
-            try:
-                eventos = fetch_eventos(dt_inicio, dt_fim)
-            except Exception as e:
-                st.error(f"Erro ao buscar eventos: {e}")
-                eventos = []
+            eventos = fetch_eventos(dt_inicio, dt_fim)
 
             ids_autoria = set()
             if buscar_autoria:
-                try:
-                    ids_autoria = fetch_ids_autoria_deputada(id_deputada)
-                except Exception as e:
-                    st.warning(f"Não foi possível carregar IDs de autoria (pauta): {e}")
-                    ids_autoria = set()
+                ids_autoria = fetch_ids_autoria_deputada(id_deputada)
 
             df = escanear_eventos(
                 eventos=eventos,
@@ -762,17 +780,14 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
-    # ---------------- TAB 4: Independente (Rastreador + Carteira) ----------------
     with tab4:
         st.subheader("Rastreador + Carteira de Projetos (Autoria) — independente da pauta")
 
-        colA, colB, colC = st.columns([1.2, 1.4, 1.4])
+        colA, colB = st.columns([1.2, 1.8])
         with colA:
             bt_refresh_base = st.button("🔄 Limpar cache (autoria/status)")
         with colB:
-            mostrar_so_carteira = st.checkbox("Carteira: só tipos legislativos (PL/PLP/PDL/PEC...)", value=True)
-        with colC:
-            st.caption("Base de autoria cache 1h. Carteira é sob demanda.")
+            st.caption("Agora endpoints instáveis (tramitações/status) NÃO derrubam o app.")
 
         if bt_refresh_base:
             fetch_lista_proposicoes_autoria.clear()
@@ -780,7 +795,6 @@ def main():
             fetch_tramitacoes_proposicao.clear()
             fetch_orgao_by_uri.clear()
 
-        # Base de autoria
         with st.spinner("Carregando base de proposições de autoria..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
@@ -788,17 +802,11 @@ def main():
             st.info("Nenhuma proposição de autoria encontrada.")
             return
 
-        # Filtros comuns
-        if mostrar_so_carteira:
-            df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
+        df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
         col1, col2, col3 = st.columns([2.2, 1.1, 1.1])
         with col1:
-            q = st.text_input(
-                "🔎 Buscar por sigla/número/ano OU texto da ementa",
-                value="",
-                placeholder="Ex.: PL 123/2025 | 'pix' | 'vacina' | 'imposto'",
-            )
+            q = st.text_input("🔎 Buscar por sigla/número/ano OU ementa", value="", placeholder="Ex.: PL 123/2025 | 'pix' | 'vacina'")
         with col2:
             anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
             anos_sel = st.multiselect("Ano", options=anos, default=anos[:4] if len(anos) >= 4 else anos)
@@ -814,31 +822,21 @@ def main():
 
         if q.strip():
             qn = normalize_text(q)
-            df_f["_search"] = (
-                df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)
-            ).apply(normalize_text)
-            df_f = df_f[df_f["_search"].str.contains(qn, na=False)].copy()
-            df_f = df_f.drop(columns=["_search"], errors="ignore")
+            df_f["_search"] = (df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)).apply(normalize_text)
+            df_f = df_f[df_f["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
 
-        st.caption(f"Resultados (base autoria): {len(df_f)} proposições")
+        st.caption(f"Resultados (autoria): {len(df_f)} proposições")
 
-        # =========================
-        # 4A) CARTEIRA
-        # =========================
         st.markdown("## 📌 Carteira de Projetos (mapa de onde está)")
-
-        colK1, colK2, colK3 = st.columns([1.0, 1.0, 1.6])
+        colK1, colK2 = st.columns([1.2, 1.8])
         with colK1:
             bt_load_carteira = st.button("📥 Carregar/Atualizar carteira (status)", type="primary")
         with colK2:
             filtro_parado_30 = st.checkbox("Filtrar: parado > 30 dias", value=False)
-        with colK3:
-            st.caption("A carteira consulta status/tramitações de cada proposição filtrada. Use filtros acima para reduzir volume.")
 
         carteira_key = f"carteira_{id_deputada}_{hash(tuple(df_f['id'].tolist()))}"
 
         if bt_load_carteira:
-            # Monta carteira com barra de progresso
             ids_list = df_f["id"].tolist()
             total = len(ids_list)
             if total == 0:
@@ -846,13 +844,12 @@ def main():
             else:
                 prog = st.progress(0)
                 msg = st.empty()
-
-                # Para evitar estourar tempo: processa na ordem do df_f
                 rows = []
+
                 for i, pid in enumerate(ids_list, start=1):
                     msg.write(f"Carregando {i}/{total}… (ID {pid})")
-                    r = df_f[df_f["id"] == pid].iloc[0]
 
+                    r = df_f[df_f["id"] == pid].iloc[0]
                     status = fetch_status_proposicao(str(pid))
                     org = fetch_orgao_by_uri(status.get("status_uriOrgao") or "")
                     df_tram = fetch_tramitacoes_proposicao(str(pid))
@@ -874,7 +871,6 @@ def main():
                         "Inteiro teor": status.get("urlInteiroTeor") or "",
                         "Despacho (status)": status.get("status_despacho") or "",
                     })
-
                     prog.progress(int(i * 100 / total))
 
                 msg.empty()
@@ -888,7 +884,7 @@ def main():
 
         df_carteira = st.session_state.get(carteira_key)
         if df_carteira is None:
-            st.info("Clique em **Carregar/Atualizar carteira (status)** para montar o mapa completo (onde está + parado há).")
+            st.info("Clique em **Carregar/Atualizar carteira (status)** para montar o mapa completo.")
         else:
             view_c = df_carteira.copy()
             if filtro_parado_30:
@@ -897,25 +893,21 @@ def main():
 
             st.dataframe(
                 view_c[
-                    ["Proposição", "Tipo", "Ano", "Órgão atual (sigla)", "Órgão atual (nome)", "Situação atual", "Último andamento", "Última mov. (dataHora)", "Parado há (dias)", "Ementa"]
+                    ["Proposição", "Tipo", "Ano", "Órgão atual (sigla)", "Órgão atual (nome)",
+                     "Situação atual", "Último andamento", "Última mov. (dataHora)", "Parado há (dias)", "Ementa"]
                 ],
                 use_container_width=True,
                 hide_index=True,
             )
 
-            xlsx_c = to_xlsx_bytes(view_c, "Carteira_Projetos")
             st.download_button(
                 "⬇️ XLSX – Carteira de projetos",
-                data=xlsx_c,
+                data=to_xlsx_bytes(view_c, "Carteira_Projetos"),
                 file_name="carteira_projetos_autoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
         st.markdown("---")
-
-        # =========================
-        # 4B) RASTREADOR INDIVIDUAL + ESTRATÉGIA
-        # =========================
         st.markdown("## 🔎 Rastreador individual (status + tramitação + estratégia)")
 
         df_show = df_f.head(400).copy()
@@ -948,35 +940,31 @@ def main():
 
         proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or df_show.iloc[idx]["Proposicao"]
 
-        # Onde está agora (bem explícito)
-        st.markdown("### 📍 Onde está AGORA")
         org_sigla = status.get("status_siglaOrgao") or orgao_atual.get("sigla") or "—"
         org_nome = orgao_atual.get("nome") or "—"
         situacao = status.get("status_descricaoSituacao") or "—"
         andamento = status.get("status_descricaoTramitacao") or "—"
         despacho = status.get("status_despacho") or ""
 
-        colA, colB, colC, colD = st.columns(4)
-        colA.metric("Proposição", proposicao_fmt)
-        colB.metric("Órgão atual (sigla)", org_sigla)
-        colC.metric("Órgão atual (nome)", org_nome if len(org_nome) <= 28 else org_nome[:28] + "…")
-        colD.metric("Parado há", f"{parado_dias} dias" if parado_dias is not None else "—")
+        st.markdown("### 📍 Onde está AGORA")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Proposição", proposicao_fmt)
+        c2.metric("Órgão atual (sigla)", org_sigla)
+        c3.metric("Órgão atual (nome)", org_nome if len(org_nome) <= 28 else org_nome[:28] + "…")
+        c4.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
 
         st.markdown("**Situação atual**")
         st.write(situacao)
-
         st.markdown("**Último andamento**")
         st.write(andamento)
-
         if despacho:
-            st.markdown("**Despacho (muito importante para saber para onde foi)**")
+            st.markdown("**Despacho**")
             st.write(despacho)
 
         if status.get("urlInteiroTeor"):
-            st.markdown("**Inteiro teor (link)**")
+            st.markdown("**Inteiro teor**")
             st.write(status["urlInteiroTeor"])
 
-        # Estratégia (botão)
         st.markdown("### 🧠 Estratégia (curta)")
         if st.button("🧩 Gerar estratégia para este projeto"):
             estrategia = gerar_estrategia_curta(org_sigla, org_nome, situacao, andamento, despacho, parado_dias)
@@ -984,25 +972,22 @@ def main():
 
         st.markdown("### 🧭 Linha do tempo (tramitações)")
         if df_tram.empty:
-            st.info("Sem tramitações retornadas.")
+            st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
         else:
             view_tram = df_tram[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "dataHora"]].copy()
             view_tram = view_tram.rename(columns={"siglaOrgao": "Órgão", "descricaoTramitacao": "Andamento", "despacho": "Despacho"})
             st.dataframe(view_tram[["Data", "Hora", "Órgão", "Andamento", "Despacho"]], use_container_width=True, hide_index=True)
 
-            xlsx_t = to_xlsx_bytes(view_tram, "Tramitacoes")
             st.download_button(
                 "⬇️ XLSX – Tramitações",
-                data=xlsx_t,
+                data=to_xlsx_bytes(view_tram, "Tramitacoes"),
                 file_name=f"tramitacoes_{proposicao_fmt.replace(' ', '_').replace('/', '-')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
-        st.markdown("---")
-        xlsx_base = to_xlsx_bytes(df_f, "Base_Autoria_Filtrada")
         st.download_button(
             "⬇️ XLSX – Base filtrada (autoria)",
-            data=xlsx_base,
+            data=to_xlsx_bytes(df_f, "Base_Autoria_Filtrada"),
             file_name="proposicoes_autoria_filtradas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
