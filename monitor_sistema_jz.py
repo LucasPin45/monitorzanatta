@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import requests
+import re
+
 import streamlit as st
 
 
@@ -72,6 +74,33 @@ def format_sigla_num_ano(sigla, numero, ano) -> str:
     if sigla and numero and ano:
         return f"{sigla} {numero}/{ano}"
     return ""
+# ------------------ Relator parsing (fallback via despacho) ------------------
+
+# Regex: "Dep. Nome (PL-SC)" or "Deputado Nome (PL-SC)" etc.
+_RELATOR_PATTERNS = [
+    re.compile(r"\bDep\.?\s+([A-ZÀ-Ü][A-Za-zÀ-ÿ'\-\. ]{2,80}?)\s*\(\s*([A-Z]{1,10})\s*-\s*([A-Z]{2})\s*\)", re.IGNORECASE),
+    re.compile(r"\bDeputad[oa]\s+([A-ZÀ-Ü][A-Za-zÀ-ÿ'\-\. ]{2,80}?)\s*\(\s*([A-Z]{1,10})\s*-\s*([A-Z]{2})\s*\)", re.IGNORECASE),
+]
+
+def parse_relator_from_text(text: str) -> tuple[str, str, str]:
+    """
+    Extrai relator do texto do despacho/andamento quando a API não fornece uriUltimoRelator.
+    Retorna (nome, partido, uf). Se não achar, retorna ('','','').
+    """
+    if not text:
+        return "", "", ""
+    t = " ".join(str(text).split())
+    for pat in _RELATOR_PATTERNS:
+        m = pat.search(t)
+        if m:
+            nome = (m.group(1) or "").strip().strip(",;.")
+            partido = (m.group(2) or "").strip().upper()
+            uf = (m.group(3) or "").strip().upper()
+            # limpeza leve: remover prefixos repetidos no nome
+            nome = re.sub(r"^(Dep\.?|Deputad[oa])\s+", "", nome, flags=re.IGNORECASE).strip()
+            return nome, partido, uf
+    return "", "", ""
+
 
 
 def extract_id_from_uri(uri: str):
@@ -135,44 +164,16 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
 
 
 def needs_relator_info(situacao: str, andamento: str) -> bool:
-    """Decide se vale a pena tentar identificar relator(a) (para performance).
-    Regra: quando o texto indicar relatoria/parecer/designação, ou quando houver
-    'relator' e 'parecer' em qualquer ordem (ex.: 'Parecer do(a) Relator(a)')."""
     combo = normalize_text(f"{situacao} {andamento}")
-    if "designacao de relator" in combo or "designado relator" in combo:
+    # cobre: "Aguardando Parecer", "Parecer do(a) Relator(a)", "Designação/Designado Relator"
+    if "relator" in combo and ("parecer" in combo or "design" in combo):
         return True
-    if "relator" in combo and "parecer" in combo:
-        return True
-    # gatilhos adicionais comuns
     triggers = [
-        "aguardando parecer", "aguarda parecer", "aguardando o parecer",
-        "parecer de relator", "relatoria", "relator(a)", "relatora", "relator"
+        "aguardando parecer", "aguarda parecer", "parecer do relator",
+        "parecer de relator", "designacao de relator", "designação de relator",
+        "designado relator", "designada relatora"
     ]
     return any(t in combo for t in triggers)
-
-
-def parse_relator_from_text(text: str) -> tuple[str, str, str]:
-    """Extrai relator(a) de textos livres (despacho/andamento).
-    Exemplos comuns:
-    - 'Parecer da Relatora, Dep. Caroline de Toni (PL-SC), ...'
-    - 'Designado Relator, Dep. Dr. Frederico (PRD-MG).'
-    Retorna (nome, partido, uf)."""
-    if not isinstance(text, str) or not text.strip():
-        return "", "", ""
-    t = " ".join(text.replace("\n", " ").split())
-    pat = re.compile(r"\bDep\.?\s+([^\(\)]+?)\s*\(([^\-\)\s]{1,10})-([A-Z]{2})\)", re.IGNORECASE)
-    m = pat.search(t)
-    if m:
-        return m.group(1).strip(" ,.;:-"), m.group(2).strip(), m.group(3).strip()
-    pat2 = re.compile(r"\bDeputad[oa]\s+([^\(\)]+?)\s*\(([^\-\)\s]{1,10})-([A-Z]{2})\)", re.IGNORECASE)
-    m2 = pat2.search(t)
-    if m2:
-        return m2.group(1).strip(" ,.;:-"), m2.group(2).strip(), m2.group(3).strip()
-    pat3 = re.compile(r"\bDep\.?\s+([A-ZÀ-Úa-zà-úÇç'’\-\.\s]{3,80})", re.IGNORECASE)
-    m3 = pat3.search(t)
-    if m3:
-        return m3.group(1).strip(" ,.;:-"), "", ""
-    return "", "", ""
 
 
 def canonical_situacao(situacao: str) -> str:
@@ -876,12 +877,6 @@ def build_status_map(ids: list[str]) -> dict:
             relator_nome = (s.get("status_ultimoRelator_nome") or "").strip()
             relator_partido = (s.get("status_ultimoRelator_partido") or "").strip()
             relator_uf = (s.get("status_ultimoRelator_uf") or "").strip()
-
-            # Fallback: muitos casos trazem o relator apenas no texto do despacho/andamento.
-            if not relator_nome:
-                nome_txt, part_txt, uf_txt = parse_relator_from_text((s.get("status_despacho") or "") + " " + (andamento or ""))
-                if nome_txt:
-                    relator_nome, relator_partido, relator_uf = nome_txt, part_txt, uf_txt
 
         return pid, {
             "situacao": situacao,
