@@ -873,7 +873,7 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df = df_base.copy()
 
     df["Situação atual"] = df["id"].astype(str).map(lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", "")))
-    )
+    
     df["Andamento (status)"] = df["id"].astype(str).map(
         lambda x: status_map.get(str(x), {}).get("andamento", "")
     )
