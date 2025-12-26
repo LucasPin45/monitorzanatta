@@ -21,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/4.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/4.1 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -652,10 +652,6 @@ def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
     return last, parado
 
 
-# ============================================================
-# ESTRATÉGIA EM TABELA
-# ============================================================
-
 def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, despacho: str, parado_dias):
     combo = normalize_text(f"{situacao} {andamento} {despacho}")
 
@@ -690,10 +686,6 @@ def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, desp
     )
     return df
 
-
-# ============================================================
-# CARTEIRA POR STATUS (Situação atual)
-# ============================================================
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def build_status_map(ids: list[str]) -> dict:
@@ -743,6 +735,10 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
+
+    # estado para clique na contagem
+    if "status_click_sel" not in st.session_state:
+        st.session_state["status_click_sel"] = None
 
     with st.sidebar:
         st.header("⚙️ Configurações")
@@ -916,6 +912,7 @@ def main():
             fetch_tramitacoes_proposicao.clear()
             build_status_map.clear()
             st.session_state.pop("df_status_last", None)
+            st.session_state["status_click_sel"] = None
 
         with st.spinner("Carregando proposições de autoria (com RIC incluído)..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
@@ -952,37 +949,43 @@ def main():
 
         # ============================================================
         # CARTEIRA POR STATUS: filtros por Situação / Órgão / Mês / Ano
+        # + CLIQUE NA CONTAGEM PARA FILTRAR
         # ============================================================
         st.markdown("---")
-        st.markdown("## 📌 Carteira por Situação atual (status) — filtros por órgão/mês/ano")
+        st.markdown("## 📌 Carteira por Situação atual (status) — filtros por órgão/mês/ano + clique na contagem")
 
-        cS1, cS2, cS3 = st.columns([1.2, 1.2, 1.6])
+        cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
         with cS1:
             bt_status = st.button("📥 Carregar/Atualizar status da lista filtrada", type="primary")
         with cS2:
             max_status = st.number_input("Limite (performance)", min_value=20, max_value=600, value=min(200, len(df_f)), step=20)
         with cS3:
             st.caption("Aplique filtros acima (Ano/Tipo/Busca) e depois carregue o status.")
+        with cS4:
+            if st.button("✖ Limpar filtro por clique"):
+                st.session_state["status_click_sel"] = None
 
         df_status_view = st.session_state.get("df_status_last", pd.DataFrame()).copy()
 
-        # opções (sempre visíveis)
         dynamic_status = []
         if not df_status_view.empty and "Situação atual" in df_status_view.columns:
             dynamic_status = [s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()]
         status_opts = merge_status_options(dynamic_status)
 
-        # filtros UI (sempre aparecem)
+        # filtros UI
         f1, f2, f3, f4 = st.columns([1.6, 1.1, 1.1, 1.1])
 
-        with f1:
-            status_sel = st.multiselect("Situação atual", options=status_opts, default=[])
+        # default do multiselect: se clicou na contagem, preenche automaticamente
+        default_status_sel = []
+        if st.session_state.get("status_click_sel"):
+            default_status_sel = [st.session_state["status_click_sel"]]
 
-        # opções de órgão/mês/ano dependem do status carregado; se não tiver, mostra vazio
+        with f1:
+            status_sel = st.multiselect("Situação atual", options=status_opts, default=default_status_sel)
+
         org_opts = []
         ano_status_opts = []
         mes_status_opts = []
-
         if not df_status_view.empty:
             org_opts = sorted([o for o in df_status_view["Órgão (sigla)"].dropna().unique().tolist() if str(o).strip()])
             ano_status_opts = sorted([int(a) for a in df_status_view["AnoStatus"].dropna().unique().tolist() if pd.notna(a)], reverse=True)
@@ -1012,7 +1015,6 @@ def main():
         else:
             df_fil = df_status_view.copy()
 
-            # aplica filtros
             if status_sel:
                 df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
             if org_sel:
@@ -1022,7 +1024,8 @@ def main():
             if mes_status_sel:
                 df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
 
-            # contagem por situação (após filtros)
+            # contagem por situação (a contagem é calculada ANTES de aplicar o clique?
+            # aqui a contagem reflete o filtro atual (org/mês/ano já aplicados).
             df_counts = (
                 df_fil.assign(_s=df_fil["Situação atual"].fillna("—").replace("", "—"))
                 .groupby("_s", as_index=False)
@@ -1033,8 +1036,28 @@ def main():
 
             cC1, cC2 = st.columns([1.0, 2.0])
             with cC1:
-                st.markdown("**Contagem por Situação atual**")
-                st.dataframe(df_counts, use_container_width=True, hide_index=True)
+                st.markdown("**Contagem por Situação atual (clique para filtrar)**")
+
+                sel_counts = st.dataframe(
+                    df_counts,
+                    use_container_width=True,
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                )
+
+                # aplica filtro ao clicar na linha
+                try:
+                    if sel_counts and isinstance(sel_counts, dict) and sel_counts.get("selection") and sel_counts["selection"].get("rows"):
+                        row_idx = sel_counts["selection"]["rows"][0]
+                        clicked_status = str(df_counts.iloc[row_idx]["Situação atual"])
+                        if clicked_status and clicked_status != "—":
+                            st.session_state["status_click_sel"] = clicked_status
+                except Exception:
+                    pass
+
+                if st.session_state.get("status_click_sel"):
+                    st.caption(f"Filtro por clique ativo: **{st.session_state['status_click_sel']}**")
 
                 bytes_out, mime, ext = to_xlsx_bytes(df_counts, "Contagem_Status")
                 st.download_button(
@@ -1061,7 +1084,6 @@ def main():
 
                 df_tbl_status["LinkTramitacao"] = df_tbl_status["id"].astype(str).apply(camara_link_tramitacao)
 
-                # ordem das colunas
                 df_tbl_status = df_tbl_status[
                     ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "id", "LinkTramitacao", "Ementa"]
                 ]
