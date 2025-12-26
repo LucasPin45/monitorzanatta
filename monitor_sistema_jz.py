@@ -840,17 +840,41 @@ def build_status_map(ids: list[str]) -> dict:
 
 
 def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
-    df = df_base.copy()
-    df["Situação atual"] = df["id"].astype(str).map(lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", "")))
-    df["Andamento (status)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("andamento", ""))
-    df["Data do status (raw)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("status_dataHora", ""))
-    df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
-    df["Relator(a)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_nome", ""))
-df["Relator(a) Partido"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_partido", ""))
-df["Relator(a) UF"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_uf", ""))
+    """Enriquece a base com status (situação/órgão/data) + relator (quando aplicável) e sinais de inércia.
 
-    # normaliza relator vazio
+    Observação: 'Parado (dias)' é um proxy leve calculado pela data do status. Evita chamadas massivas
+    ao endpoint de tramitações.
+    """
+    df = df_base.copy()
+
+    df["Situação atual"] = df["id"].astype(str).map(
+        lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", ""))
+    )
+    df["Andamento (status)"] = df["id"].astype(str).map(
+        lambda x: status_map.get(str(x), {}).get("andamento", "")
+    )
+    df["Data do status (raw)"] = df["id"].astype(str).map(
+        lambda x: status_map.get(str(x), {}).get("status_dataHora", "")
+    )
+    df["Órgão (sigla)"] = df["id"].astype(str).map(
+        lambda x: status_map.get(str(x), {}).get("siglaOrgao", "")
+    )
+
+    # Relator (já vem vazio quando não faz sentido exibir)
+    df["Relator(a)"] = df["id"].astype(str).map(
+        lambda x: status_map.get(str(x), {}).get("relator_nome", "")
+    )
+    df["Relator(a) Partido"] = df["id"].astype(str).map(
+        lambda x: status_map.get(str(x), {}).get("relator_partido", "")
+    )
+    df["Relator(a) UF"] = df["id"].astype(str).map(
+        lambda x: status_map.get(str(x), {}).get("relator_uf", "")
+    )
+
+    # normaliza vazios
     df["Relator(a)"] = df["Relator(a)"].fillna("").astype(str)
+    df["Relator(a) Partido"] = df["Relator(a) Partido"].fillna("").astype(str)
+    df["Relator(a) UF"] = df["Relator(a) UF"].fillna("").astype(str)
 
     dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
     df["DataStatus_dt"] = dt
@@ -876,7 +900,6 @@ df["Relator(a) UF"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), 
             return "—"
 
     df["Sinal"] = df["Parado (dias)"].apply(_sinal)
-
     return df
 
 
