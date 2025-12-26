@@ -21,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/3.2 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/3.3 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -70,10 +70,6 @@ def is_comissao_estrategica(sigla_orgao, lista_siglas):
     return sigla_orgao.upper() in [s.upper() for s in lista_siglas]
 
 
-def parse_dt(iso_str: str):
-    return pd.to_datetime(iso_str, errors="coerce")
-
-
 def days_since(dt: pd.Timestamp):
     if pd.isna(dt):
         return None
@@ -83,10 +79,9 @@ def days_since(dt: pd.Timestamp):
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, str, str]:
     """
     Retorna (bytes, mime, ext).
-    Preferência: XLSX via xlsxwriter (não precisa openpyxl).
-    Se não houver engine disponível, cai para CSV (com aviso).
+    Preferência: XLSX via xlsxwriter (não depende de openpyxl).
+    Se não houver engine disponível, cai para CSV (sem quebrar app).
     """
-    # tenta xlsxwriter primeiro (mais comum em deploy)
     for engine in ["xlsxwriter", "openpyxl"]:
         try:
             output = BytesIO()
@@ -102,7 +97,6 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
         except Exception:
             continue
 
-    # fallback CSV (não quebra o app)
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     return (csv_bytes, "text/csv", "csv")
 
@@ -413,11 +407,14 @@ def escanear_eventos(
 
 
 # ============================================================
-# API: RASTREADOR (INDEPENDENTE) + CARTEIRA
+# API: RASTREADOR (INDEPENDENTE) + RIC Fallback
 # ============================================================
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def fetch_lista_proposicoes_autoria(id_deputada):
+def fetch_lista_proposicoes_autoria_geral(id_deputada):
+    """
+    Busca geral por autoria (idDeputadoAutor). Em alguns casos, RIC pode não aparecer aqui.
+    """
     rows = []
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "DESC", "ordenarPor": "ano"}
@@ -453,7 +450,91 @@ def fetch_lista_proposicoes_autoria(id_deputada):
     df = pd.DataFrame(rows)
     if not df.empty:
         df["Proposicao"] = df.apply(lambda r: format_sigla_num_ano(r["siglaTipo"], r["numero"], r["ano"]), axis=1)
-        df = df[["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa", "uri"]]
+    return df
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_rics_por_autor(id_deputada):
+    """
+    Fallback específico para RIC: força siglaTipo=RIC para não depender do retorno geral.
+    """
+    rows = []
+    url = f"{BASE_URL}/proposicoes"
+    params = {
+        "siglaTipo": "RIC",
+        "idDeputadoAutor": id_deputada,
+        "itens": 100,
+        "ordem": "DESC",
+        "ordenarPor": "ano",
+    }
+
+    while True:
+        data = safe_get(url, params=params)
+        if data is None or "__error__" in data:
+            break
+
+        for d in data.get("dados", []):
+            rows.append(
+                {
+                    "id": str(d.get("id") or ""),
+                    "siglaTipo": (d.get("siglaTipo") or "").strip(),
+                    "numero": str(d.get("numero") or "").strip(),
+                    "ano": str(d.get("ano") or "").strip(),
+                    "ementa": (d.get("ementa") or "").strip(),
+                    "uri": d.get("uri") or "",
+                    "Proposicao": format_sigla_num_ano(d.get("siglaTipo"), d.get("numero"), d.get("ano")),
+                }
+            )
+
+        next_link = None
+        for link in data.get("links", []):
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+        if not next_link:
+            break
+
+        url = next_link
+        params = {}
+
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_lista_proposicoes_autoria(id_deputada):
+    """
+    Consolida:
+    - busca geral por autoria
+    - fallback de RIC
+    """
+    df1 = fetch_lista_proposicoes_autoria_geral(id_deputada)
+    df2 = fetch_rics_por_autor(id_deputada)
+
+    if df1.empty and df2.empty:
+        return pd.DataFrame(columns=["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa", "uri"])
+
+    df = pd.concat([df1, df2], ignore_index=True)
+
+    # Normaliza Proposicao se faltar
+    if "Proposicao" not in df.columns:
+        df["Proposicao"] = ""
+    mask = df["Proposicao"].isna() | (df["Proposicao"].astype(str).str.strip() == "")
+    if mask.any():
+        df.loc[mask, "Proposicao"] = df.loc[mask].apply(
+            lambda r: format_sigla_num_ano(r.get("siglaTipo"), r.get("numero"), r.get("ano")),
+            axis=1
+        )
+
+    # Remove duplicatas por id
+    df = df.drop_duplicates(subset=["id"], keep="first")
+
+    # Seleciona colunas finais
+    cols = ["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa", "uri"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    df = df[cols]
+
     return df
 
 
@@ -644,9 +725,12 @@ def main():
         bt_rodar_monitor = st.button("🔍 Rodar monitoramento (pauta)", type="primary")
 
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Tramitação (independente) + RIC"]
+        ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Tramitação (independente) + RIC (com link)"]
     )
 
+    # -------------------------
+    # TABS 1-3 (pauta)
+    # -------------------------
     df = pd.DataFrame()
     if bt_rodar_monitor:
         if dt_inicio > dt_fim:
@@ -686,8 +770,6 @@ def main():
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
                 data_bytes, mime, ext = to_xlsx_bytes(view, "Autoria_Relatoria_Pauta")
-                if ext != "xlsx":
-                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
                     f"⬇️ Baixar ({ext.upper()})",
                     data=data_bytes,
@@ -712,8 +794,6 @@ def main():
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
                 data_bytes, mime, ext = to_xlsx_bytes(view, "PalavrasChave_Pauta")
-                if ext != "xlsx":
-                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
                     f"⬇️ Baixar ({ext.upper()})",
                     data=data_bytes,
@@ -738,8 +818,6 @@ def main():
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
                 data_bytes, mime, ext = to_xlsx_bytes(view, "ComissoesEstrategicas_Pauta")
-                if ext != "xlsx":
-                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
                     f"⬇️ Baixar ({ext.upper()})",
                     data=data_bytes,
@@ -747,31 +825,37 @@ def main():
                     mime=mime,
                 )
 
+    # -------------------------
+    # TAB 4 (independente + link + RIC)
+    # -------------------------
     with tab4:
-        st.subheader("Tramitação (independente) — inclui PL/PEC/PDL/PLP e RIC")
+        st.subheader("Tramitação (independente) — inclui PL/PEC/PDL/PLP e RIC (com link)")
 
         colA, colB = st.columns([1.2, 1.8])
         with colA:
             bt_refresh = st.button("🧹 Limpar cache (autoria/status/tramitação)")
         with colB:
-            st.caption("Clique na linha da tabela para abrir detalhes (mais leve).")
+            st.caption("Clique na linha da tabela para abrir detalhes. A coluna 'Link' abre a proposição no navegador.")
 
         if bt_refresh:
+            fetch_lista_proposicoes_autoria_geral.clear()
+            fetch_rics_por_autor.clear()
             fetch_lista_proposicoes_autoria.clear()
             fetch_status_proposicao.clear()
             fetch_tramitacoes_proposicao.clear()
             fetch_orgao_by_uri.clear()
 
-        with st.spinner("Carregando proposições de autoria..."):
+        with st.spinner("Carregando proposições de autoria (com fallback de RIC)..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
         if df_aut.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
             return
 
-        # filtros
+        # manter só tipos de interesse
         df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
+        # filtros
         col1, col2, col3 = st.columns([2.2, 1.1, 1.1])
         with col1:
             q = st.text_input("🔎 Buscar por sigla/número/ano OU ementa", value="", placeholder="Ex.: RIC 123/2025 | 'pix' | 'conanda'")
@@ -795,12 +879,11 @@ def main():
 
         st.caption(f"Resultados: {len(df_f)} proposições")
 
-        # tabela clicável (streamlit novo)
-        df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
-            columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+        # tabela com LINK clicável + seleção por clique
+        df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo", "uri"]].rename(
+            columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo", "uri": "Link"}
         ).copy()
 
-        # Limita visual (leve) — detalhes só quando clicar
         df_tbl_view = df_tbl.head(400).copy()
 
         sel = st.dataframe(
@@ -809,6 +892,10 @@ def main():
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
+            column_config={
+                "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
+                "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+            },
         )
 
         selected_id = None
@@ -859,6 +946,10 @@ def main():
                 st.markdown("**Despacho (chave para saber para onde foi)**")
                 st.write(despacho)
 
+            if status.get("urlInteiroTeor"):
+                st.markdown("**Inteiro teor**")
+                st.write(status["urlInteiroTeor"])
+
             st.markdown("### 🧠 Estratégia (curta)")
             estrategia = gerar_estrategia_curta(org_sigla, org_nome, situacao, andamento, despacho, parado_dias)
             st.text_area("Copiar/colar:", value=estrategia, height=110)
@@ -872,8 +963,6 @@ def main():
                 st.dataframe(view_tram, use_container_width=True, hide_index=True)
 
                 bytes_out, mime, ext = to_xlsx_bytes(view_tram, "Tramitacoes")
-                if ext != "xlsx":
-                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
                     f"⬇️ Baixar tramitações ({ext.upper()})",
                     data=bytes_out,
@@ -884,8 +973,6 @@ def main():
         # export base filtrada
         st.markdown("---")
         bytes_out, mime, ext = to_xlsx_bytes(df_f, "Base_Autoria_Filtrada")
-        if ext != "xlsx":
-            st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
         st.download_button(
             f"⬇️ Baixar base filtrada ({ext.upper()})",
             data=bytes_out,
