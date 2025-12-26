@@ -815,7 +815,8 @@ def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, desp
     df = pd.DataFrame(
         [
             {"Campo": "Fase", "Valor": fase},
-                        {"Campo": "Ação sugerida", "Valor": acao},
+            {"Campo": "Relator(a) (último)", "Valor": (f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome and (relator_partido or relator_uf) else (relator_nome or "—"))},
+            {"Campo": "Ação sugerida", "Valor": acao},
             {"Campo": "Sinais do texto", "Valor": ", ".join(sinal) if sinal else "—"},
             {"Campo": "Alerta", "Valor": alerta or "—"},
         ]
@@ -824,30 +825,6 @@ def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, desp
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
-
-def estrategia_por_situacao(situacao: str) -> list[str]:
-    s = normalize_text(situacao or "")
-    if "aguardando designacao" in s or "aguardando designação" in s:
-        return [
-            "Buscar entre os membros da Comissão um parlamentar parceiro para relatar."
-        ]
-    if "aguardando parecer" in s:
-        return [
-            "Se o relator for parceiro/neutro: tentar acelerar a apresentação do parecer.",
-            "Se o relator for adversário: articular um VTS com membros parceiros da Comissão."
-        ]
-    if "pronta" in s and "pauta" in s:
-        return [
-            "Se o parecer for favorável: articular na Comissão para o parecer entrar na pauta.",
-            "Se o parecer for contrário: articular para NÃO entrar na pauta.",
-            "Se entrar na pauta: articular retirada de pauta; se não funcionar, articular obstrução e VTS."
-        ]
-    if "aguardando despacho" in s and "presidente" in s and "camara" in s:
-        return [
-            "Articular com a Mesa para acelerar a tramitação."
-        ]
-    return ["—"]
-
 def build_status_map(ids: list[str]) -> dict:
     """Busca status (e relator quando aplicável) com paralelismo leve para ficar rápido."""
     out: dict = {}
@@ -910,16 +887,20 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     )
 
     # Relator (já vem vazio quando não faz sentido exibir)
-    df[] = df["id"].astype(str).map(
+    df["Relator(a)"] = df["id"].astype(str).map(
         lambda x: status_map.get(str(x), {}).get("relator_nome", "")
     )
+    df["Relator(a) Partido"] = df["id"].astype(str).map(
         lambda x: status_map.get(str(x), {}).get("relator_partido", "")
     )
+    df["Relator(a) UF"] = df["id"].astype(str).map(
         lambda x: status_map.get(str(x), {}).get("relator_uf", "")
     )
 
     # normaliza vazios
-    df[] = df[].fillna("").astype(str)
+    df["Relator(a)"] = df["Relator(a)"].fillna("").astype(str)
+    df["Relator(a) Partido"] = df["Relator(a) Partido"].fillna("").astype(str)
+    df["Relator(a) UF"] = df["Relator(a) UF"].fillna("").astype(str)
 
     dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
     df["DataStatus_dt"] = dt
@@ -966,18 +947,14 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
 
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
-
-
-st.markdown("""
-<style>
-/* Fonte menor para as tabelas do mapeamento */
-div[data-testid="stDataFrame"] * { font-size: 12px; }
-/* Quebra de linha (wrap) nas células para exibir Ementa completa */
-div[data-testid="stDataFrame"] td { white-space: normal !important; }
-/* Melhora leitura */
-div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
-</style>
-""", unsafe_allow_html=True)
+    st.markdown("""
+    <style>
+    /* Fonte menor e quebra de linha nas tabelas */
+    div[data-testid="stDataFrame"] * { font-size: 12px; }
+    div[data-testid="stDataFrame"] td { white-space: normal !important; }
+    div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
+    </style>
+    """, unsafe_allow_html=True)
 
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
 
@@ -1172,7 +1149,8 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
         # filtros base (lista de proposições)
         col1, col2, col3 = st.columns([2.2, 1.1, 1.1])
         with col1:
-            q =         with col2:
+            st.caption("🔎 A busca por texto fica no *Rastreador individual* abaixo.")
+        with col2:
             anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
             anos_sel = st.multiselect("Ano (da proposição)", options=anos, default=anos[:3] if len(anos) >= 3 else anos)
         with col3:
@@ -1184,11 +1162,6 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
             df_f = df_f[df_f["ano"].isin(anos_sel)].copy()
         if tipos_sel:
             df_f = df_f[df_f["siglaTipo"].isin(tipos_sel)].copy()
-
-        if q.strip():
-            qn = normalize_text(q)
-            df_f["_search"] = (df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)).apply(normalize_text)
-            df_f = df_f[df_f["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
 
         st.caption(f"Resultados: {len(df_f)} proposições")
 
@@ -1202,7 +1175,9 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
         with cS1:
             bt_status = st.button("📥 Carregar/Atualizar status da lista filtrada", type="primary")
         with cS2:
-            max_status = st.number_input("Limite (performance)", min_value=20, max_value=600, value=min(200, len(df_f)), step=20)
+            max_default = max(20, min(200, len(df_f)))
+            max_allowed = max(20, min(600, len(df_f)))
+            max_status = st.number_input("Limite (performance)", min_value=20, max_value=max_allowed, value=max_default, step=20)
         with cS3:
             st.caption("Aplique filtros acima (Ano/Tipo/Busca) e depois carregue o status.")
         with cS4:
@@ -1325,6 +1300,15 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
                 df_tbl_status["Data do status"] = df_tbl_status["DataStatus_dt"].apply(fmt_dt_br)
                 df_tbl_status.drop(columns=["DataStatus_dt"], inplace=True, errors="ignore")
 
+                def _fmt_relator_row(r):
+                    nome = (r.get("Relator(a)") or "").strip()
+                    if not nome:
+                        return "—"
+                    p = (r.get("Relator(a) Partido") or "").strip()
+                    u = (r.get("Relator(a) UF") or "").strip()
+                    return f"{nome} ({p}-{u})" if (p or u) else nome
+                df_tbl_status.drop(columns=["Relator(a) Partido", "Relator(a) UF"], inplace=True, errors="ignore")
+
                 df_tbl_status["Parado (dias)"] = df_tbl_status["Parado (dias)"].apply(lambda x: int(x) if isinstance(x, (int, float)) and pd.notna(x) else None)
                 df_tbl_status["Parado há"] = df_tbl_status["Parado (dias)"].apply(lambda x: f"{x} dias" if isinstance(x, int) else "—")
                 df_tbl_status.drop(columns=["Parado (dias)"], inplace=True, errors="ignore")
@@ -1358,10 +1342,15 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
         # ============================================================
         st.markdown("---")
         st.markdown("## 🔎 Rastreador individual (clique em uma linha da tabela abaixo)")
+        q_ind = st.text_input("🔎 Buscar no rastreador (sigla/número/ano OU ementa)", value="", placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'")
 
         df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
             columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
         ).copy()
+        if q_ind.strip():
+            qn = normalize_text(q_ind)
+            df_tbl["_search"] = (df_tbl["Proposição"].fillna("").astype(str) + " " + df_tbl["Ementa"].fillna("").astype(str)).apply(normalize_text)
+            df_tbl = df_tbl[df_tbl["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
 
         df_tbl_view = df_tbl.head(400).copy()
@@ -1400,11 +1389,10 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
 
             proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or ""
             org_sigla = status.get("status_siglaOrgao") or "—"
-            situacao = status.get("status_descricaoSituacao") or "—"
+            situacao = normalize_situacao(status.get("status_descricaoSituacao") or "—")
             andamento = status.get("status_descricaoTramitacao") or "—"
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
-            relator_nome = (status.get("status_ultimoRelator_nome") or "").strip()
             relator_partido = (status.get("status_ultimoRelator_partido") or "").strip()
             relator_uf = (status.get("status_ultimoRelator_uf") or "").strip()
 
@@ -1421,7 +1409,6 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
             c4.metric("Última mov.", fmt_dt_br(ultima_dt))
             c5.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
             relator_fmt = (f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome and (relator_partido or relator_uf) else (relator_nome or "—"))
-            c6.metric(relator_fmt)
 
             st.markdown("**Link da tramitação**")
             st.write(camara_link_tramitacao(selected_id))
@@ -1446,10 +1433,6 @@ div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
             if status.get("urlInteiroTeor"):
                 st.markdown("**Inteiro teor**")
                 st.write(status["urlInteiroTeor"])
-
-            st.markdown("### 🧠 Estratégia (tabela)")
-            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias, relator_nome, relator_partido, relator_uf)
-            st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             st.markdown("### 🧭 Linha do tempo (tramitações)")
             if df_tram.empty:
