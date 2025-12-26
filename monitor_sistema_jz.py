@@ -192,25 +192,28 @@ def safe_get(url, params=None):
 # ============================================================
 
 @st.cache_data(show_spinner=False, ttl=86400)
-def fetch_deputado_nome_by_id(dep_id: str) -> str:
+def fetch_deputado_info_by_id(dep_id: str) -> dict:
+    """Retorna dados básicos do deputado para exibição (nome/partido/UF)."""
     if not dep_id:
-        return ""
+        return {"nome": "", "siglaPartido": "", "siglaUf": ""}
     data = safe_get(f"{BASE_URL}/deputados/{dep_id}")
     if data is None or "__error__" in data:
-        return ""
+        return {"nome": "", "siglaPartido": "", "siglaUf": ""}
     d = data.get("dados", {}) or {}
-    return (d.get("nome") or "").strip()
+    return {
+        "nome": (d.get("nome") or "").strip(),
+        "siglaPartido": (d.get("siglaPartido") or "").strip(),
+        "siglaUf": (d.get("siglaUf") or "").strip(),
+    }
 
 
-def resolve_relator_nome(uri_ultimo_relator: str) -> tuple[str, str]:
-    """
-    Retorna (relator_id, relator_nome)
-    """
+def resolve_relator_info(uri_ultimo_relator: str) -> tuple[str, str, str, str]:
+    """Retorna (relator_id, relator_nome, relator_partido, relator_uf)."""
     rid = extract_id_from_uri(uri_ultimo_relator or "")
     if not rid:
-        return "", ""
-    nome = fetch_deputado_nome_by_id(rid)
-    return rid, nome
+        return "", "", "", ""
+    info = fetch_deputado_info_by_id(rid)
+    return rid, info.get("nome", ""), info.get("siglaPartido", ""), info.get("siglaUf", "")
 
 
 # ============================================================
@@ -609,13 +612,15 @@ def fetch_status_proposicao(id_proposicao):
             "status_uriUltimoRelator": "",
             "status_ultimoRelator_id": "",
             "status_ultimoRelator_nome": "",
+            "status_ultimoRelator_partido": "",
+            "status_ultimoRelator_uf": "",
         }
 
     d = data.get("dados", {}) or {}
     status = d.get("statusProposicao", {}) or {}
 
     uri_ultimo_relator = status.get("uriUltimoRelator") or ""
-    relator_id, relator_nome = resolve_relator_nome(uri_ultimo_relator)
+    relator_id, relator_nome, relator_partido, relator_uf = resolve_relator_info(uri_ultimo_relator)
 
     return {
         "id": str(d.get("id") or id_proposicao),
@@ -633,6 +638,8 @@ def fetch_status_proposicao(id_proposicao):
         "status_uriUltimoRelator": uri_ultimo_relator,
         "status_ultimoRelator_id": relator_id,
         "status_ultimoRelator_nome": relator_nome,
+        "status_ultimoRelator_partido": relator_partido,
+        "status_ultimoRelator_uf": relator_uf,
     }
 
 
@@ -697,7 +704,7 @@ def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
     return last, parado
 
 
-def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, despacho: str, parado_dias, relator_nome: str):
+def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, despacho: str, parado_dias, relator_nome: str, relator_partido: str = "", relator_uf: str = ""):
     combo = normalize_text(f"{situacao} {andamento} {despacho}")
 
     fase = "Indefinida"
@@ -733,7 +740,7 @@ def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, desp
     df = pd.DataFrame(
         [
             {"Campo": "Fase", "Valor": fase},
-            {"Campo": "Relator(a) (último)", "Valor": relator_nome or "—"},
+            {"Campo": "Relator(a) (último)", "Valor": (f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome and (relator_partido or relator_uf) else (relator_nome or "—"))},
             {"Campo": "Ação sugerida", "Valor": acao},
             {"Campo": "Sinais do texto", "Valor": ", ".join(sinal) if sinal else "—"},
             {"Campo": "Alerta", "Valor": alerta or "—"},
@@ -751,9 +758,13 @@ def build_status_map(ids: list[str]) -> dict:
         andamento = (s.get("status_descricaoTramitacao") or "").strip()
 
         relator_nome = ""
+        relator_partido = ""
+        relator_uf = ""
         # Só carrega/expõe relator quando fizer sentido (aguardando parecer/relator etc.)
         if needs_relator_info(situacao, andamento):
             relator_nome = (s.get("status_ultimoRelator_nome") or "").strip()
+            relator_partido = (s.get("status_ultimoRelator_partido") or "").strip()
+            relator_uf = (s.get("status_ultimoRelator_uf") or "").strip()
 
         out[str(pid)] = {
             "situacao": situacao,
@@ -761,6 +772,8 @@ def build_status_map(ids: list[str]) -> dict:
             "status_dataHora": (s.get("status_dataHora") or "").strip(),
             "siglaOrgao": (s.get("status_siglaOrgao") or "").strip(),
             "relator_nome": relator_nome,
+            "relator_partido": relator_partido,
+            "relator_uf": relator_uf,
         }
     return out
 
@@ -772,6 +785,8 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["Data do status (raw)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("status_dataHora", ""))
     df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
     df["Relator(a)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_nome", ""))
+df["Relator(a) Partido"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_partido", ""))
+df["Relator(a) UF"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_uf", ""))
 
     # normaliza relator vazio
     df["Relator(a)"] = df["Relator(a)"].fillna("").astype(str)
@@ -780,6 +795,9 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["DataStatus_dt"] = dt
     df["AnoStatus"] = dt.dt.year
     df["MesStatus"] = dt.dt.month
+
+    # indicador leve: dias desde o último status (proxy para "parado há X dias")
+    df["Parado (dias)"] = df["DataStatus_dt"].apply(days_since)
 
     return df
 
@@ -979,7 +997,7 @@ def main():
             fetch_status_proposicao.clear()
             fetch_tramitacoes_proposicao.clear()
             build_status_map.clear()
-            fetch_deputado_nome_by_id.clear()
+            fetch_deputado_info_by_id.clear()
             st.session_state.pop("df_status_last", None)
             st.session_state["status_click_sel"] = None
 
@@ -1138,7 +1156,7 @@ def main():
                 st.markdown("**Lista filtrada (Link = Ficha de Tramitação + Relator quando aplicável)**")
 
                 df_tbl_status = df_fil[
-                    ["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "DataStatus_dt", "Relator(a)", "id", "ementa"]
+                    ["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "DataStatus_dt", "Parado (dias)", "Relator(a)", "Relator(a) Partido", "Relator(a) UF", "id", "ementa"]
                 ].rename(columns={
                     "Proposicao": "Proposição",
                     "siglaTipo": "Tipo",
@@ -1149,12 +1167,25 @@ def main():
                 df_tbl_status["Data do status"] = df_tbl_status["DataStatus_dt"].apply(fmt_dt_br)
                 df_tbl_status.drop(columns=["DataStatus_dt"], inplace=True, errors="ignore")
 
-                df_tbl_status["Relator(a)"] = df_tbl_status["Relator(a)"].replace("", "—")
+                def _fmt_relator_row(r):
+                    nome = (r.get("Relator(a)") or "").strip()
+                    if not nome:
+                        return "—"
+                    p = (r.get("Relator(a) Partido") or "").strip()
+                    u = (r.get("Relator(a) UF") or "").strip()
+                    return f"{nome} ({p}-{u})" if (p or u) else nome
+
+                df_tbl_status["Relator(a)"] = df_tbl_status.apply(_fmt_relator_row, axis=1)
+                df_tbl_status.drop(columns=["Relator(a) Partido", "Relator(a) UF"], inplace=True, errors="ignore")
+
+                df_tbl_status["Parado (dias)"] = df_tbl_status["Parado (dias)"].apply(lambda x: int(x) if isinstance(x, (int, float)) and pd.notna(x) else None)
+                df_tbl_status["Parado há"] = df_tbl_status["Parado (dias)"].apply(lambda x: f"{x} dias" if isinstance(x, int) else "—")
+                df_tbl_status.drop(columns=["Parado (dias)"], inplace=True, errors="ignore")
 
                 df_tbl_status["LinkTramitacao"] = df_tbl_status["id"].astype(str).apply(camara_link_tramitacao)
 
                 df_tbl_status = df_tbl_status[
-                    ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Relator(a)", "id", "LinkTramitacao", "Ementa"]
+                    ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Parado há", "Relator(a)", "id", "LinkTramitacao", "Ementa"]
                 ]
 
                 st.dataframe(
@@ -1227,10 +1258,14 @@ def main():
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
             relator_nome = (status.get("status_ultimoRelator_nome") or "").strip()
+            relator_partido = (status.get("status_ultimoRelator_partido") or "").strip()
+            relator_uf = (status.get("status_ultimoRelator_uf") or "").strip()
 
             # só exibe relator se fizer sentido
             if not needs_relator_info(situacao, andamento):
                 relator_nome = ""
+                relator_partido = ""
+                relator_uf = ""
 
             c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.1, 1.2, 1.2, 1.0, 1.3])
             c1.metric("Proposição", proposicao_fmt or "—")
@@ -1238,7 +1273,8 @@ def main():
             c3.metric("Data do Status", fmt_dt_br(status_dt))
             c4.metric("Última mov.", fmt_dt_br(ultima_dt))
             c5.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
-            c6.metric("Relator(a)", relator_nome or "—")
+            relator_fmt = (f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome and (relator_partido or relator_uf) else (relator_nome or "—"))
+            c6.metric("Relator(a)", relator_fmt)
 
             st.markdown("**Link da tramitação**")
             st.write(camara_link_tramitacao(selected_id))
@@ -1261,7 +1297,7 @@ def main():
                 st.write(status["urlInteiroTeor"])
 
             st.markdown("### 🧠 Estratégia (tabela)")
-            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias, relator_nome)
+            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias, relator_nome, relator_partido, relator_uf)
             st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             st.markdown("### 🧭 Linha do tempo (tramitações)")
