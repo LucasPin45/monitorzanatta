@@ -21,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/3.5 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/3.6 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -30,6 +30,22 @@ PALAVRAS_CHAVE_PADRAO = [
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
 
 TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
+
+# lista base (pré-definida) pra sempre existir filtro mesmo antes do carregamento
+STATUS_PREDEFINIDOS = [
+    "Arquivada",
+    "Aguardando Despacho do Presidente da Câmara dos Deputados",
+    "Aguardando Designação de Relator(a)",
+    "Aguardando Parecer de Relator(a)",
+    "Tramitando em Conjunto",
+    "Pronta para Pauta",
+    "Aguardando Deliberação",
+    "Aguardando Apreciação",
+    "Aguardando Parecer",
+    "Aguardando Distribuição",
+    "Aguardando Designação",
+    "Aguardando Votação",
+]
 
 
 # ============================================================
@@ -688,15 +704,11 @@ def montar_estrategia_tabela(org_sigla: str, org_nome: str, situacao: str, andam
 
 
 # ============================================================
-# NOVO: “CARTEIRA POR STATUS” (Situação atual)
+# CARTEIRA POR STATUS (Situação atual)
 # ============================================================
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def build_status_map(ids: list[str]) -> dict:
-    """
-    Retorna dict {id: {...status...}} usando fetch_status_proposicao (cacheado).
-    ttl menor (30 min) porque status muda.
-    """
     out = {}
     for pid in ids:
         s = fetch_status_proposicao(str(pid))
@@ -718,6 +730,23 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
     return df
 
+
+def merge_status_options(dynamic_opts: list[str]) -> list[str]:
+    # une predefinido + dinâmico, sem duplicar, mantendo ordem “bonita”
+    base = [s for s in STATUS_PREDEFINIDOS if s and str(s).strip()]
+    dyn = [s for s in dynamic_opts if s and str(s).strip()]
+    merged = []
+    seen = set()
+    for s in base + sorted(dyn):
+        if s not in seen:
+            merged.append(s)
+            seen.add(s)
+    return merged
+
+
+# ============================================================
+# UI
+# ============================================================
 
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
@@ -886,6 +915,7 @@ def main():
             fetch_tramitacoes_proposicao.clear()
             fetch_orgao_by_uri.clear()
             build_status_map.clear()
+            st.session_state.pop("df_status_last", None)
 
         with st.spinner("Carregando proposições de autoria (com fallback de RIC)..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
@@ -896,7 +926,7 @@ def main():
 
         df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
-        # filtros
+        # filtros base
         col1, col2, col3 = st.columns([2.2, 1.1, 1.1])
         with col1:
             q = st.text_input("🔎 Buscar por sigla/número/ano OU ementa", value="", placeholder="Ex.: RIC 123/2025 | 'pix' | 'conanda'")
@@ -921,7 +951,7 @@ def main():
         st.caption(f"Resultados: {len(df_f)} proposições")
 
         # ============================================================
-        # NOVO BLOCO: Carteira por Situação atual (status)
+        # CARTEIRA POR STATUS (FILTRO SEMPRE APARECE)
         # ============================================================
         st.markdown("---")
         st.markdown("## 📌 Carteira por Situação atual (status)")
@@ -932,42 +962,49 @@ def main():
         with cS2:
             max_status = st.number_input("Limite (para performance)", min_value=20, max_value=600, value=min(200, len(df_f)), step=20)
         with cS3:
-            st.caption("Dica: use os filtros (Ano/Tipo/Busca) e depois carregue o status — fica rápido e leve.")
+            st.caption("Use os filtros (Ano/Tipo/Busca) e depois carregue o status — fica rápido e leve.")
 
-        df_status_view = pd.DataFrame()
+        # estado + opções do filtro (sempre visível)
+        df_status_view = st.session_state.get("df_status_last", pd.DataFrame()).copy()
+
+        dynamic_opts = []
+        if not df_status_view.empty and "Situação atual" in df_status_view.columns:
+            dynamic_opts = [s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()]
+
+        status_opts = merge_status_options(dynamic_opts)
+
+        # seleção persistente
+        if "status_sel_ui" not in st.session_state:
+            st.session_state["status_sel_ui"] = []
+
+        colF1, colF2 = st.columns([1.6, 1.0])
+        with colF1:
+            status_sel = st.multiselect(
+                "Filtrar por Situação atual",
+                options=status_opts,
+                default=st.session_state["status_sel_ui"],
+                key="status_sel_ui",
+            )
+        with colF2:
+            somente_vazios = st.checkbox("Mostrar apenas Situação vazia", value=False)
+
         if bt_status:
             with st.spinner("Buscando status (Situação atual) das proposições filtradas..."):
                 ids_list = df_f["id"].astype(str).head(int(max_status)).tolist()
                 status_map = build_status_map(ids_list)
                 df_status_view = enrich_with_status(df_f.head(int(max_status)), status_map)
-
-                st.session_state["status_map_last"] = status_map
                 st.session_state["df_status_last"] = df_status_view
 
-        # se já carregou antes, reutiliza
-        if "df_status_last" in st.session_state and isinstance(st.session_state["df_status_last"], pd.DataFrame):
-            df_status_view = st.session_state["df_status_last"].copy()
-
+        # se ainda não carregou, avisa (mas filtro já está na tela)
         if df_status_view.empty:
-            st.info("Clique em **Carregar/Atualizar status** para montar a carteira por Situação atual.")
+            st.info("✅ O filtro já está pronto. Agora clique em **Carregar/Atualizar status** para preencher a carteira e habilitar a contagem/lista.")
         else:
-            # lista de status
-            status_opts = sorted([s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()])
-            default_sel = status_opts[:6] if len(status_opts) > 6 else status_opts
-
-            colF1, colF2 = st.columns([1.6, 1.0])
-            with colF1:
-                status_sel = st.multiselect("Filtrar por Situação atual", options=status_opts, default=default_sel)
-            with colF2:
-                somente_vazios = st.checkbox("Mostrar apenas Situação vazia", value=False)
-
             df_fil = df_status_view.copy()
             if somente_vazios:
                 df_fil = df_fil[df_fil["Situação atual"].fillna("").astype(str).str.strip() == ""].copy()
             elif status_sel:
                 df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
 
-            # contagem por status
             df_counts = (
                 df_status_view.assign(_s=df_status_view["Situação atual"].fillna("—").replace("", "—"))
                 .groupby("_s", as_index=False)
@@ -1000,7 +1037,6 @@ def main():
                     }
                 ).copy()
 
-                # formata Data do status (ISO -> BR)
                 df_tbl_status["Data do status"] = df_tbl_status["Data do status"].apply(lambda x: fmt_dt_br(parse_dt(x)) if x else "—")
 
                 st.dataframe(
@@ -1022,7 +1058,7 @@ def main():
                 )
 
         # ============================================================
-        # Rastreador individual (já existente)
+        # Rastreador individual (mantido)
         # ============================================================
         st.markdown("---")
         st.markdown("## 🔎 Rastreador individual (clique em uma linha da tabela abaixo)")
