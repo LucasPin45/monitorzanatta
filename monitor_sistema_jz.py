@@ -133,16 +133,9 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
     return (csv_bytes, "text/csv", "csv")
 
 
-def needs_relator_info(situacao: str, andamento: str) -> bool:
-    combo = normalize_text(f"{situacao} {andamento}")
-    # gatilhos típicos
-    triggers = [
-        "aguardando parecer", "aguarda parecer", "aguardando o parecer",
-        "parecer de relator", "parecer do relator", "designacao de relator", "designação de relator"
-    ]
-    return any(t in combo for t in triggers)
-
-
+def needs_relator_info(situacao: str) -> bool:
+    # Relator removido da UI (instabilidade/latência nos dados).
+    return False
 def canonical_situacao(situacao: str) -> str:
     """Normaliza rótulos de Situação atual para evitar duplicidades e facilitar filtros."""
     s_raw = (situacao or "").strip()
@@ -778,51 +771,21 @@ def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
     return last, parado
 
 
-def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, despacho: str, parado_dias, relator_nome: str, relator_partido: str = "", relator_uf: str = ""):
-    combo = normalize_text(f"{situacao} {andamento} {despacho}")
-
-    fase = "Indefinida"
-    acao = "Conferir despacho e última tramitação."
-    sinal = []
-    alerta = ""
-
-    if "aguard" in combo and "relator" in combo:
-        sinal.append("Aguarda relator")
-        if relator_nome:
-            sinal.append(f"Relator: {relator_nome}")
-            acao = "Acionar relator e mapear parecer (prazo/agenda)."
-
-    if "parecer" in combo and "aguard" in combo:
-        sinal.append("Aguarda parecer")
-        if relator_nome:
-            sinal.append(f"Relator: {relator_nome}")
-            acao = "Cobrar parecer com o gabinete do relator (com minuta/argumentos)."
-
-    if "arquiv" in combo:
-        sinal.append("Arquivamento")
-        acao = "Avaliar desarquivamento/novo PL/apensamento."
-
-    org_sigla_u = (org_sigla or "").upper()
-    if org_sigla_u in ("MESA", "PLEN"):
-        fase = org_sigla_u
-    elif org_sigla_u:
-        fase = f"Comissão ({org_sigla_u})"
-
-    if isinstance(parado_dias, int) and parado_dias >= 30:
-        alerta = f"Parado há {parado_dias} dias (priorizar cobrança)."
-
-    df = pd.DataFrame(
-        [
-            {"Campo": "Fase", "Valor": fase},
-            {"Campo": "Relator(a) (último)", "Valor": (f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome and (relator_partido or relator_uf) else (relator_nome or "—"))},
-            {"Campo": "Ação sugerida", "Valor": acao},
-            {"Campo": "Sinais do texto", "Valor": ", ".join(sinal) if sinal else "—"},
-            {"Campo": "Alerta", "Valor": alerta or "—"},
-        ]
-    )
-    return df
-
-
+def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, despacho: str, parado_dias):
+    """Tabela simples e estável para estratégia (sem relator)."""
+    s = canonical_situacao(situacao or "")
+    linhas = estrategia_por_situacao(s)
+    # sinal simples (priorização)
+    sinal = "🔴" if isinstance(parado_dias, int) and parado_dias >= 90 else ("🟠" if isinstance(parado_dias, int) and parado_dias >= 30 else "🟢")
+    return pd.DataFrame([{
+        "Órgão (sigla)": org_sigla or "—",
+        "Situação atual": s or "—",
+        "Sinal": sinal,
+        "Estratégia sugerida": " | ".join(linhas),
+        "Último andamento": andamento or "—",
+        "Despacho": despacho or "—",
+        "Parado há (dias)": parado_dias if isinstance(parado_dias, int) else None,
+    }])
 @st.cache_data(show_spinner=False, ttl=1800)
 def build_status_map(ids: list[str]) -> dict:
     """Busca status (e relator quando aplicável) com paralelismo leve para ficar rápido."""
@@ -884,21 +847,6 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
         lambda x: status_map.get(str(x), {}).get("siglaOrgao", "")
     )
 
-    # Relator (já vem vazio quando não faz sentido exibir)
-    df["Relator(a)"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("relator_nome", "")
-    )
-    df["Relator(a) Partido"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("relator_partido", "")
-    )
-    df["Relator(a) UF"] = df["id"].astype(str).map(
-        lambda x: status_map.get(str(x), {}).get("relator_uf", "")
-    )
-
-    # normaliza vazios
-    df["Relator(a)"] = df["Relator(a)"].fillna("").astype(str)
-    df["Relator(a) Partido"] = df["Relator(a) Partido"].fillna("").astype(str)
-    df["Relator(a) UF"] = df["Relator(a) UF"].fillna("").astype(str)
 
     dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
     df["DataStatus_dt"] = dt
@@ -945,54 +893,46 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
 
 
 def estrategia_por_situacao(situacao: str) -> list[str]:
-    """
-    Regras fixas de estratégia por Situação atual (sem depender de relator na UI).
-    """
+    """Regras fixas de estratégia por Situação atual (sem relator na UI)."""
     s = normalize_text(situacao or "")
+
+    # 1) Aguardando designação de relator(a)
     if "aguardando designacao de relator" in s or "aguardando designação de relator" in s:
-        return [
-            "Buscar entre os membros da Comissão, parlamentar parceiro."
-        ]
-    if "aguardando parecer de relator" in s or ("aguardando" in s and "parecer" in s):
+        return ["Buscar entre os membros da Comissão, parlamentar parceiro."]
+
+    # 2) Aguardando parecer do relator(a) (unificado)
+    if "aguardando parecer" in s and "relator" in s:
         return [
             "Se o relator for parceiro/neutro: tentar acelerar a apresentação do parecer.",
-            "Se o relator for adversário: articular um VTS com membros parceiros da Comissão."
+            "Se o relator for adversário: articular um VTS com membros parceiros da Comissão.",
         ]
+    # algumas situações vêm só como "Aguardando Parecer" (sem 'relator') — trate como a mesma coisa
+    if "aguardando parecer" in s or s.startswith("parecer"):
+        return [
+            "Se o relator for parceiro/neutro: tentar acelerar a apresentação do parecer.",
+            "Se o relator for adversário: articular um VTS com membros parceiros da Comissão.",
+        ]
+
+    # 3) Pronta para pauta
     if "pronta para pauta" in s:
         return [
             "Se o parecer for favorável: articular na Comissão para o parecer entrar na pauta.",
             "Se o parecer for contrário: articular pra não entrar na pauta.",
-            "Caso entre na pauta: articular retirada de pauta; se não funcionar, articular obstrução e VTS."
+            "Caso entre na pauta: articular retirada de pauta; se não funcionar, articular obstrução e VTS.",
         ]
-    if "aguardando despacho do presidente da camara dos deputados" in s or ("aguardando despacho" in s and "presidente" in s and "camara" in s):
-        return [
-            "Articular com a Mesa para acelerar a tramitação."
-        ]
+
+    # 4) Aguardando despacho do Presidente da Câmara dos Deputados
+    if "aguardando despacho" in s and "presidente" in s and "camara" in s:
+        return ["Articular com a Mesa para acelerar a tramitação."]
+
     return ["—"]
-
-
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
 
 
-st.markdown("""
-<style>
-/* Fonte menor nas tabelas do mapeamento e rastreador */
-div[data-testid="stDataFrame"] * { font-size: 12px; }
-div[data-testid="stDataFrame"] td { white-space: normal !important; }
-div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
-
-/* Também aplica ao data_editor (quando Streamlit usa grid) */
-div[data-testid="stDataEditor"] * { font-size: 12px; }
-div[data-testid="stDataEditor"] td { white-space: normal !important; }
-div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
-</style>
-""", unsafe_allow_html=True)
-
-
     st.markdown("""
     <style>
-    div[data-testid="stDataFrame"] * { font-size: 12px; }
+    div[data-testid="stDataFrame"] * { font-size: 11px; }
     div[data-testid="stDataFrame"] td { white-space: normal !important; }
     div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
     </style>
@@ -1199,18 +1139,18 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
             tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
             tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos)
 
-        df_f = df_aut.copy()
+        df_base = df_aut.copy()
         if anos_sel:
-            df_f = df_f[df_f["ano"].isin(anos_sel)].copy()
+            df_base = df_base[df_base["ano"].isin(anos_sel)].copy()
         if tipos_sel:
-            df_f = df_f[df_f["siglaTipo"].isin(tipos_sel)].copy()
-
+            df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
+        df_rast = df_base.copy()
         if q.strip():
             qn = normalize_text(q)
-            df_f["_search"] = (df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)).apply(normalize_text)
-            df_f = df_f[df_f["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
+            df_rast["_search"] = (df_rast["Proposicao"].fillna("").astype(str) + " " + df_rast["ementa"].fillna("").astype(str)).apply(normalize_text)
+            df_rast = df_rast[df_rast["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
 
-        st.caption(f"Resultados: {len(df_f)} proposições")
+        st.caption(f"Rastreador: {len(df_rast)} proposições")
 
         # ============================================================
         # CARTEIRA POR STATUS + Toggle na contagem + Relator(a)
@@ -1222,7 +1162,7 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
         with cS1:
             bt_status = st.button("📥 Carregar/Atualizar status da lista filtrada", type="primary")
         with cS2:
-            max_status = st.number_input("Limite (performance)", min_value=20, max_value=600, value=min(200, len(df_f)), step=20)
+            max_status = st.number_input("Limite (performance)", min_value=20, max_value=600, value=min(200, len(df_rast)), step=20)
         with cS3:
             st.caption("Aplique filtros acima (Ano/Tipo/Busca) e depois carregue o status.")
         with cS4:
@@ -1268,9 +1208,9 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
 
         if bt_status:
             with st.spinner("Buscando status (e relator quando aplicável)..."):
-                ids_list = df_f["id"].astype(str).head(int(max_status)).tolist()
+                ids_list = df_base["id"].astype(str).head(int(max_status)).tolist()
                 status_map = build_status_map(ids_list)
-                df_status_view = enrich_with_status(df_f.head(int(max_status)), status_map)
+                df_status_view = enrich_with_status(df_base.head(int(max_status)), status_map)
                 st.session_state["df_status_last"] = df_status_view
 
         if df_status_view.empty:
@@ -1331,30 +1271,21 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
                 )
 
             with cC2:
-                st.markdown("**Lista filtrada (Link = Ficha de Tramitação + Relator quando aplicável)**")
+                st.markdown("**Lista filtrada (Link = Ficha de Tramitação)**")
 
-                df_tbl_status = df_fil[
-                    ["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "DataStatus_dt", "Parado (dias)", "Sinal", "id", "ementa"]
-                ].rename(columns={
+                # Tabela leve: sem relator (APIs variam muito e isso aumenta custo/instabilidade)
+                keep_cols = ["Proposicao", "siglaTipo", "ano", "SituacaoAtual", "OrgaoSigla", "DataStatus_dt", "Parado (dias)", "Sinal", "id", "ementa"]
+                df_tbl_status = df_fil[keep_cols].rename(columns={
                     "Proposicao": "Proposição",
                     "siglaTipo": "Tipo",
                     "ano": "Ano",
+                    "SituacaoAtual": "Situação atual",
+                    "OrgaoSigla": "Órgão (sigla)",
                     "ementa": "Ementa",
                 }).copy()
 
                 df_tbl_status["Data do status"] = df_tbl_status["DataStatus_dt"].apply(fmt_dt_br)
                 df_tbl_status.drop(columns=["DataStatus_dt"], inplace=True, errors="ignore")
-
-                def _fmt_relator_row(r):
-                    nome = (r.get("Relator(a)") or "").strip()
-                    if not nome:
-                        return "—"
-                    p = (r.get("Relator(a) Partido") or "").strip()
-                    u = (r.get("Relator(a) UF") or "").strip()
-                    return f"{nome} ({p}-{u})" if (p or u) else nome
-
-                df_tbl_status["Relator(a)"] = df_tbl_status.apply(_fmt_relator_row, axis=1)
-                df_tbl_status.drop(columns=["Relator(a) UF"], inplace=True, errors="ignore")
 
                 df_tbl_status["Parado (dias)"] = df_tbl_status["Parado (dias)"].apply(lambda x: int(x) if isinstance(x, (int, float)) and pd.notna(x) else None)
                 df_tbl_status["Parado há"] = df_tbl_status["Parado (dias)"].apply(lambda x: f"{x} dias" if isinstance(x, int) else "—")
@@ -1362,10 +1293,9 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
 
                 df_tbl_status["LinkTramitacao"] = df_tbl_status["id"].astype(str).apply(camara_link_tramitacao)
 
-                df_tbl_status = df_tbl_status[
-                    ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Sinal", "Parado há", "id", "LinkTramitacao", "Ementa"]
-                ]
-
+                df_tbl_status = df_tbl_status[[
+                    "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Sinal", "Parado há", "id", "LinkTramitacao", "Ementa"
+                ]]
                 st.data_editor(df_tbl_status, disabled=True, use_container_width=True,
                     hide_index=True,
                     column_config={
@@ -1387,7 +1317,7 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
         st.markdown("---")
         st.markdown("## 🔎 Rastreador individual (clique em uma linha da tabela abaixo)")
 
-        df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
+        df_tbl = df_rast[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
             columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
         ).copy()
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
@@ -1474,7 +1404,7 @@ div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
                 st.write(status["urlInteiroTeor"])
 
             st.markdown("### 🧠 Estratégia (tabela)")
-            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias, relator_nome, relator_partido, relator_uf)
+            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias)
             st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             st.markdown("### 🧭 Linha do tempo (tramitações)")
