@@ -46,7 +46,6 @@ COMISSOES_ESTRATEGICAS_PADRAO = [
 # FUNÇÕES UTILITÁRIAS
 # ============================================================
 
-
 def normalize_text(text):
     """Remove acentos e coloca em minúsculas para comparação/busca."""
     if not isinstance(text, str):
@@ -100,7 +99,6 @@ def get_proposicao_id_from_item(item):
       3) proposicao*             (parecer, PRL etc.)
       4) campos de URI diretos
     """
-
     grupos = [
         ["proposicaoRelacionada", "proposicaoRelacionada_", "proposicao_relacionada"],
         ["proposicaoPrincipal", "proposicao_principal"],
@@ -148,23 +146,28 @@ def fetch_proposicao_info(id_proposicao):
         data = safe_get(f"{BASE_URL}/proposicoes/{id_proposicao}")
         dados = data.get("dados", {})
         return {
+            "id": str(dados.get("id") or id_proposicao),
             "sigla": str(dados.get("siglaTipo") or "").strip(),
             "numero": str(dados.get("numero") or "").strip(),
             "ano": str(dados.get("ano") or "").strip(),
             "ementa": (dados.get("ementa") or "").strip(),
         }
     except Exception:
-        return {
-            "sigla": "",
-            "numero": "",
-            "ano": "",
-            "ementa": "",
-        }
+        return {"id": str(id_proposicao), "sigla": "", "numero": "", "ano": "", "ementa": ""}
+
+
+def format_sigla_num_ano(sigla, numero, ano):
+    sigla = (sigla or "").strip()
+    numero = (str(numero) or "").strip()
+    ano = (str(ano) or "").strip()
+    if sigla and numero and ano:
+        return f"{sigla} {numero}/{ano}"
+    return ""
+
 
 # ============================================================
 # ACESSO À API – EVENTOS, PAUTA, AUTORIA
 # ============================================================
-
 
 @st.cache_data(show_spinner=False)
 def fetch_eventos(start_date, end_date):
@@ -231,7 +234,6 @@ def fetch_proposicoes_autoria_deputada(id_deputada):
             if d.get("id"):
                 ids.add(str(d["id"]))
 
-        # paginação: procura link "next"
         links = data.get("links", [])
         next_link = None
         for link in links:
@@ -242,16 +244,143 @@ def fetch_proposicoes_autoria_deputada(id_deputada):
         if not next_link:
             break
 
-        # próxima página: usamos o href completo e zeramos params
         url = next_link
         params = {}
 
     return ids
 
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_lista_proposicoes_autoria(id_deputada):
+    """
+    Lista (com metadados) das proposições de autoria da deputada:
+    id, siglaTipo, numero, ano, ementa, uri.
+    """
+    rows = []
+    url = f"{BASE_URL}/proposicoes"
+    params = {
+        "idDeputadoAutor": id_deputada,
+        "itens": 100,
+        "ordem": "DESC",
+        "ordenarPor": "ano",
+    }
+
+    while True:
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        for d in data.get("dados", []):
+            rows.append(
+                {
+                    "id": str(d.get("id") or ""),
+                    "siglaTipo": (d.get("siglaTipo") or "").strip(),
+                    "numero": str(d.get("numero") or "").strip(),
+                    "ano": str(d.get("ano") or "").strip(),
+                    "ementa": (d.get("ementa") or "").strip(),
+                    "uri": d.get("uri") or "",
+                }
+            )
+
+        links = data.get("links", [])
+        next_link = None
+        for link in links:
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+
+        if not next_link:
+            break
+
+        url = next_link
+        params = {}
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Proposicao"] = df.apply(lambda r: format_sigla_num_ano(r["siglaTipo"], r["numero"], r["ano"]), axis=1)
+        df = df[["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa", "uri"]]
+    return df
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_status_proposicao(id_proposicao):
+    """
+    Busca o 'statusProposicao' e outros campos úteis em /proposicoes/{id}.
+    Campos variam, então retornamos com tolerância a ausência.
+    """
+    data = safe_get(f"{BASE_URL}/proposicoes/{id_proposicao}")
+    dados = data.get("dados", {}) or {}
+    status = dados.get("statusProposicao", {}) or {}
+
+    # alguns campos comuns aparecem dentro de statusProposicao
+    return {
+        "id": str(dados.get("id") or id_proposicao),
+        "sigla": (dados.get("siglaTipo") or "").strip(),
+        "numero": str(dados.get("numero") or "").strip(),
+        "ano": str(dados.get("ano") or "").strip(),
+        "ementa": (dados.get("ementa") or "").strip(),
+        "status_dataHora": status.get("dataHora") or "",
+        "status_siglaOrgao": status.get("siglaOrgao") or "",
+        "status_uriOrgao": status.get("uriOrgao") or "",
+        "status_descricaoTramitacao": status.get("descricaoTramitacao") or "",
+        "status_descricaoSituacao": status.get("descricaoSituacao") or "",
+        "status_despacho": status.get("despacho") or "",
+        "status_sequencia": status.get("sequencia") or "",
+        # às vezes existem também
+        "urlInteiroTeor": dados.get("urlInteiroTeor") or "",
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_tramitacoes_proposicao(id_proposicao):
+    """
+    Busca tramitações em /proposicoes/{id}/tramitacoes com paginação.
+    """
+    rows = []
+    url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
+    params = {"itens": 100, "ordem": "ASC", "ordenarPor": "dataHora"}
+
+    while True:
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        for t in data.get("dados", []):
+            rows.append(
+                {
+                    "dataHora": t.get("dataHora") or "",
+                    "sequencia": t.get("sequencia") or "",
+                    "siglaOrgao": t.get("siglaOrgao") or "",
+                    "uriOrgao": t.get("uriOrgao") or "",
+                    "descricaoTramitacao": t.get("descricaoTramitacao") or "",
+                    "despacho": t.get("despacho") or "",
+                }
+            )
+
+        links = data.get("links", [])
+        next_link = None
+        for link in links:
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+
+        if not next_link:
+            break
+
+        url = next_link
+        params = {}
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Data"] = pd.to_datetime(df["dataHora"], errors="coerce").dt.strftime("%d/%m/%Y")
+        df["Hora"] = pd.to_datetime(df["dataHora"], errors="coerce").dt.strftime("%H:%M")
+        df = df[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "sequencia", "uriOrgao", "dataHora"]]
+    return df
+
+
 # ============================================================
 # REGRAS DE MONITORAMENTO
 # ============================================================
-
 
 def pauta_item_tem_relatoria_deputada(item, alvo_nome, alvo_partido, alvo_uf):
     relator = item.get("relator") or {}
@@ -259,14 +388,7 @@ def pauta_item_tem_relatoria_deputada(item, alvo_nome, alvo_partido, alvo_uf):
     partido = relator.get("siglaPartido") or ""
     uf = relator.get("siglaUf") or ""
 
-    return matches_deputy(
-        nome,
-        alvo_nome,
-        partido,
-        alvo_partido,
-        uf,
-        alvo_uf,
-    )
+    return matches_deputy(nome, alvo_nome, partido, alvo_partido, uf, alvo_uf)
 
 
 def pauta_item_palavras_chave(item, palavras_chave_normalizadas):
@@ -274,23 +396,19 @@ def pauta_item_palavras_chave(item, palavras_chave_normalizadas):
     Verifica se algum termo de palavras-chave aparece em textos relevantes
     do item de pauta e de todas as proposições associadas.
     """
-
     textos = []
 
-    # 1. Campos diretos do item
     for chave in ("ementa", "ementaDetalhada", "titulo", "descricao", "descricaoTipo"):
         valor = item.get(chave)
         if valor:
             textos.append(str(valor))
 
-    # 2. Proposição "normal": item["proposicao"]
     prop = item.get("proposicao") or {}
     for chave in ("ementa", "ementaDetalhada", "titulo"):
         valor = prop.get(chave)
         if valor:
             textos.append(str(valor))
 
-    # 3. Proposição RELACIONADA
     prop_rel = item.get("proposicaoRelacionada_") or {}
     for chave in ("ementa", "ementaDetalhada", "titulo"):
         valor = prop_rel.get(chave)
@@ -314,10 +432,10 @@ def is_comissao_estrategica(sigla_orgao, lista_siglas):
         return False
     return sigla_orgao.upper() in [s.upper() for s in lista_siglas]
 
+
 # ============================================================
 # VARREDURA GERAL (CORE)
 # ============================================================
-
 
 def escanear_eventos(
     eventos,
@@ -340,10 +458,7 @@ def escanear_eventos(
     """
     registros = []
 
-    palavras_chave_norm = [
-        (normalize_text(p), p) for p in palavras_chave if p.strip()
-    ]
-
+    palavras_chave_norm = [(normalize_text(p), p) for p in palavras_chave if p.strip()]
     ids_autoria_deputada = ids_autoria_deputada or set()
 
     for ev in eventos:
@@ -378,27 +493,20 @@ def escanear_eventos(
         pares_kw_proposicao = set()  # (palavra, PL) exato
 
         for item in pauta:
-            # Palavras-chave deste item
             kws_item = pauta_item_palavras_chave(item, palavras_chave_norm)
             has_keywords = bool(kws_item)
 
-            # RELATORIA
-            relatoria_flag = pauta_item_tem_relatoria_deputada(
-                item, alvo_nome, alvo_partido, alvo_uf
-            )
+            relatoria_flag = pauta_item_tem_relatoria_deputada(item, alvo_nome, alvo_partido, alvo_uf)
 
-            # AUTORIA – via set de IDs
             autoria_flag = False
             if buscar_autoria and ids_autoria_deputada:
                 id_prop_tmp = get_proposicao_id_from_item(item)
                 if id_prop_tmp and id_prop_tmp in ids_autoria_deputada:
                     autoria_flag = True
 
-            # Se não há nada de interesse, pula
             if not (relatoria_flag or autoria_flag or has_keywords):
                 continue
 
-            # Identificar proposição
             id_prop = get_proposicao_id_from_item(item)
 
             identificacao = "(proposição não identificada)"
@@ -410,7 +518,6 @@ def escanear_eventos(
                     identificacao = f"{info['sigla']} {info['numero']}/{info['ano']}"
                 ementa_prop = info["ementa"]
             else:
-                # fallback: tenta usar o que vier no próprio item de pauta
                 prop = item.get("proposicao") or {}
                 sigla = prop.get("siglaTipo") or ""
                 numero = prop.get("numero") or ""
@@ -428,7 +535,6 @@ def escanear_eventos(
             if autoria_flag:
                 proposicoes_autoria.add(texto_completo)
             if has_keywords:
-                # este PL tem palavras-chave
                 proposicoes_keywords.add(identificacao)
                 for kw in kws_item:
                     palavras_evento.add(kw)
@@ -438,7 +544,6 @@ def escanear_eventos(
         tem_autoria = len(proposicoes_autoria) > 0
         tem_keywords = len(palavras_evento) > 0
 
-        # mapeamento exato palavra -> PL
         if pares_kw_proposicao:
             pares_ordenados = sorted(pares_kw_proposicao)
             mapa_kw_prop = "; ".join([f"{kw}||{pl}" for kw, pl in pares_ordenados])
@@ -466,7 +571,7 @@ def escanear_eventos(
                 "tem_palavras_chave": tem_keywords,
                 "palavras_chave_encontradas": "; ".join(sorted(palavras_evento)) if palavras_evento else "",
                 "proposicoes_palavras_chave": "; ".join(sorted(proposicoes_keywords)) if proposicoes_keywords else "",
-                "mapeamento_kw_proposicao": mapa_kw_prop,  # NOVO: pares exatos
+                "mapeamento_kw_proposicao": mapa_kw_prop,
                 "comissao_estrategica": is_comissao_estrategica(sigla_org, comissoes_estrategicas),
             }
             registros.append(registro)
@@ -476,10 +581,10 @@ def escanear_eventos(
         df = df.sort_values(["data", "hora", "orgao_sigla", "id_evento"])
     return df
 
+
 # ============================================================
 # INTERFACE STREAMLIT
 # ============================================================
-
 
 def main():
     st.set_page_config(
@@ -494,6 +599,7 @@ def main():
         1. **Matérias de autoria ou relatoria da Dep. Júlia Zanatta**  
         2. **Matérias de todas as comissões com termos sensíveis**  
         3. **Matérias de comissões estratégicas selecionadas**  
+        4. **Tramitação e andamento (linha do tempo) dos projetos de autoria**  
         """
     )
 
@@ -589,7 +695,6 @@ def main():
             st.error(f"Erro ao buscar eventos na API da Câmara: {e}")
             return
 
-        # Para AUTORIA: lista de proposições da deputada (uma vez, cacheada)
         ids_autoria = set()
         if buscar_autoria:
             try:
@@ -614,28 +719,30 @@ def main():
             ids_autoria_deputada=ids_autoria,
         )
 
+    # ---------------- KPIs gerais ----------------
     if df.empty:
         st.warning("Nenhum evento encontrado no período com os critérios atuais.")
-        return
+        # Ainda assim faz sentido permitir a aba 4 (autoria) se buscar_autoria estiver ligado.
+        # Então não retornamos aqui; só avisamos.
+    else:
+        total_eventos = len(df["id_evento"].unique())
+        total_autoria = df["tem_autoria_deputada"].sum()
+        total_relatoria = df["tem_relatoria_deputada"].sum()
+        total_keywords = df["tem_palavras_chave"].sum()
 
-    # ---------------- KPIs gerais ----------------
-    total_eventos = len(df["id_evento"].unique())
-    total_autoria = df["tem_autoria_deputada"].sum()
-    total_relatoria = df["tem_relatoria_deputada"].sum()
-    total_keywords = df["tem_palavras_chave"].sum()
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Eventos de comissão (intervalo)", total_eventos)
-    k2.metric("Eventos c/ AUTORIA da deputada", int(total_autoria))
-    k3.metric("Eventos c/ RELATORIA da deputada", int(total_relatoria))
-    k4.metric("Eventos com palavras-chave", int(total_keywords))
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Eventos de comissão (intervalo)", total_eventos)
+        k2.metric("Eventos c/ AUTORIA da deputada", int(total_autoria))
+        k3.metric("Eventos c/ RELATORIA da deputada", int(total_relatoria))
+        k4.metric("Eventos com palavras-chave", int(total_keywords))
 
     # ---------------- Abas ----------------
-    tab1, tab2, tab3 = st.tabs(
+    tab1, tab2, tab3, tab4 = st.tabs(
         [
             "1️⃣ Autoria/Relatoria da Deputada",
             "2️⃣ Palavras-chave em qualquer comissão",
             "3️⃣ Comissões estratégicas",
+            "4️⃣ Tramitação – Projetos de autoria",
         ]
     )
 
@@ -643,224 +750,355 @@ def main():
     with tab1:
         st.subheader("Matérias de autoria ou relatoria da Deputada")
 
-        df_jz = df[(df["tem_autoria_deputada"]) | (df["tem_relatoria_deputada"])].copy()
-        if df_jz.empty:
-            st.info("Nenhum evento com autoria ou relatoria da deputada no período.")
+        if df.empty:
+            st.info("Sem linhas no intervalo selecionado (eventos/pautas).")
         else:
-            st.caption(f"Total de linhas (evento x órgão): {len(df_jz)}")
+            df_jz = df[(df["tem_autoria_deputada"]) | (df["tem_relatoria_deputada"])].copy()
+            if df_jz.empty:
+                st.info("Nenhum evento com autoria ou relatoria da deputada no período.")
+            else:
+                st.caption(f"Total de linhas (evento x órgão): {len(df_jz)}")
 
-            df_jz_show = df_jz[
-                [
-                    "data",
-                    "hora",
-                    "orgao_id",
-                    "orgao_sigla",
-                    "orgao_nome",
-                    "id_evento",
-                    "tipo_evento",
-                    "tem_autoria_deputada",
-                    "proposicoes_autoria",
-                    "tem_relatoria_deputada",
-                    "proposicoes_relatoria",
-                    "descricao_evento",
-                ]
-            ].rename(
-                columns={
-                    "data": "Data",
-                    "hora": "Hora",
-                    "orgao_id": "ID órgão",
-                    "orgao_sigla": "Órgão (sigla)",
-                    "orgao_nome": "Órgão (nome)",
-                    "id_evento": "ID evento",
-                    "tipo_evento": "Tipo de evento",
-                    "tem_autoria_deputada": "Tem AUTORIA da deputada?",
-                    "proposicoes_autoria": "Proposições (autoria)",
-                    "tem_relatoria_deputada": "Tem RELATORIA da deputada?",
-                    "proposicoes_relatoria": "Proposições (relatoria)",
-                    "descricao_evento": "Descrição evento",
-                }
-            )
+                df_jz_show = df_jz[
+                    [
+                        "data",
+                        "hora",
+                        "orgao_id",
+                        "orgao_sigla",
+                        "orgao_nome",
+                        "id_evento",
+                        "tipo_evento",
+                        "tem_autoria_deputada",
+                        "proposicoes_autoria",
+                        "tem_relatoria_deputada",
+                        "proposicoes_relatoria",
+                        "descricao_evento",
+                    ]
+                ].rename(
+                    columns={
+                        "data": "Data",
+                        "hora": "Hora",
+                        "orgao_id": "ID órgão",
+                        "orgao_sigla": "Órgão (sigla)",
+                        "orgao_nome": "Órgão (nome)",
+                        "id_evento": "ID evento",
+                        "tipo_evento": "Tipo de evento",
+                        "tem_autoria_deputada": "Tem AUTORIA da deputada?",
+                        "proposicoes_autoria": "Proposições (autoria)",
+                        "tem_relatoria_deputada": "Tem RELATORIA da deputada?",
+                        "proposicoes_relatoria": "Proposições (relatoria)",
+                        "descricao_evento": "Descrição evento",
+                    }
+                )
 
-            # formata data dd/mm/aaaa
-            df_jz_show["Data"] = pd.to_datetime(
-                df_jz_show["Data"], errors="coerce"
-            ).dt.strftime("%d/%m/%Y")
+                df_jz_show["Data"] = pd.to_datetime(df_jz_show["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
 
-            # 1 LINHA POR PROJETO NA RELATORIA
-            df_jz_show["Proposições (relatoria)"] = df_jz_show["Proposições (relatoria)"].fillna("")
-            df_jz_show["Proposições (relatoria)"] = df_jz_show["Proposições (relatoria)"].apply(
-                lambda x: [s.strip() for s in str(x).split(";") if s.strip()] or [""]
-            )
-            df_jz_show = df_jz_show.explode("Proposições (relatoria)")
+                df_jz_show["Proposições (relatoria)"] = df_jz_show["Proposições (relatoria)"].fillna("")
+                df_jz_show["Proposições (relatoria)"] = df_jz_show["Proposições (relatoria)"].apply(
+                    lambda x: [s.strip() for s in str(x).split(";") if s.strip()] or [""]
+                )
+                df_jz_show = df_jz_show.explode("Proposições (relatoria)")
 
-            st.dataframe(df_jz_show, use_container_width=True, hide_index=True)
+                st.dataframe(df_jz_show, use_container_width=True, hide_index=True)
 
-            csv_jz = df_jz_show.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "⬇️ Baixar CSV – Autoria/Relatoria",
-                data=csv_jz,
-                file_name=f"monitor_autoria_relatoria_{dt_inicio}_{dt_fim}.csv",
-                mime="text/csv",
-            )
+                csv_jz = df_jz_show.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "⬇️ Baixar CSV – Autoria/Relatoria",
+                    data=csv_jz,
+                    file_name=f"monitor_autoria_relatoria_{dt_inicio}_{dt_fim}.csv",
+                    mime="text/csv",
+                )
 
     # --------- TAB 2: Palavras-chave ---------
     with tab2:
         st.subheader("Matérias com palavras-chave sensíveis (todas as comissões)")
 
-        df_kw = df[df["tem_palavras_chave"] == True].copy()
-
-        if df_kw.empty:
-            st.info("Nenhuma matéria com palavras-chave sensíveis encontrada no intervalo selecionado.")
+        if df.empty:
+            st.info("Sem linhas no intervalo selecionado (eventos/pautas).")
         else:
-            df_kw_show = df_kw[
-                [
-                    "data",
-                    "hora",
-                    "orgao_sigla",
-                    "orgao_nome",
-                    "id_evento",
-                    "tipo_evento",
-                    "mapeamento_kw_proposicao",
-                    "tem_autoria_deputada",
-                    "proposicoes_autoria",
-                    "tem_relatoria_deputada",
-                    "proposicoes_relatoria",
-                    "descricao_evento",
+            df_kw = df[df["tem_palavras_chave"] == True].copy()
+
+            if df_kw.empty:
+                st.info("Nenhuma matéria com palavras-chave sensíveis encontrada no intervalo selecionado.")
+            else:
+                df_kw_show = df_kw[
+                    [
+                        "data",
+                        "hora",
+                        "orgao_sigla",
+                        "orgao_nome",
+                        "id_evento",
+                        "tipo_evento",
+                        "mapeamento_kw_proposicao",
+                        "tem_autoria_deputada",
+                        "proposicoes_autoria",
+                        "tem_relatoria_deputada",
+                        "proposicoes_relatoria",
+                        "descricao_evento",
+                    ]
+                ].rename(
+                    columns={
+                        "data": "Data",
+                        "hora": "Hora",
+                        "orgao_sigla": "Órgão (sigla)",
+                        "orgao_nome": "Órgão (nome)",
+                        "id_evento": "ID evento",
+                        "tipo_evento": "Tipo de evento",
+                        "mapeamento_kw_proposicao": "MapaKWPL",
+                        "tem_autoria_deputada": "Tem AUTORIA da deputada?",
+                        "proposicoes_autoria": "Proposições (autoria)",
+                        "tem_relatoria_deputada": "Tem RELATORIA da deputada?",
+                        "proposicoes_relatoria": "Proposições (relatoria)",
+                        "descricao_evento": "Descrição evento",
+                    }
+                )
+
+                df_kw_show["Data"] = pd.to_datetime(df_kw_show["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
+
+                df_kw_show["MapaKWPL"] = df_kw_show["MapaKWPL"].fillna("").apply(
+                    lambda x: [s.strip() for s in str(x).split(";") if s.strip()] or [""]
+                )
+
+                df_kw_show = df_kw_show.explode("MapaKWPL")
+
+                def split_pair(s):
+                    parts = str(s).split("||", 1)
+                    if len(parts) == 2:
+                        return parts[0], parts[1]
+                    return "", s
+
+                df_kw_show[["Palavras-chave encontradas", "Proposições (palavras-chave)"]] = pd.DataFrame(
+                    df_kw_show["MapaKWPL"].apply(split_pair).tolist(),
+                    index=df_kw_show.index,
+                )
+
+                df_kw_show = df_kw_show.drop(columns=["MapaKWPL"])
+
+                cols_order = [
+                    "Data",
+                    "Hora",
+                    "Órgão (sigla)",
+                    "Palavras-chave encontradas",
+                    "Proposições (palavras-chave)",
+                    "Órgão (nome)",
+                    "ID evento",
+                    "Tipo de evento",
+                    "Tem AUTORIA da deputada?",
+                    "Proposições (autoria)",
+                    "Tem RELATORIA da deputada?",
+                    "Proposições (relatoria)",
+                    "Descrição evento",
                 ]
-            ].rename(
-                columns={
-                    "data": "Data",
-                    "hora": "Hora",
-                    "orgao_sigla": "Órgão (sigla)",
-                    "orgao_nome": "Órgão (nome)",
-                    "id_evento": "ID evento",
-                    "tipo_evento": "Tipo de evento",
-                    "mapeamento_kw_proposicao": "MapaKWPL",
-                    "tem_autoria_deputada": "Tem AUTORIA da deputada?",
-                    "proposicoes_autoria": "Proposições (autoria)",
-                    "tem_relatoria_deputada": "Tem RELATORIA da deputada?",
-                    "proposicoes_relatoria": "Proposições (relatoria)",
-                    "descricao_evento": "Descrição evento",
-                }
-            )
+                df_kw_show = df_kw_show[cols_order]
 
-            # formata data dd/mm/aaaa
-            df_kw_show["Data"] = pd.to_datetime(
-                df_kw_show["Data"], errors="coerce"
-            ).dt.strftime("%d/%m/%Y")
+                st.dataframe(df_kw_show, use_container_width=True, hide_index=True)
 
-            # MapaKWPL = "palavra||PL 1234/2024; outra||PL 5678/2025"
-            df_kw_show["MapaKWPL"] = df_kw_show["MapaKWPL"].fillna("").apply(
-                lambda x: [s.strip() for s in str(x).split(";") if s.strip()] or [""]
-            )
-
-            df_kw_show = df_kw_show.explode("MapaKWPL")
-
-            def split_pair(s):
-                parts = str(s).split("||", 1)
-                if len(parts) == 2:
-                    return parts[0], parts[1]
-                return "", s
-
-            df_kw_show[["Palavras-chave encontradas", "Proposições (palavras-chave)"]] = pd.DataFrame(
-                df_kw_show["MapaKWPL"].apply(split_pair).tolist(),
-                index=df_kw_show.index,
-            )
-
-            df_kw_show = df_kw_show.drop(columns=["MapaKWPL"])
-
-            # reordena colunas: Data, Hora, Órgão (sigla), Palavra, PL, resto
-            cols_order = [
-                "Data",
-                "Hora",
-                "Órgão (sigla)",
-                "Palavras-chave encontradas",
-                "Proposições (palavras-chave)",
-                "Órgão (nome)",
-                "ID evento",
-                "Tipo de evento",
-                "Tem AUTORIA da deputada?",
-                "Proposições (autoria)",
-                "Tem RELATORIA da deputada?",
-                "Proposições (relatoria)",
-                "Descrição evento",
-            ]
-            df_kw_show = df_kw_show[cols_order]
-
-            st.dataframe(df_kw_show, use_container_width=True, hide_index=True)
-
-            csv_kw = df_kw_show.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "⬇️ Baixar CSV – Palavras-chave",
-                data=csv_kw,
-                file_name=f"monitor_palavras_chave_{dt_inicio}_{dt_fim}.csv",
-                mime="text/csv",
-            )
+                csv_kw = df_kw_show.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "⬇️ Baixar CSV – Palavras-chave",
+                    data=csv_kw,
+                    file_name=f"monitor_palavras_chave_{dt_inicio}_{dt_fim}.csv",
+                    mime="text/csv",
+                )
 
     # --------- TAB 3: Comissões estratégicas ---------
     with tab3:
         st.subheader("Matérias das comissões estratégicas")
 
-        df_com = df[df["comissao_estrategica"]].copy()
-        if df_com.empty:
-            st.info("Nenhum evento de comissão estratégica no período.")
+        if df.empty:
+            st.info("Sem linhas no intervalo selecionado (eventos/pautas).")
         else:
-            st.caption(f"Total de linhas (evento x órgão): {len(df_com)}")
+            df_com = df[df["comissao_estrategica"]].copy()
+            if df_com.empty:
+                st.info("Nenhum evento de comissão estratégica no período.")
+            else:
+                st.caption(f"Total de linhas (evento x órgão): {len(df_com)}")
 
-            df_com_show = df_com[
-                [
-                    "data",
-                    "hora",
-                    "orgao_sigla",
-                    "orgao_nome",
-                    "id_evento",
-                    "tipo_evento",
-                    "tem_autoria_deputada",
-                    "proposicoes_autoria",
-                    "tem_relatoria_deputada",
-                    "proposicoes_relatoria",
-                    "tem_palavras_chave",
-                    "palavras_chave_encontradas",
-                    "proposicoes_palavras_chave",
-                    "descricao_evento",
-                ]
-            ].rename(
-                columns={
-                    "data": "Data",
-                    "hora": "Hora",
-                    "orgao_sigla": "Órgão (sigla)",
-                    "orgao_nome": "Órgão (nome)",
-                    "id_evento": "ID evento",
-                    "tipo_evento": "Tipo de evento",
-                    "tem_autoria_deputada": "Tem AUTORIA da deputada?",
-                    "proposicoes_autoria": "Proposições (autoria)",
-                    "tem_relatoria_deputada": "Tem RELATORIA da deputada?",
-                    "proposicoes_relatoria": "Proposições (relatoria)",
-                    "tem_palavras_chave": "Tem palavras-chave?",
-                    "palavras_chave_encontradas": "Palavras-chave encontradas",
-                    "proposicoes_palavras_chave": "Proposições (palavras-chave)",
-                    "descricao_evento": "Descrição evento",
-                }
+                df_com_show = df_com[
+                    [
+                        "data",
+                        "hora",
+                        "orgao_sigla",
+                        "orgao_nome",
+                        "id_evento",
+                        "tipo_evento",
+                        "tem_autoria_deputada",
+                        "proposicoes_autoria",
+                        "tem_relatoria_deputada",
+                        "proposicoes_relatoria",
+                        "tem_palavras_chave",
+                        "palavras_chave_encontradas",
+                        "proposicoes_palavras_chave",
+                        "descricao_evento",
+                    ]
+                ].rename(
+                    columns={
+                        "data": "Data",
+                        "hora": "Hora",
+                        "orgao_sigla": "Órgão (sigla)",
+                        "orgao_nome": "Órgão (nome)",
+                        "id_evento": "ID evento",
+                        "tipo_evento": "Tipo de evento",
+                        "tem_autoria_deputada": "Tem AUTORIA da deputada?",
+                        "proposicoes_autoria": "Proposições (autoria)",
+                        "tem_relatoria_deputada": "Tem RELATORIA da deputada?",
+                        "proposicoes_relatoria": "Proposições (relatoria)",
+                        "tem_palavras_chave": "Tem palavras-chave?",
+                        "palavras_chave_encontradas": "Palavras-chave encontradas",
+                        "proposicoes_palavras_chave": "Proposições (palavras-chave)",
+                        "descricao_evento": "Descrição evento",
+                    }
+                )
+
+                df_com_show["Data"] = pd.to_datetime(df_com_show["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
+
+                st.dataframe(df_com_show, use_container_width=True, hide_index=True)
+
+                csv_com = df_com_show.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "⬇️ Baixar CSV – Comissões estratégicas",
+                    data=csv_com,
+                    file_name=f"monitor_comissoes_estrategicas_{dt_inicio}_{dt_fim}.csv",
+                    mime="text/csv",
+                )
+
+    # --------- TAB 4: Tramitação – Projetos de autoria ---------
+    with tab4:
+        st.subheader("Tramitação e andamento – Projetos de autoria da Deputada")
+
+        if not buscar_autoria:
+            st.warning("Ative a opção **'Verificar AUTORIA da deputada'** na barra lateral para carregar a base de projetos de autoria.")
+            return
+
+        with st.spinner("Carregando lista completa de proposições de autoria..."):
+            try:
+                df_autoria = fetch_lista_proposicoes_autoria(id_deputada)
+            except Exception as e:
+                st.error(f"Erro ao carregar lista de proposições de autoria: {e}")
+                return
+
+        if df_autoria.empty:
+            st.info("Nenhuma proposição de autoria encontrada para o ID informado.")
+            return
+
+        # ---- filtros de pesquisa ----
+        colA, colB, colC = st.columns([2.2, 1.2, 1.2])
+        with colA:
+            q = st.text_input(
+                "🔎 Pesquisar (sigla/número/ano ou termos da ementa)",
+                value="",
+                placeholder="Ex.: PL 123/2025 | 'pix' | 'vacina' | 'imposto de renda'",
+            )
+        with colB:
+            anos = sorted([a for a in df_autoria["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
+            anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos)
+        with colC:
+            tipos = sorted([t for t in df_autoria["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
+            tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos)
+
+        df_f = df_autoria.copy()
+        if anos_sel:
+            df_f = df_f[df_f["ano"].isin(anos_sel)].copy()
+        if tipos_sel:
+            df_f = df_f[df_f["siglaTipo"].isin(tipos_sel)].copy()
+
+        if q.strip():
+            qn = normalize_text(q)
+            df_f["_search"] = (
+                df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)
+            ).apply(normalize_text)
+            df_f = df_f[df_f["_search"].str.contains(qn, na=False)].copy()
+            df_f = df_f.drop(columns=["_search"], errors="ignore")
+
+        st.caption(f"Resultados: {len(df_f)} proposições")
+
+        # ---- seleção de proposição ----
+        # Para facilitar, mostramos as 300 primeiras se a lista estiver enorme
+        max_show = 300
+        df_show = df_f.head(max_show).copy()
+
+        st.dataframe(
+            df_show[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
+                columns={"ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Selectbox com rótulo amigável
+        options = df_show.apply(lambda r: f"{r['Proposicao']} — {r['ementa'][:120]}{'...' if len(r['ementa']) > 120 else ''}", axis=1).tolist()
+        ids = df_show["id"].tolist()
+
+        if not ids:
+            st.info("Nenhuma proposição para selecionar com os filtros atuais.")
+            return
+
+        idx = st.selectbox("Selecionar proposição para ver tramitação completa:", range(len(ids)), format_func=lambda i: options[i])
+        id_sel = ids[idx]
+
+        # ---- painel de status + tramitação ----
+        with st.spinner("Buscando status e tramitação..."):
+            try:
+                status = fetch_status_proposicao(id_sel)
+                df_tram = fetch_tramitacoes_proposicao(id_sel)
+            except Exception as e:
+                st.error(f"Erro ao buscar dados da proposição: {e}")
+                return
+
+        proposicao_fmt = format_sigla_num_ano(status["sigla"], status["numero"], status["ano"]) or df_show.iloc[idx]["Proposicao"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Proposição", proposicao_fmt)
+        c2.metric("Situação", status.get("status_descricaoSituacao") or "—")
+        c3.metric("Órgão atual", status.get("status_siglaOrgao") or "—")
+        last_mov = status.get("status_descricaoTramitacao") or "—"
+        c4.metric("Último andamento", (last_mov[:45] + "…") if len(last_mov) > 46 else last_mov)
+
+        if status.get("status_despacho"):
+            st.markdown("**Despacho / Observação**")
+            st.write(status["status_despacho"])
+
+        if status.get("urlInteiroTeor"):
+            st.markdown("**Inteiro teor (link na API)**")
+            st.write(status["urlInteiroTeor"])
+
+        st.markdown("### Linha do tempo (tramitações)")
+        if df_tram.empty:
+            st.info("Sem tramitações retornadas para esta proposição.")
+        else:
+            st.dataframe(
+                df_tram[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho"]].rename(
+                    columns={
+                        "siglaOrgao": "Órgão",
+                        "descricaoTramitacao": "Andamento",
+                        "despacho": "Despacho",
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True,
             )
 
-            # formata data dd/mm/aaaa
-            df_com_show["Data"] = pd.to_datetime(
-                df_com_show["Data"], errors="coerce"
-            ).dt.strftime("%d/%m/%Y")
-
-            st.dataframe(df_com_show, use_container_width=True, hide_index=True)
-
-            csv_com = df_com_show.to_csv(index=False).encode("utf-8-sig")
+            csv_tram = df_tram.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                "⬇️ Baixar CSV – Comissões estratégicas",
-                data=csv_com,
-                file_name=f"monitor_comissoes_estrategicas_{dt_inicio}_{dt_fim}.csv",
+                "⬇️ Baixar CSV – Tramitações",
+                data=csv_tram,
+                file_name=f"tramitacoes_{proposicao_fmt.replace(' ', '_').replace('/', '-')}.csv",
                 mime="text/csv",
             )
 
+        # download da base filtrada de autoria
+        st.markdown("---")
+        csv_aut = df_f.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Baixar CSV – Base filtrada (autoria)",
+            data=csv_aut,
+            file_name="proposicoes_autoria_filtradas.csv",
+            mime="text/csv",
+        )
+
     st.caption(
         "Dados: API de Dados Abertos da Câmara dos Deputados "
-        "(/eventos, /eventos/{id}/pauta, /proposicoes, /proposicoes/{id})."
+        "(/eventos, /eventos/{id}/pauta, /proposicoes, /proposicoes/{id}, /proposicoes/{id}/tramitacoes)."
     )
 
 
