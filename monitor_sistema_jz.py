@@ -21,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/3.3 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/3.4 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -29,7 +29,6 @@ PALAVRAS_CHAVE_PADRAO = [
 
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
 
-# Inclui RIC
 TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 
 
@@ -70,18 +69,29 @@ def is_comissao_estrategica(sigla_orgao, lista_siglas):
     return sigla_orgao.upper() in [s.upper() for s in lista_siglas]
 
 
+def parse_dt(iso_str: str):
+    """Parse robusto para ISO, retorna Timestamp ou NaT."""
+    return pd.to_datetime(iso_str, errors="coerce", utc=False)
+
+
 def days_since(dt: pd.Timestamp):
-    if pd.isna(dt):
+    """Diferença em dias até hoje (timezone-agnóstico)."""
+    if dt is None or pd.isna(dt):
         return None
-    return (pd.Timestamp(datetime.date.today()) - dt.normalize()).days
+    # normaliza para data local (sem tz) pra não dar bug com UTC
+    d = pd.Timestamp(dt).tz_localize(None) if getattr(dt, "tzinfo", None) else pd.Timestamp(dt)
+    today = pd.Timestamp(datetime.date.today())
+    return int((today - d.normalize()).days)
+
+
+def fmt_dt_br(dt: pd.Timestamp):
+    if dt is None or pd.isna(dt):
+        return "—"
+    d = pd.Timestamp(dt).tz_localize(None) if getattr(dt, "tzinfo", None) else pd.Timestamp(dt)
+    return d.strftime("%d/%m/%Y %H:%M")
 
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, str, str]:
-    """
-    Retorna (bytes, mime, ext).
-    Preferência: XLSX via xlsxwriter (não depende de openpyxl).
-    Se não houver engine disponível, cai para CSV (sem quebrar app).
-    """
     for engine in ["xlsxwriter", "openpyxl"]:
         try:
             output = BytesIO()
@@ -412,9 +422,6 @@ def escanear_eventos(
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_lista_proposicoes_autoria_geral(id_deputada):
-    """
-    Busca geral por autoria (idDeputadoAutor). Em alguns casos, RIC pode não aparecer aqui.
-    """
     rows = []
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "DESC", "ordenarPor": "ano"}
@@ -455,9 +462,6 @@ def fetch_lista_proposicoes_autoria_geral(id_deputada):
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_rics_por_autor(id_deputada):
-    """
-    Fallback específico para RIC: força siglaTipo=RIC para não depender do retorno geral.
-    """
     rows = []
     url = f"{BASE_URL}/proposicoes"
     params = {
@@ -502,11 +506,6 @@ def fetch_rics_por_autor(id_deputada):
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_lista_proposicoes_autoria(id_deputada):
-    """
-    Consolida:
-    - busca geral por autoria
-    - fallback de RIC
-    """
     df1 = fetch_lista_proposicoes_autoria_geral(id_deputada)
     df2 = fetch_rics_por_autor(id_deputada)
 
@@ -515,7 +514,6 @@ def fetch_lista_proposicoes_autoria(id_deputada):
 
     df = pd.concat([df1, df2], ignore_index=True)
 
-    # Normaliza Proposicao se faltar
     if "Proposicao" not in df.columns:
         df["Proposicao"] = ""
     mask = df["Proposicao"].isna() | (df["Proposicao"].astype(str).str.strip() == "")
@@ -525,10 +523,8 @@ def fetch_lista_proposicoes_autoria(id_deputada):
             axis=1
         )
 
-    # Remove duplicatas por id
     df = df.drop_duplicates(subset=["id"], keep="first")
 
-    # Seleciona colunas finais
     cols = ["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa", "uri"]
     for c in cols:
         if c not in df.columns:
@@ -623,52 +619,83 @@ def fetch_tramitacoes_proposicao(id_proposicao):
     df = pd.DataFrame(rows)
     if not df.empty:
         dt = pd.to_datetime(df["dataHora"], errors="coerce")
+        df["DataHora_dt"] = dt
         df["Data"] = dt.dt.strftime("%d/%m/%Y")
         df["Hora"] = dt.dt.strftime("%H:%M")
-        df["DataHora_dt"] = dt
         df = df[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "dataHora", "DataHora_dt"]]
     return df
 
 
-def calc_ultima_mov(df_tram: pd.DataFrame):
-    if df_tram is None or df_tram.empty:
-        return (None, None)
-    dt = df_tram.get("DataHora_dt")
-    if dt is None:
-        dt = pd.to_datetime(df_tram["dataHora"], errors="coerce")
-    dt = dt.dropna()
-    if dt.empty:
-        return (None, None)
-    last = dt.max()
-    return (last, days_since(last))
+def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
+    """
+    Fonte da 'última movimentação':
+    1) última tramitação (se houver)
+    2) dataHora do statusProposicao (fallback)
+    """
+    last = None
+
+    if df_tram is not None and not df_tram.empty:
+        dt = df_tram.get("DataHora_dt")
+        if dt is None:
+            dt = pd.to_datetime(df_tram["dataHora"], errors="coerce")
+        dt = dt.dropna()
+        if not dt.empty:
+            last = dt.max()
+
+    if (last is None or pd.isna(last)) and status_dataHora:
+        last = parse_dt(status_dataHora)
+
+    parado = days_since(last) if last is not None and not pd.isna(last) else None
+    return last, parado
 
 
-def gerar_estrategia_curta(org_sigla: str, org_nome: str, situacao: str, andamento: str, despacho: str, parado_dias):
+# ============================================================
+# ESTRATÉGIA EM TABELA
+# ============================================================
+
+def montar_estrategia_tabela(org_sigla: str, org_nome: str, situacao: str, andamento: str, despacho: str, parado_dias):
+    """
+    Estrutura em tabela, pronta pra você substituir por regras melhores depois.
+    """
     org_sigla_u = (org_sigla or "").upper()
     org_nome_u = (org_nome or "").upper()
     despacho_u = (despacho or "").upper()
 
-    if "DESPACHO" in despacho_u or "MESA" in org_sigla_u or "MESA" in org_nome_u:
-        msg = "• *Estratégia:* fase de *despacho/encaminhamento*. Ação: checar *Mesa/SGM* e confirmar *comissões designadas*."
-    elif "PLEN" in org_sigla_u or "PLENÁRIO" in org_nome_u:
-        msg = "• *Estratégia:* está no *Plenário*. Ação: mapear líderes, avaliar urgência e buscar janela de pauta."
-    elif org_sigla_u:
-        msg = f"• *Estratégia:* tramita em *{org_sigla_u}* ({org_nome}). Ação: checar relatoria/prazo e cobrar inclusão em pauta."
-    else:
-        msg = "• *Estratégia:* órgão atual não está claro. Ação: conferir despacho e última tramitação."
+    fase = "Indefinida"
+    acao = "Conferir despacho e última tramitação."
+    alerta = ""
 
-    if isinstance(parado_dias, int) and parado_dias >= 30:
-        msg += f" *Alerta:* parado há {parado_dias} dias → priorizar cobrança de andamento."
+    if "DESPACHO" in despacho_u or "MESA" in org_sigla_u or "MESA" in org_nome_u:
+        fase = "Despacho/encaminhamento"
+        acao = "Checar Mesa/SGM e confirmar comissões designadas."
+    elif "PLEN" in org_sigla_u or "PLENÁRIO" in org_nome_u:
+        fase = "Plenário"
+        acao = "Mapear líderes, avaliar urgência e buscar janela de pauta."
+    elif org_sigla_u:
+        fase = f"Comissão ({org_sigla_u})"
+        acao = "Checar relatoria/prazo e cobrar inclusão em pauta."
 
     combo = normalize_text(f"{situacao} {andamento} {despacho}")
+    sinal = []
     if "aguard" in combo and "relator" in combo:
-        msg += " Sinal: *aguarda relator* → pressionar designação."
+        sinal.append("Aguarda relator")
     if "parecer" in combo and "aguard" in combo:
-        msg += " Sinal: *aguarda parecer* → alinhar entrega."
+        sinal.append("Aguarda parecer")
     if "arquiv" in combo:
-        msg += " Sinal: *arquivamento* → checar desarquivamento/reapresentação."
+        sinal.append("Arquivamento")
 
-    return msg
+    if isinstance(parado_dias, int) and parado_dias >= 30:
+        alerta = f"Parado há {parado_dias} dias (priorizar cobrança)."
+
+    df = pd.DataFrame(
+        [
+            {"Campo": "Fase", "Valor": fase},
+            {"Campo": "Ação sugerida", "Valor": acao},
+            {"Campo": "Sinais do texto", "Valor": ", ".join(sinal) if sinal else "—"},
+            {"Campo": "Alerta", "Valor": alerta or "—"},
+        ]
+    )
+    return df
 
 
 # ============================================================
@@ -852,7 +879,6 @@ def main():
             st.info("Nenhuma proposição de autoria encontrada.")
             return
 
-        # manter só tipos de interesse
         df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
         # filtros
@@ -879,7 +905,7 @@ def main():
 
         st.caption(f"Resultados: {len(df_f)} proposições")
 
-        # tabela com LINK clicável + seleção por clique
+        # tabela com LINK clicável + seleção
         df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo", "uri"]].rename(
             columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo", "uri": "Link"}
         ).copy()
@@ -916,10 +942,11 @@ def main():
                 status = fetch_status_proposicao(selected_id)
                 orgao_atual = fetch_orgao_by_uri(status.get("status_uriOrgao") or "")
                 df_tram = fetch_tramitacoes_proposicao(selected_id)
-                last_dt, parado_dias = calc_ultima_mov(df_tram)
+
+                status_dt = parse_dt(status.get("status_dataHora") or "")
+                ultima_dt, parado_dias = calc_ultima_mov(df_tram, status.get("status_dataHora") or "")
 
             proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or ""
-
             org_sigla = status.get("status_siglaOrgao") or orgao_atual.get("sigla") or "—"
             org_nome = orgao_atual.get("nome") or "—"
             situacao = status.get("status_descricaoSituacao") or "—"
@@ -927,11 +954,13 @@ def main():
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
 
-            c1, c2, c3, c4 = st.columns(4)
+            # MÉTRICAS (com datas)
+            c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
             c1.metric("Proposição", proposicao_fmt or "—")
             c2.metric("Órgão atual (sigla)", org_sigla)
-            c3.metric("Órgão atual (nome)", org_nome if len(org_nome) <= 28 else org_nome[:28] + "…")
-            c4.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
+            c3.metric("Data do Status", fmt_dt_br(status_dt))
+            c4.metric("Última movimentação", fmt_dt_br(ultima_dt))
+            c5.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
 
             st.markdown("**Ementa**")
             st.write(ementa)
@@ -950,9 +979,9 @@ def main():
                 st.markdown("**Inteiro teor**")
                 st.write(status["urlInteiroTeor"])
 
-            st.markdown("### 🧠 Estratégia (curta)")
-            estrategia = gerar_estrategia_curta(org_sigla, org_nome, situacao, andamento, despacho, parado_dias)
-            st.text_area("Copiar/colar:", value=estrategia, height=110)
+            st.markdown("### 🧠 Estratégia (tabela)")
+            df_estr = montar_estrategia_tabela(org_sigla, org_nome, situacao, andamento, despacho, parado_dias)
+            st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             st.markdown("### 🧭 Linha do tempo (tramitações)")
             if df_tram.empty:
