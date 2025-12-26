@@ -21,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/3.4 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/3.5 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -70,15 +70,12 @@ def is_comissao_estrategica(sigla_orgao, lista_siglas):
 
 
 def parse_dt(iso_str: str):
-    """Parse robusto para ISO, retorna Timestamp ou NaT."""
     return pd.to_datetime(iso_str, errors="coerce", utc=False)
 
 
 def days_since(dt: pd.Timestamp):
-    """Diferença em dias até hoje (timezone-agnóstico)."""
     if dt is None or pd.isna(dt):
         return None
-    # normaliza para data local (sem tz) pra não dar bug com UTC
     d = pd.Timestamp(dt).tz_localize(None) if getattr(dt, "tzinfo", None) else pd.Timestamp(dt)
     today = pd.Timestamp(datetime.date.today())
     return int((today - d.normalize()).days)
@@ -627,11 +624,6 @@ def fetch_tramitacoes_proposicao(id_proposicao):
 
 
 def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
-    """
-    Fonte da 'última movimentação':
-    1) última tramitação (se houver)
-    2) dataHora do statusProposicao (fallback)
-    """
     last = None
 
     if df_tram is not None and not df_tram.empty:
@@ -654,9 +646,6 @@ def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
 # ============================================================
 
 def montar_estrategia_tabela(org_sigla: str, org_nome: str, situacao: str, andamento: str, despacho: str, parado_dias):
-    """
-    Estrutura em tabela, pronta pra você substituir por regras melhores depois.
-    """
     org_sigla_u = (org_sigla or "").upper()
     org_nome_u = (org_nome or "").upper()
     despacho_u = (despacho or "").upper()
@@ -699,8 +688,36 @@ def montar_estrategia_tabela(org_sigla: str, org_nome: str, situacao: str, andam
 
 
 # ============================================================
-# UI
+# NOVO: “CARTEIRA POR STATUS” (Situação atual)
 # ============================================================
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def build_status_map(ids: list[str]) -> dict:
+    """
+    Retorna dict {id: {...status...}} usando fetch_status_proposicao (cacheado).
+    ttl menor (30 min) porque status muda.
+    """
+    out = {}
+    for pid in ids:
+        s = fetch_status_proposicao(str(pid))
+        out[str(pid)] = {
+            "situacao": (s.get("status_descricaoSituacao") or "").strip(),
+            "andamento": (s.get("status_descricaoTramitacao") or "").strip(),
+            "status_dataHora": (s.get("status_dataHora") or "").strip(),
+            "siglaOrgao": (s.get("status_siglaOrgao") or "").strip(),
+            "uriOrgao": (s.get("status_uriOrgao") or "").strip(),
+        }
+    return out
+
+
+def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
+    df = df_base.copy()
+    df["Situação atual"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("situacao", ""))
+    df["Andamento (status)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("andamento", ""))
+    df["Data do status"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("status_dataHora", ""))
+    df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
+    return df
+
 
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
@@ -755,9 +772,6 @@ def main():
         ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Tramitação (independente) + RIC (com link)"]
     )
 
-    # -------------------------
-    # TABS 1-3 (pauta)
-    # -------------------------
     df = pd.DataFrame()
     if bt_rodar_monitor:
         if dt_inicio > dt_fim:
@@ -853,7 +867,7 @@ def main():
                 )
 
     # -------------------------
-    # TAB 4 (independente + link + RIC)
+    # TAB 4
     # -------------------------
     with tab4:
         st.subheader("Tramitação (independente) — inclui PL/PEC/PDL/PLP e RIC (com link)")
@@ -871,6 +885,7 @@ def main():
             fetch_status_proposicao.clear()
             fetch_tramitacoes_proposicao.clear()
             fetch_orgao_by_uri.clear()
+            build_status_map.clear()
 
         with st.spinner("Carregando proposições de autoria (com fallback de RIC)..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
@@ -905,7 +920,113 @@ def main():
 
         st.caption(f"Resultados: {len(df_f)} proposições")
 
-        # tabela com LINK clicável + seleção
+        # ============================================================
+        # NOVO BLOCO: Carteira por Situação atual (status)
+        # ============================================================
+        st.markdown("---")
+        st.markdown("## 📌 Carteira por Situação atual (status)")
+
+        cS1, cS2, cS3 = st.columns([1.2, 1.2, 1.6])
+        with cS1:
+            bt_status = st.button("📥 Carregar/Atualizar status da lista filtrada", type="primary")
+        with cS2:
+            max_status = st.number_input("Limite (para performance)", min_value=20, max_value=600, value=min(200, len(df_f)), step=20)
+        with cS3:
+            st.caption("Dica: use os filtros (Ano/Tipo/Busca) e depois carregue o status — fica rápido e leve.")
+
+        df_status_view = pd.DataFrame()
+        if bt_status:
+            with st.spinner("Buscando status (Situação atual) das proposições filtradas..."):
+                ids_list = df_f["id"].astype(str).head(int(max_status)).tolist()
+                status_map = build_status_map(ids_list)
+                df_status_view = enrich_with_status(df_f.head(int(max_status)), status_map)
+
+                st.session_state["status_map_last"] = status_map
+                st.session_state["df_status_last"] = df_status_view
+
+        # se já carregou antes, reutiliza
+        if "df_status_last" in st.session_state and isinstance(st.session_state["df_status_last"], pd.DataFrame):
+            df_status_view = st.session_state["df_status_last"].copy()
+
+        if df_status_view.empty:
+            st.info("Clique em **Carregar/Atualizar status** para montar a carteira por Situação atual.")
+        else:
+            # lista de status
+            status_opts = sorted([s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()])
+            default_sel = status_opts[:6] if len(status_opts) > 6 else status_opts
+
+            colF1, colF2 = st.columns([1.6, 1.0])
+            with colF1:
+                status_sel = st.multiselect("Filtrar por Situação atual", options=status_opts, default=default_sel)
+            with colF2:
+                somente_vazios = st.checkbox("Mostrar apenas Situação vazia", value=False)
+
+            df_fil = df_status_view.copy()
+            if somente_vazios:
+                df_fil = df_fil[df_fil["Situação atual"].fillna("").astype(str).str.strip() == ""].copy()
+            elif status_sel:
+                df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
+
+            # contagem por status
+            df_counts = (
+                df_status_view.assign(_s=df_status_view["Situação atual"].fillna("—").replace("", "—"))
+                .groupby("_s", as_index=False)
+                .size()
+                .rename(columns={"_s": "Situação atual", "size": "Qtde"})
+                .sort_values("Qtde", ascending=False)
+            )
+
+            cC1, cC2 = st.columns([1.0, 2.0])
+            with cC1:
+                st.markdown("**Contagem por Situação atual**")
+                st.dataframe(df_counts, use_container_width=True, hide_index=True)
+
+                bytes_out, mime, ext = to_xlsx_bytes(df_counts, "Contagem_Status")
+                st.download_button(
+                    f"⬇️ Baixar contagem ({ext.upper()})",
+                    data=bytes_out,
+                    file_name=f"contagem_situacao_atual.{ext}",
+                    mime=mime,
+                )
+
+            with cC2:
+                st.markdown("**Lista filtrada (com Link)**")
+                df_tbl_status = df_fil[["Proposicao", "siglaTipo", "ano", "Situação atual", "Órgão (sigla)", "Data do status", "id", "uri", "ementa"]].rename(
+                    columns={
+                        "Proposicao": "Proposição",
+                        "siglaTipo": "Tipo",
+                        "uri": "Link",
+                        "ementa": "Ementa",
+                    }
+                ).copy()
+
+                # formata Data do status (ISO -> BR)
+                df_tbl_status["Data do status"] = df_tbl_status["Data do status"].apply(lambda x: fmt_dt_br(parse_dt(x)) if x else "—")
+
+                st.dataframe(
+                    df_tbl_status,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
+                        "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                    },
+                )
+
+                bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status, "Carteira_Status")
+                st.download_button(
+                    f"⬇️ Baixar lista ({ext.upper()})",
+                    data=bytes_out,
+                    file_name=f"carteira_situacao_atual.{ext}",
+                    mime=mime,
+                )
+
+        # ============================================================
+        # Rastreador individual (já existente)
+        # ============================================================
+        st.markdown("---")
+        st.markdown("## 🔎 Rastreador individual (clique em uma linha da tabela abaixo)")
+
         df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo", "uri"]].rename(
             columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo", "uri": "Link"}
         ).copy()
@@ -954,7 +1075,6 @@ def main():
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
 
-            # MÉTRICAS (com datas)
             c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
             c1.metric("Proposição", proposicao_fmt or "—")
             c2.metric("Órgão atual (sigla)", org_sigla)
@@ -999,7 +1119,6 @@ def main():
                     mime=mime,
                 )
 
-        # export base filtrada
         st.markdown("---")
         bytes_out, mime, ext = to_xlsx_bytes(df_f, "Base_Autoria_Filtrada")
         st.download_button(
