@@ -872,8 +872,7 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     """
     df = df_base.copy()
 
-    df["Situação atual"] = df["id"].astype(str).map(
-        lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", ""))
+    df["Situação atual"] = df["id"].astype(str).map(lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", "")))
     )
     df["Andamento (status)"] = df["id"].astype(str).map(
         lambda x: status_map.get(str(x), {}).get("andamento", "")
@@ -944,8 +943,52 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
 # UI
 # ============================================================
 
+
+def estrategia_por_situacao(situacao: str) -> list[str]:
+    """
+    Regras fixas de estratégia por Situação atual (sem depender de relator na UI).
+    """
+    s = normalize_text(situacao or "")
+    if "aguardando designacao de relator" in s or "aguardando designação de relator" in s:
+        return [
+            "Buscar entre os membros da Comissão, parlamentar parceiro."
+        ]
+    if "aguardando parecer de relator" in s or ("aguardando" in s and "parecer" in s):
+        return [
+            "Se o relator for parceiro/neutro: tentar acelerar a apresentação do parecer.",
+            "Se o relator for adversário: articular um VTS com membros parceiros da Comissão."
+        ]
+    if "pronta para pauta" in s:
+        return [
+            "Se o parecer for favorável: articular na Comissão para o parecer entrar na pauta.",
+            "Se o parecer for contrário: articular pra não entrar na pauta.",
+            "Caso entre na pauta: articular retirada de pauta; se não funcionar, articular obstrução e VTS."
+        ]
+    if "aguardando despacho do presidente da camara dos deputados" in s or ("aguardando despacho" in s and "presidente" in s and "camara" in s):
+        return [
+            "Articular com a Mesa para acelerar a tramitação."
+        ]
+    return ["—"]
+
+
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
+
+
+st.markdown("""
+<style>
+/* Fonte menor nas tabelas do mapeamento e rastreador */
+div[data-testid="stDataFrame"] * { font-size: 12px; }
+div[data-testid="stDataFrame"] td { white-space: normal !important; }
+div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
+
+/* Também aplica ao data_editor (quando Streamlit usa grid) */
+div[data-testid="stDataEditor"] * { font-size: 12px; }
+div[data-testid="stDataEditor"] td { white-space: normal !important; }
+div[data-testid="stDataEditor"] tbody tr td { line-height: 1.25em; }
+</style>
+""", unsafe_allow_html=True)
+
 
     st.markdown("""
     <style>
@@ -1323,15 +1366,12 @@ def main():
                     ["Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Data do status", "Sinal", "Parado há", "id", "LinkTramitacao", "Ementa"]
                 ]
 
-                st.dataframe(
-                    df_tbl_status,
-                    use_container_width=True,
+                st.data_editor(df_tbl_status, disabled=True, use_container_width=True,
                     hide_index=True,
                     column_config={
                         "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
                         "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-                    },
-                )
+                    },)
 
                 bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status, "Carteira_Status")
                 st.download_button(
@@ -1416,6 +1456,11 @@ def main():
 
             st.markdown("**Situação atual**")
             st.write(situacao)
+
+
+            st.markdown("**Estratégia sugerida (por status):**")
+            for item in estrategia_por_situacao(situacao):
+                st.markdown(f"- {item}")
 
             st.markdown("**Último andamento**")
             st.write(andamento)
