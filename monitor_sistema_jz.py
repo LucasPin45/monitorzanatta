@@ -21,7 +21,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/3.1 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/3.2 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -29,7 +29,8 @@ PALAVRAS_CHAVE_PADRAO = [
 
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
 
-TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV"]
+# Inclui RIC
+TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 
 
 # ============================================================
@@ -69,13 +70,6 @@ def is_comissao_estrategica(sigla_orgao, lista_siglas):
     return sigla_orgao.upper() in [s.upper() for s in lista_siglas]
 
 
-def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
-    return output.getvalue()
-
-
 def parse_dt(iso_str: str):
     return pd.to_datetime(iso_str, errors="coerce")
 
@@ -86,34 +80,53 @@ def days_since(dt: pd.Timestamp):
     return (pd.Timestamp(datetime.date.today()) - dt.normalize()).days
 
 
+def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, str, str]:
+    """
+    Retorna (bytes, mime, ext).
+    Preferência: XLSX via xlsxwriter (não precisa openpyxl).
+    Se não houver engine disponível, cai para CSV (com aviso).
+    """
+    # tenta xlsxwriter primeiro (mais comum em deploy)
+    for engine in ["xlsxwriter", "openpyxl"]:
+        try:
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine=engine) as writer:
+                df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+            return (
+                output.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsx",
+            )
+        except ModuleNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    # fallback CSV (não quebra o app)
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    return (csv_bytes, "text/csv", "csv")
+
+
 # ============================================================
 # HTTP ROBUSTO (retry/backoff)
 # ============================================================
 
 def _request_json(url: str, params=None, timeout=30, max_retries=3):
-    """
-    Faz GET e devolve JSON.
-    - 404: retorna None
-    - 429/5xx/timeouts: tenta retry curto com backoff
-    """
     params = params or {}
-    backoffs = [0.6, 1.2, 2.4]  # curto para Streamlit Cloud
+    backoffs = [0.6, 1.2, 2.4]
     last_err = None
 
     for attempt in range(max_retries):
         try:
             resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
 
-            # 404 -> não existe
             if resp.status_code == 404:
                 return None
 
-            # 429 -> rate limit: retry
             if resp.status_code == 429:
                 time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
                 continue
 
-            # 5xx -> retry
             if 500 <= resp.status_code <= 599:
                 time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
                 continue
@@ -124,16 +137,13 @@ def _request_json(url: str, params=None, timeout=30, max_retries=3):
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             last_err = e
             time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
-            continue
         except requests.exceptions.HTTPError as e:
             last_err = e
-            # outros 4xx (exceto 404/429) não adianta insistir
             break
         except Exception as e:
             last_err = e
             break
 
-    # se falhou, não derruba o app
     return {"__error__": str(last_err) if last_err else "unknown_error"}
 
 
@@ -256,12 +266,6 @@ def pauta_item_palavras_chave(item, palavras_chave_normalizadas):
         if v:
             textos.append(str(v))
 
-    prop_rel = item.get("proposicaoRelacionada_") or {}
-    for chave in ("ementa", "ementaDetalhada", "titulo"):
-        v = prop_rel.get(chave)
-        if v:
-            textos.append(str(v))
-
     texto_norm = normalize_text(" ".join(textos))
     encontradas = set()
     for kw_norm, kw_original in palavras_chave_normalizadas:
@@ -338,9 +342,7 @@ def escanear_eventos(
 
         proposicoes_relatoria = set()
         proposicoes_autoria = set()
-        proposicoes_keywords = set()
         palavras_evento = set()
-        pares_kw_proposicao = set()
 
         for item in pauta:
             kws_item = pauta_item_palavras_chave(item, palavras_chave_norm)
@@ -365,10 +367,6 @@ def escanear_eventos(
                 info = fetch_proposicao_info(id_prop)
                 identificacao = format_sigla_num_ano(info["sigla"], info["numero"], info["ano"]) or identificacao
                 ementa_prop = info["ementa"]
-            else:
-                prop = item.get("proposicao") or {}
-                identificacao = format_sigla_num_ano(prop.get("siglaTipo"), prop.get("numero"), prop.get("ano")) or identificacao
-                ementa_prop = prop.get("ementa") or ""
 
             texto_completo = f"{identificacao} — {ementa_prop}" if ementa_prop else identificacao
 
@@ -377,15 +375,11 @@ def escanear_eventos(
             if autoria_flag:
                 proposicoes_autoria.add(texto_completo)
             if has_keywords:
-                proposicoes_keywords.add(identificacao)
                 for kw in kws_item:
                     palavras_evento.add(kw)
-                    pares_kw_proposicao.add((kw, identificacao))
 
         if not (proposicoes_relatoria or proposicoes_autoria or palavras_evento):
             continue
-
-        mapa_kw_prop = "; ".join([f"{kw}||{pl}" for kw, pl in sorted(pares_kw_proposicao)]) if pares_kw_proposicao else ""
 
         for org in orgaos:
             sigla_org = org.get("siglaOrgao") or org.get("sigla") or ""
@@ -408,8 +402,6 @@ def escanear_eventos(
                     "proposicoes_autoria": "; ".join(sorted(proposicoes_autoria)),
                     "tem_palavras_chave": bool(palavras_evento),
                     "palavras_chave_encontradas": "; ".join(sorted(palavras_evento)),
-                    "proposicoes_palavras_chave": "; ".join(sorted(proposicoes_keywords)),
-                    "mapeamento_kw_proposicao": mapa_kw_prop,
                     "comissao_estrategica": is_comissao_estrategica(sigla_org, comissoes_estrategicas),
                 }
             )
@@ -480,7 +472,6 @@ def fetch_orgao_by_uri(uri_orgao: str):
 def fetch_status_proposicao(id_proposicao):
     data = safe_get(f"{BASE_URL}/proposicoes/{id_proposicao}")
     if data is None or "__error__" in data:
-        # não derruba o app
         return {
             "id": str(id_proposicao),
             "sigla": "",
@@ -494,7 +485,6 @@ def fetch_status_proposicao(id_proposicao):
             "status_descricaoTramitacao": "",
             "status_descricaoSituacao": "",
             "status_despacho": "",
-            "status_sequencia": "",
         }
 
     d = data.get("dados", {}) or {}
@@ -513,33 +503,24 @@ def fetch_status_proposicao(id_proposicao):
         "status_descricaoTramitacao": status.get("descricaoTramitacao") or "",
         "status_descricaoSituacao": status.get("descricaoSituacao") or "",
         "status_despacho": status.get("despacho") or "",
-        "status_sequencia": status.get("sequencia") or "",
     }
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_tramitacoes_proposicao(id_proposicao):
-    """
-    Endpoint mais instável (404/429/5xx). Nunca deve derrubar o app.
-    """
     rows = []
     url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
     params = {"itens": 100, "ordem": "ASC", "ordenarPor": "dataHora"}
 
     while True:
         data = safe_get(url, params=params)
-        if data is None:
-            # 404: sem tramitações / não existe
-            break
-        if "__error__" in data:
-            # falha momentânea: devolve vazio (não derruba)
+        if data is None or "__error__" in data:
             break
 
         for t in data.get("dados", []):
             rows.append(
                 {
                     "dataHora": t.get("dataHora") or "",
-                    "sequencia": t.get("sequencia") or "",
                     "siglaOrgao": t.get("siglaOrgao") or "",
                     "uriOrgao": t.get("uriOrgao") or "",
                     "descricaoTramitacao": t.get("descricaoTramitacao") or "",
@@ -552,11 +533,9 @@ def fetch_tramitacoes_proposicao(id_proposicao):
             if link.get("rel") == "next":
                 next_link = link.get("href")
                 break
-
         if not next_link:
             break
 
-        # next_link já vem completo
         url = next_link
         params = {}
 
@@ -566,7 +545,7 @@ def fetch_tramitacoes_proposicao(id_proposicao):
         df["Data"] = dt.dt.strftime("%d/%m/%Y")
         df["Hora"] = dt.dt.strftime("%H:%M")
         df["DataHora_dt"] = dt
-        df = df[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "sequencia", "uriOrgao", "dataHora", "DataHora_dt"]]
+        df = df[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "dataHora", "DataHora_dt"]]
     return df
 
 
@@ -589,34 +568,22 @@ def gerar_estrategia_curta(org_sigla: str, org_nome: str, situacao: str, andamen
     despacho_u = (despacho or "").upper()
 
     if "DESPACHO" in despacho_u or "MESA" in org_sigla_u or "MESA" in org_nome_u:
-        msg = (
-            "• *Estratégia:* fase de *despacho/encaminhamento*. "
-            "Ação: checar *Mesa/SGM* e confirmar *comissões designadas* no despacho."
-        )
+        msg = "• *Estratégia:* fase de *despacho/encaminhamento*. Ação: checar *Mesa/SGM* e confirmar *comissões designadas*."
     elif "PLEN" in org_sigla_u or "PLENÁRIO" in org_nome_u:
-        msg = (
-            "• *Estratégia:* está no *Plenário*. "
-            "Ação: mapear líderes, avaliar urgência, preparar orientação e falar com a Mesa sobre janela de pauta."
-        )
+        msg = "• *Estratégia:* está no *Plenário*. Ação: mapear líderes, avaliar urgência e buscar janela de pauta."
     elif org_sigla_u:
-        msg = (
-            f"• *Estratégia:* tramita no órgão *{org_sigla_u}* ({org_nome}). "
-            "Ação: identificar secretaria e status (relator? parecer? inclusão em pauta?) e acionar o fluxo correto."
-        )
+        msg = f"• *Estratégia:* tramita em *{org_sigla_u}* ({org_nome}). Ação: checar relatoria/prazo e cobrar inclusão em pauta."
     else:
-        msg = (
-            "• *Estratégia:* órgão atual não está claro. "
-            "Ação: conferir despacho e última tramitação para identificar onde travou."
-        )
+        msg = "• *Estratégia:* órgão atual não está claro. Ação: conferir despacho e última tramitação."
 
     if isinstance(parado_dias, int) and parado_dias >= 30:
-        msg += f" *Alerta:* parado há {parado_dias} dias → priorizar cobrança e mapa de entraves."
+        msg += f" *Alerta:* parado há {parado_dias} dias → priorizar cobrança de andamento."
 
     combo = normalize_text(f"{situacao} {andamento} {despacho}")
     if "aguard" in combo and "relator" in combo:
-        msg += " Sinal: *aguarda relator* → pressionar designação (presidência/secretaria)."
+        msg += " Sinal: *aguarda relator* → pressionar designação."
     if "parecer" in combo and "aguard" in combo:
-        msg += " Sinal: *aguarda parecer* → alinhar com relator e calendarizar entrega."
+        msg += " Sinal: *aguarda parecer* → alinhar entrega."
     if "arquiv" in combo:
         msg += " Sinal: *arquivamento* → checar desarquivamento/reapresentação."
 
@@ -648,12 +615,12 @@ def main():
 
         st.subheader("Deputada monitorada")
         alvo_nome = st.text_input("Nome", value=DEPUTADA_NOME_PADRAO)
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
             alvo_partido = st.text_input("Partido", value=DEPUTADA_PARTIDO_PADRAO)
-        with col2:
+        with c2:
             alvo_uf = st.text_input("UF", value=DEPUTADA_UF_PADRAO)
-        with col3:
+        with c3:
             id_dep_str = st.text_input("ID (Dados Abertos)", value=str(DEPUTADA_ID_PADRAO))
 
         try:
@@ -677,7 +644,7 @@ def main():
         bt_rodar_monitor = st.button("🔍 Rodar monitoramento (pauta)", type="primary")
 
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Rastreador + Carteira (Autoria)"]
+        ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Tramitação (independente) + RIC"]
     )
 
     df = pd.DataFrame()
@@ -688,10 +655,7 @@ def main():
 
         with st.spinner("Consultando eventos/pauta e analisando..."):
             eventos = fetch_eventos(dt_inicio, dt_fim)
-
-            ids_autoria = set()
-            if buscar_autoria:
-                ids_autoria = fetch_ids_autoria_deputada(id_deputada)
+            ids_autoria = fetch_ids_autoria_deputada(id_deputada) if buscar_autoria else set()
 
             df = escanear_eventos(
                 eventos=eventos,
@@ -706,7 +670,7 @@ def main():
             )
 
     with tab1:
-        st.subheader("Autoria/Relatoria na pauta (depende do monitoramento)")
+        st.subheader("Autoria/Relatoria na pauta")
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
         else:
@@ -716,22 +680,23 @@ def main():
             else:
                 view = df_jz[
                     ["data", "hora", "orgao_sigla", "orgao_nome", "id_evento", "tipo_evento",
-                     "tem_autoria_deputada", "proposicoes_autoria",
-                     "tem_relatoria_deputada", "proposicoes_relatoria", "descricao_evento"]
+                     "proposicoes_autoria", "proposicoes_relatoria", "descricao_evento"]
                 ].copy()
                 view["data"] = pd.to_datetime(view["data"], errors="coerce").dt.strftime("%d/%m/%Y")
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
-                xlsx = to_xlsx_bytes(view, "Autoria_Relatoria_Pauta")
+                data_bytes, mime, ext = to_xlsx_bytes(view, "Autoria_Relatoria_Pauta")
+                if ext != "xlsx":
+                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
-                    "⬇️ XLSX – Autoria/Relatoria (pauta)",
-                    data=xlsx,
-                    file_name=f"autoria_relatoria_pauta_{dt_inicio}_{dt_fim}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"⬇️ Baixar ({ext.upper()})",
+                    data=data_bytes,
+                    file_name=f"autoria_relatoria_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                    mime=mime,
                 )
 
     with tab2:
-        st.subheader("Palavras-chave na pauta (depende do monitoramento)")
+        st.subheader("Palavras-chave na pauta")
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
         else:
@@ -741,21 +706,23 @@ def main():
             else:
                 view = df_kw[
                     ["data", "hora", "orgao_sigla", "orgao_nome", "id_evento", "tipo_evento",
-                     "palavras_chave_encontradas", "mapeamento_kw_proposicao", "descricao_evento"]
+                     "palavras_chave_encontradas", "descricao_evento"]
                 ].copy()
                 view["data"] = pd.to_datetime(view["data"], errors="coerce").dt.strftime("%d/%m/%Y")
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
-                xlsx = to_xlsx_bytes(view, "PalavrasChave_Pauta")
+                data_bytes, mime, ext = to_xlsx_bytes(view, "PalavrasChave_Pauta")
+                if ext != "xlsx":
+                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
-                    "⬇️ XLSX – Palavras-chave (pauta)",
-                    data=xlsx,
-                    file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"⬇️ Baixar ({ext.upper()})",
+                    data=data_bytes,
+                    file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                    mime=mime,
                 )
 
     with tab3:
-        st.subheader("Comissões estratégicas (depende do monitoramento)")
+        st.subheader("Comissões estratégicas")
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
         else:
@@ -765,51 +732,52 @@ def main():
             else:
                 view = df_com[
                     ["data", "hora", "orgao_sigla", "orgao_nome", "id_evento", "tipo_evento",
-                     "tem_autoria_deputada", "proposicoes_autoria",
-                     "tem_relatoria_deputada", "proposicoes_relatoria",
-                     "tem_palavras_chave", "palavras_chave_encontradas", "descricao_evento"]
+                     "proposicoes_autoria", "proposicoes_relatoria", "palavras_chave_encontradas", "descricao_evento"]
                 ].copy()
                 view["data"] = pd.to_datetime(view["data"], errors="coerce").dt.strftime("%d/%m/%Y")
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
-                xlsx = to_xlsx_bytes(view, "ComissoesEstrategicas_Pauta")
+                data_bytes, mime, ext = to_xlsx_bytes(view, "ComissoesEstrategicas_Pauta")
+                if ext != "xlsx":
+                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
                 st.download_button(
-                    "⬇️ XLSX – Comissões estratégicas (pauta)",
-                    data=xlsx,
-                    file_name=f"comissoes_estrategicas_pauta_{dt_inicio}_{dt_fim}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"⬇️ Baixar ({ext.upper()})",
+                    data=data_bytes,
+                    file_name=f"comissoes_estrategicas_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                    mime=mime,
                 )
 
     with tab4:
-        st.subheader("Rastreador + Carteira de Projetos (Autoria) — independente da pauta")
+        st.subheader("Tramitação (independente) — inclui PL/PEC/PDL/PLP e RIC")
 
         colA, colB = st.columns([1.2, 1.8])
         with colA:
-            bt_refresh_base = st.button("🔄 Limpar cache (autoria/status)")
+            bt_refresh = st.button("🧹 Limpar cache (autoria/status/tramitação)")
         with colB:
-            st.caption("Agora endpoints instáveis (tramitações/status) NÃO derrubam o app.")
+            st.caption("Clique na linha da tabela para abrir detalhes (mais leve).")
 
-        if bt_refresh_base:
+        if bt_refresh:
             fetch_lista_proposicoes_autoria.clear()
             fetch_status_proposicao.clear()
             fetch_tramitacoes_proposicao.clear()
             fetch_orgao_by_uri.clear()
 
-        with st.spinner("Carregando base de proposições de autoria..."):
+        with st.spinner("Carregando proposições de autoria..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
         if df_aut.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
             return
 
+        # filtros
         df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
         col1, col2, col3 = st.columns([2.2, 1.1, 1.1])
         with col1:
-            q = st.text_input("🔎 Buscar por sigla/número/ano OU ementa", value="", placeholder="Ex.: PL 123/2025 | 'pix' | 'vacina'")
+            q = st.text_input("🔎 Buscar por sigla/número/ano OU ementa", value="", placeholder="Ex.: RIC 123/2025 | 'pix' | 'conanda'")
         with col2:
             anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
-            anos_sel = st.multiselect("Ano", options=anos, default=anos[:4] if len(anos) >= 4 else anos)
+            anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos)
         with col3:
             tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
             tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos)
@@ -825,171 +793,104 @@ def main():
             df_f["_search"] = (df_f["Proposicao"].fillna("").astype(str) + " " + df_f["ementa"].fillna("").astype(str)).apply(normalize_text)
             df_f = df_f[df_f["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
 
-        st.caption(f"Resultados (autoria): {len(df_f)} proposições")
+        st.caption(f"Resultados: {len(df_f)} proposições")
 
-        st.markdown("## 📌 Carteira de Projetos (mapa de onde está)")
-        colK1, colK2 = st.columns([1.2, 1.8])
-        with colK1:
-            bt_load_carteira = st.button("📥 Carregar/Atualizar carteira (status)", type="primary")
-        with colK2:
-            filtro_parado_30 = st.checkbox("Filtrar: parado > 30 dias", value=False)
+        # tabela clicável (streamlit novo)
+        df_tbl = df_f[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
+            columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+        ).copy()
 
-        carteira_key = f"carteira_{id_deputada}_{hash(tuple(df_f['id'].tolist()))}"
+        # Limita visual (leve) — detalhes só quando clicar
+        df_tbl_view = df_tbl.head(400).copy()
 
-        if bt_load_carteira:
-            ids_list = df_f["id"].tolist()
-            total = len(ids_list)
-            if total == 0:
-                st.info("Nada para carregar.")
-            else:
-                prog = st.progress(0)
-                msg = st.empty()
-                rows = []
-
-                for i, pid in enumerate(ids_list, start=1):
-                    msg.write(f"Carregando {i}/{total}… (ID {pid})")
-
-                    r = df_f[df_f["id"] == pid].iloc[0]
-                    status = fetch_status_proposicao(str(pid))
-                    org = fetch_orgao_by_uri(status.get("status_uriOrgao") or "")
-                    df_tram = fetch_tramitacoes_proposicao(str(pid))
-                    last_dt, parado_dias = calc_ultima_mov(df_tram)
-
-                    prop_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or r.get("Proposicao") or ""
-                    rows.append({
-                        "ID": str(pid),
-                        "Proposição": prop_fmt,
-                        "Tipo": r.get("siglaTipo") or status.get("sigla") or "",
-                        "Ano": r.get("ano") or status.get("ano") or "",
-                        "Ementa": status.get("ementa") or r.get("ementa") or "",
-                        "Órgão atual (sigla)": status.get("status_siglaOrgao") or org.get("sigla") or "",
-                        "Órgão atual (nome)": org.get("nome") or "",
-                        "Situação atual": status.get("status_descricaoSituacao") or "",
-                        "Último andamento": status.get("status_descricaoTramitacao") or "",
-                        "Última mov. (dataHora)": last_dt.strftime("%Y-%m-%d %H:%M") if isinstance(last_dt, pd.Timestamp) and not pd.isna(last_dt) else "",
-                        "Parado há (dias)": parado_dias if parado_dias is not None else "",
-                        "Inteiro teor": status.get("urlInteiroTeor") or "",
-                        "Despacho (status)": status.get("status_despacho") or "",
-                    })
-                    prog.progress(int(i * 100 / total))
-
-                msg.empty()
-                prog.empty()
-
-                df_carteira = pd.DataFrame(rows)
-                if not df_carteira.empty:
-                    df_carteira["_parado_sort"] = pd.to_numeric(df_carteira["Parado há (dias)"], errors="coerce").fillna(-1)
-                    df_carteira = df_carteira.sort_values(["_parado_sort", "Ano", "Tipo", "Proposição"], ascending=[False, False, True, True]).drop(columns=["_parado_sort"])
-                st.session_state[carteira_key] = df_carteira
-
-        df_carteira = st.session_state.get(carteira_key)
-        if df_carteira is None:
-            st.info("Clique em **Carregar/Atualizar carteira (status)** para montar o mapa completo.")
-        else:
-            view_c = df_carteira.copy()
-            if filtro_parado_30:
-                view_c["_p"] = pd.to_numeric(view_c["Parado há (dias)"], errors="coerce")
-                view_c = view_c[view_c["_p"].fillna(-1) > 30].drop(columns=["_p"], errors="ignore")
-
-            st.dataframe(
-                view_c[
-                    ["Proposição", "Tipo", "Ano", "Órgão atual (sigla)", "Órgão atual (nome)",
-                     "Situação atual", "Último andamento", "Última mov. (dataHora)", "Parado há (dias)", "Ementa"]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.download_button(
-                "⬇️ XLSX – Carteira de projetos",
-                data=to_xlsx_bytes(view_c, "Carteira_Projetos"),
-                file_name="carteira_projetos_autoria.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-        st.markdown("---")
-        st.markdown("## 🔎 Rastreador individual (status + tramitação + estratégia)")
-
-        df_show = df_f.head(400).copy()
-        st.dataframe(
-            df_show[["Proposicao", "ementa", "id", "ano", "siglaTipo"]].rename(
-                columns={"ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
-            ),
+        sel = st.dataframe(
+            df_tbl_view,
             use_container_width=True,
             hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
         )
 
-        ids = df_show["id"].tolist()
-        if not ids:
-            st.info("Nenhuma proposição com esses filtros.")
-            return
+        selected_id = None
+        try:
+            if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
+                row_idx = sel["selection"]["rows"][0]
+                selected_id = str(df_tbl_view.iloc[row_idx]["ID"])
+        except Exception:
+            selected_id = None
 
-        options = df_show.apply(
-            lambda r: f"{r['Proposicao']} — {r['ementa'][:120]}{'...' if len(r['ementa']) > 120 else ''}",
-            axis=1
-        ).tolist()
+        st.markdown("---")
+        st.markdown("### 📍 Detalhes (clique em uma linha acima)")
 
-        idx = st.selectbox("Selecionar proposição para rastrear:", range(len(ids)), format_func=lambda i: options[i])
-        id_sel = str(ids[idx])
+        if not selected_id:
+            st.info("Clique em uma proposição na tabela para carregar status e tramitações.")
+        else:
+            with st.spinner("Carregando status + tramitações..."):
+                status = fetch_status_proposicao(selected_id)
+                orgao_atual = fetch_orgao_by_uri(status.get("status_uriOrgao") or "")
+                df_tram = fetch_tramitacoes_proposicao(selected_id)
+                last_dt, parado_dias = calc_ultima_mov(df_tram)
 
-        with st.spinner("Buscando ONDE ESTÁ agora + tramitação..."):
-            status = fetch_status_proposicao(id_sel)
-            orgao_atual = fetch_orgao_by_uri(status.get("status_uriOrgao") or "")
-            df_tram = fetch_tramitacoes_proposicao(id_sel)
-            last_dt, parado_dias = calc_ultima_mov(df_tram)
+            proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or ""
 
-        proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or df_show.iloc[idx]["Proposicao"]
+            org_sigla = status.get("status_siglaOrgao") or orgao_atual.get("sigla") or "—"
+            org_nome = orgao_atual.get("nome") or "—"
+            situacao = status.get("status_descricaoSituacao") or "—"
+            andamento = status.get("status_descricaoTramitacao") or "—"
+            despacho = status.get("status_despacho") or ""
+            ementa = status.get("ementa") or ""
 
-        org_sigla = status.get("status_siglaOrgao") or orgao_atual.get("sigla") or "—"
-        org_nome = orgao_atual.get("nome") or "—"
-        situacao = status.get("status_descricaoSituacao") or "—"
-        andamento = status.get("status_descricaoTramitacao") or "—"
-        despacho = status.get("status_despacho") or ""
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Proposição", proposicao_fmt or "—")
+            c2.metric("Órgão atual (sigla)", org_sigla)
+            c3.metric("Órgão atual (nome)", org_nome if len(org_nome) <= 28 else org_nome[:28] + "…")
+            c4.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
 
-        st.markdown("### 📍 Onde está AGORA")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Proposição", proposicao_fmt)
-        c2.metric("Órgão atual (sigla)", org_sigla)
-        c3.metric("Órgão atual (nome)", org_nome if len(org_nome) <= 28 else org_nome[:28] + "…")
-        c4.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
+            st.markdown("**Ementa**")
+            st.write(ementa)
 
-        st.markdown("**Situação atual**")
-        st.write(situacao)
-        st.markdown("**Último andamento**")
-        st.write(andamento)
-        if despacho:
-            st.markdown("**Despacho**")
-            st.write(despacho)
+            st.markdown("**Situação atual**")
+            st.write(situacao)
 
-        if status.get("urlInteiroTeor"):
-            st.markdown("**Inteiro teor**")
-            st.write(status["urlInteiroTeor"])
+            st.markdown("**Último andamento**")
+            st.write(andamento)
 
-        st.markdown("### 🧠 Estratégia (curta)")
-        if st.button("🧩 Gerar estratégia para este projeto"):
+            if despacho:
+                st.markdown("**Despacho (chave para saber para onde foi)**")
+                st.write(despacho)
+
+            st.markdown("### 🧠 Estratégia (curta)")
             estrategia = gerar_estrategia_curta(org_sigla, org_nome, situacao, andamento, despacho, parado_dias)
             st.text_area("Copiar/colar:", value=estrategia, height=110)
 
-        st.markdown("### 🧭 Linha do tempo (tramitações)")
-        if df_tram.empty:
-            st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
-        else:
-            view_tram = df_tram[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "dataHora"]].copy()
-            view_tram = view_tram.rename(columns={"siglaOrgao": "Órgão", "descricaoTramitacao": "Andamento", "despacho": "Despacho"})
-            st.dataframe(view_tram[["Data", "Hora", "Órgão", "Andamento", "Despacho"]], use_container_width=True, hide_index=True)
+            st.markdown("### 🧭 Linha do tempo (tramitações)")
+            if df_tram.empty:
+                st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
+            else:
+                view_tram = df_tram[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho"]].copy()
+                view_tram = view_tram.rename(columns={"siglaOrgao": "Órgão", "descricaoTramitacao": "Andamento", "despacho": "Despacho"})
+                st.dataframe(view_tram, use_container_width=True, hide_index=True)
 
-            st.download_button(
-                "⬇️ XLSX – Tramitações",
-                data=to_xlsx_bytes(view_tram, "Tramitacoes"),
-                file_name=f"tramitacoes_{proposicao_fmt.replace(' ', '_').replace('/', '-')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+                bytes_out, mime, ext = to_xlsx_bytes(view_tram, "Tramitacoes")
+                if ext != "xlsx":
+                    st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
+                st.download_button(
+                    f"⬇️ Baixar tramitações ({ext.upper()})",
+                    data=bytes_out,
+                    file_name=f"tramitacoes_{selected_id}.{ext}",
+                    mime=mime,
+                )
 
+        # export base filtrada
+        st.markdown("---")
+        bytes_out, mime, ext = to_xlsx_bytes(df_f, "Base_Autoria_Filtrada")
+        if ext != "xlsx":
+            st.warning("Export XLSX indisponível no servidor. Instale `xlsxwriter` no requirements.txt. Exportando CSV por enquanto.")
         st.download_button(
-            "⬇️ XLSX – Base filtrada (autoria)",
-            data=to_xlsx_bytes(df_f, "Base_Autoria_Filtrada"),
-            file_name="proposicoes_autoria_filtradas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            f"⬇️ Baixar base filtrada ({ext.upper()})",
+            data=bytes_out,
+            file_name=f"proposicoes_autoria_filtradas.{ext}",
+            mime=mime,
         )
 
 
