@@ -213,10 +213,7 @@ def safe_get(url, params=None):
 @st.cache_data(show_spinner=False, ttl=1800)
 def fetch_proposicao_completa(id_proposicao: str) -> dict:
     """
-    FUNÇÃO CENTRAL: Busca TODAS as informações da proposição de uma vez:
-    - Dados básicos + Status
-    - TODAS as tramitações (com paginação)
-    - Relator extraído das tramitações
+    FUNÇÃO CENTRAL: Busca TODAS as informações da proposição de uma vez.
     """
     pid = str(id_proposicao).strip()
     if not pid:
@@ -239,156 +236,171 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
     }
     
     # 1. DADOS BÁSICOS + STATUS
-    data = safe_get(f"{BASE_URL}/proposicoes/{pid}")
-    if data and isinstance(data, dict) and data.get("dados"):
-        d = data.get("dados", {}) or {}
-        resultado.update({
-            "sigla": (d.get("siglaTipo") or "").strip(),
-            "numero": str(d.get("numero") or "").strip(),
-            "ano": str(d.get("ano") or "").strip(),
-            "ementa": (d.get("ementa") or "").strip(),
-            "urlInteiroTeor": d.get("urlInteiroTeor") or "",
-        })
-        
-        status = d.get("statusProposicao", {}) or {}
-        resultado.update({
-            "status_dataHora": status.get("dataHora") or "",
-            "status_siglaOrgao": status.get("siglaOrgao") or "",
-            "status_descricaoTramitacao": status.get("descricaoTramitacao") or "",
-            "status_descricaoSituacao": canonical_situacao(status.get("descricaoSituacao") or ""),
-            "status_despacho": status.get("despacho") or "",
-        })
+    try:
+        data = safe_get(f"{BASE_URL}/proposicoes/{pid}")
+        if data and isinstance(data, dict) and data.get("dados"):
+            d = data.get("dados", {}) or {}
+            resultado.update({
+                "sigla": (d.get("siglaTipo") or "").strip(),
+                "numero": str(d.get("numero") or "").strip(),
+                "ano": str(d.get("ano") or "").strip(),
+                "ementa": (d.get("ementa") or "").strip(),
+                "urlInteiroTeor": d.get("urlInteiroTeor") or "",
+            })
+            
+            status = d.get("statusProposicao", {}) or {}
+            resultado.update({
+                "status_dataHora": status.get("dataHora") or "",
+                "status_siglaOrgao": status.get("siglaOrgao") or "",
+                "status_descricaoTramitacao": status.get("descricaoTramitacao") or "",
+                "status_descricaoSituacao": canonical_situacao(status.get("descricaoSituacao") or ""),
+                "status_despacho": status.get("despacho") or "",
+            })
+    except Exception as e:
+        st.error(f"Erro ao buscar dados básicos: {e}")
     
-    # 2. TRAMITAÇÕES COMPLETAS (busca TODAS as páginas)
-    tramitacoes = []
-    url_tram = f"{BASE_URL}/proposicoes/{pid}/tramitacoes"
-    pagina = 1
-    
-    while pagina <= 15:  # Máximo 15 páginas (1500 registros)
-        params = {"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora", "pagina": pagina}
-        tram_data = safe_get(url_tram, params=params)
+    # 2. TRAMITAÇÕES COMPLETAS
+    try:
+        tramitacoes = []
+        pagina = 1
         
-        if not tram_data or "__error__" in tram_data:
-            break
+        while pagina <= 10:
+            params = {"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora", "pagina": pagina}
+            tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes", params=params)
+            
+            if not tram_data or "__error__" in tram_data:
+                break
+            
+            dados = tram_data.get("dados", [])
+            if not dados:
+                break
+            
+            tramitacoes.extend(dados)
+            
+            # Verifica próxima página
+            has_next = any(link.get("rel") == "next" for link in tram_data.get("links", []))
+            if not has_next:
+                break
+            
+            pagina += 1
         
-        dados = tram_data.get("dados", [])
-        if not dados:
-            break
+        resultado["tramitacoes"] = tramitacoes
+    except Exception as e:
+        st.error(f"Erro ao buscar tramitações: {e}")
+    
+    # 3. EXTRAI RELATOR DAS TRAMITAÇÕES
+    try:
+        relator_info = {}
+        patterns = [
+            r'Designad[oa]\s+Relator[a]?,?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
+            r'Relator[a]?:?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
+            r'Parecer\s+(?:do|da)\s+Relator[a]?,?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
+        ]
         
-        tramitacoes.extend(dados)
+        for t in resultado["tramitacoes"]:
+            despacho = t.get("despacho") or ""
+            desc = t.get("descricaoTramitacao") or ""
+            texto = f"{despacho} {desc}"
+            
+            for pattern in patterns:
+                match = re.search(pattern, texto, re.IGNORECASE)
+                if match:
+                    nome = match.group(1).strip()
+                    partido = party_norm(match.group(2).strip())
+                    uf = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else ""
+                    
+                    if nome and len(nome) > 3:
+                        relator_info = {"nome": nome, "partido": partido, "uf": uf}
+                        break
+            
+            if relator_info:
+                break
         
-        # Verifica próxima página
-        has_next = any(link.get("rel") == "next" for link in tram_data.get("links", []))
-        if not has_next:
-            break
+        # Fallback para endpoint
+        if not relator_info:
+            rel_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
+            if isinstance(rel_data, dict) and rel_data.get("dados"):
+                candidatos = rel_data.get("dados", [])
+                if candidatos:
+                    r = candidatos[0]
+                    nome = r.get("nome") or r.get("nomeRelator") or ""
+                    partido = party_norm(r.get("siglaPartido") or r.get("partido") or "")
+                    uf = r.get("siglaUf") or r.get("uf") or ""
+                    if nome:
+                        relator_info = {"nome": nome, "partido": partido, "uf": uf}
         
-        pagina += 1
+        resultado["relator"] = relator_info
+    except Exception as e:
+        st.error(f"Erro ao buscar relator: {e}")
     
-    resultado["tramitacoes"] = tramitacoes
-    
-    # 3. EXTRAI RELATOR DAS TRAMITAÇÕES (padrões regex)
-    relator_info = {}
-    
-    patterns = [
-        r'Designad[oa]\s+Relator[a]?,?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
-        r'Relator[a]?:?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
-        r'Parecer\s+(?:do|da)\s+Relator[a]?,?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
-    ]
-    
-    # Busca nas tramitações (da mais recente para a mais antiga)
-    for t in tramitacoes:
-        despacho = t.get("despacho") or ""
-        desc = t.get("descricaoTramitacao") or ""
-        texto = f"{despacho} {desc}"
-        
-        for pattern in patterns:
-            match = re.search(pattern, texto, re.IGNORECASE)
-            if match:
-                nome = match.group(1).strip()
-                partido = party_norm(match.group(2).strip())
-                uf = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else ""
-                
-                if nome and len(nome) > 3:
-                    relator_info = {"nome": nome, "partido": partido, "uf": uf}
-                    break
-        
-        if relator_info:
-            break
-    
-    # Fallback: tenta endpoints específicos
-    if not relator_info:
-        rel_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
-        if isinstance(rel_data, dict) and rel_data.get("dados"):
-            candidatos = rel_data.get("dados", [])
-            if candidatos:
-                r = candidatos[0]
-                nome = r.get("nome") or r.get("nomeRelator") or ""
-                partido = party_norm(r.get("siglaPartido") or r.get("partido") or "")
-                uf = r.get("siglaUf") or r.get("uf") or ""
-                if nome:
-                    relator_info = {"nome": nome, "partido": partido, "uf": uf}
-    
-    resultado["relator"] = relator_info
     return resultado
 
-
-# ============================================================
-# FUNÇÕES QUE USAM A BUSCA CENTRALIZADA
-# ============================================================
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def get_tramitacoes_ultimas10(id_prop):
     """Retorna as 10 últimas tramitações."""
-    dados_completos = fetch_proposicao_completa(id_prop)
-    tramitacoes = dados_completos.get("tramitacoes", [])
-    
-    if not tramitacoes:
+    try:
+        dados_completos = fetch_proposicao_completa(id_prop)
+        tramitacoes = dados_completos.get("tramitacoes", [])
+        
+        if not tramitacoes:
+            st.warning(f"Nenhuma tramitação encontrada para ID {id_prop}")
+            return pd.DataFrame()
+        
+        rows = []
+        for t in tramitacoes:
+            dh = t.get("dataHora") or ""
+            if dh:
+                rows.append({
+                    "dataHora": dh,
+                    "siglaOrgao": t.get("siglaOrgao") or "—",
+                    "descricaoTramitacao": t.get("descricaoTramitacao") or "—",
+                })
+        
+        if not rows:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(rows)
+        df['dataHora_dt'] = pd.to_datetime(df['dataHora'], errors='coerce')
+        df = df[df['dataHora_dt'].notna()].copy()
+        
+        if df.empty:
+            return pd.DataFrame()
+        
+        df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
+        df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
+        df = df.sort_values('dataHora_dt', ascending=False)
+        
+        view = pd.DataFrame({
+            "Data": df["Data"].values,
+            "Hora": df["Hora"].values,
+            "Órgão": df["siglaOrgao"].values,
+            "Tramitação": df["descricaoTramitacao"].values,
+        })
+        
+        resultado = view.head(10).reset_index(drop=True)
+        st.success(f"✅ {len(tramitacoes)} tramitações encontradas, mostrando as 10 mais recentes")
+        
+        return resultado
+    except Exception as e:
+        st.error(f"Erro em get_tramitacoes_ultimas10: {e}")
         return pd.DataFrame()
-    
-    rows = []
-    for t in tramitacoes:
-        dh = t.get("dataHora") or ""
-        if dh:
-            rows.append({
-                "dataHora": dh,
-                "siglaOrgao": t.get("siglaOrgao") or "—",
-                "descricaoTramitacao": t.get("descricaoTramitacao") or "—",
-            })
-    
-    if not rows:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(rows)
-    df['dataHora_dt'] = pd.to_datetime(df['dataHora'], errors='coerce')
-    df = df[df['dataHora_dt'].notna()].copy()
-    
-    if df.empty:
-        return pd.DataFrame()
-    
-    df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
-    df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
-    df = df.sort_values('dataHora_dt', ascending=False)
-    
-    view = pd.DataFrame({
-        "Data": df["Data"].values,
-        "Hora": df["Hora"].values,
-        "Órgão": df["siglaOrgao"].values,
-        "Tramitação": df["descricaoTramitacao"].values,
-    })
-    
-    resultado = view.head(10).reset_index(drop=True)
-    
-    if len(df) < 10:
-        st.caption(f"ℹ️ Total de tramitações encontradas: {len(df)}")
-    
-    return resultado
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def fetch_relator_atual(id_proposicao: str) -> dict:
     """Retorna relator usando a função centralizada."""
-    dados_completos = fetch_proposicao_completa(id_proposicao)
-    return dados_completos.get("relator", {})
+    try:
+        dados_completos = fetch_proposicao_completa(id_proposicao)
+        relator = dados_completos.get("relator", {})
+        if relator:
+            st.info(f"✅ Relator encontrado: {relator.get('nome', 'N/A')}")
+        else:
+            st.warning("⚠️ Relator não identificado")
+        return relator
+    except Exception as e:
+        st.error(f"Erro ao buscar relator: {e}")
+        return {}
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
