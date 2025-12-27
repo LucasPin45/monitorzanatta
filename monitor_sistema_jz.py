@@ -1505,39 +1505,40 @@ st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
 
 
             # Estratégia (tabela)
-            st.markdown("---")
-            st.markdown("### 🧠 Estratégia (tabela)")
-            df_estr = montar_estrategia_tabela(situacao, relator_alerta=alerta_relator)
-            st.dataframe(df_estr, use_container_width=True, hide_index=True)
+st.markdown("---")
+st.markdown("### 🧠 Estratégia (tabela)")
+df_estr = montar_estrategia_tabela(situacao, relator_alerta=alerta_relator)
+st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             # Linha do tempo (últimas 10)
-            st.markdown("---")
-            st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
-            if df_tram10.empty:
-                st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
-            else:
-                st.dataframe(df_tram10, use_container_width=True, hide_index=True)
+st.markdown("---")
+st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
+if df_tram10.empty:
+    st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
+else:
+    st.dataframe(df_tram10, use_container_width=True, hide_index=True)
 
-                bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
-                st.download_button(
-                    f"⬇️ Baixar linha do tempo ({ext.upper()})",
-                    data=bytes_out,
-                    file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
-                    mime=mime,
-                )
+bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
+st.download_button(
+    f"⬇️ Baixar linha do tempo ({ext.upper()})",
+    data=bytes_out,
+    file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
+    mime=mime,
+    )
 
-        st.markdown("---")
-        bytes_out, mime, ext = to_xlsx_bytes(df_tbl[show_cols_r], "Base_Rastreador_Ordenada")
-        st.download_button(
-            f"⬇️ Baixar base do rastreador ({ext.upper()})",
-            data=bytes_out,
-            file_name=f"rastreador_ordenado_por_status.{ext}",
-            mime=mime,
-        )
+st.markdown("---")
+bytes_out, mime, ext = to_xlsx_bytes(df_tbl[show_cols_r], "Base_Rastreador_Ordenada")
+st.download_button(
+    f"⬇️ Baixar base do rastreador ({ext.upper()})",
+    data=bytes_out,
+    file_name=f"rastreador_ordenado_por_status.{ext}",
+    mime=mime,
+    )
 
 
 if __name__ == "__main__":
     main()
+
 
 
 
