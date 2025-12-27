@@ -1512,12 +1512,13 @@ if selected_id:
 st.markdown("---")
 st.markdown("### 🧠 Estratégia")
 df_estr = montar_estrategia_tabela(
-    situacao, 
+    status_sel,
     relator_alerta=alerta_relator
 )
+
 st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
-            # Linha do tempo (últimas 10)
+# Linha do tempo (últimas 10)
 st.markdown("---")
 st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
 if df_tram10.empty:
@@ -1545,6 +1546,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
