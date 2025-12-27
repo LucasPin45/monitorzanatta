@@ -1033,12 +1033,29 @@ def main():
         }
         .map-small div[data-testid="stDataFrame"] * { font-size: 11px !important; }
         a { word-break: break-word; overflow-wrap: anywhere; }
+        
+        /* Destaque para tramitações recentes (15 dias) */
+        .tramitacao-recente {
+            background-color: #fff59d !important;
+            font-weight: 500;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
+    # TÍTULO COM FOTO DA DEPUTADA
+    col_foto_titulo, col_titulo = st.columns([1, 9])
+    
+    with col_foto_titulo:
+        foto_deputada_url = f"https://www.camara.leg.br/internet/deputado/bandep/{DEPUTADA_ID_PADRAO}.jpg"
+        try:
+            st.image(foto_deputada_url, width=80)
+        except:
+            st.markdown("👤")
+    
+    with col_titulo:
+        st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -1190,7 +1207,8 @@ def main():
                 )
 
     with tab4:
-        st.subheader("Tramitação - PL/PEC/PDL/PLP e RIC")
+        st.markdown("### 🔎 Rastreador Individual")
+        st.caption("Busque e acompanhe proposições de autoria da deputada")
 
         colA, colB = st.columns([1.2, 1.8])
         with colA:
@@ -1217,6 +1235,8 @@ def main():
 
         df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
+        st.markdown("#### 🗂️ Filtros de Proposições")
+        
         col2, col3 = st.columns([1.1, 1.1])
         with col2:
             anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
@@ -1232,7 +1252,7 @@ def main():
             df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
         st.markdown("---")
-        st.markdown("### 📊 Carteira por Situação Atual")
+        st.markdown("#### 📊 Carteira por Situação Atual")
 
         cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
        
@@ -1389,11 +1409,10 @@ def main():
             )
 
         st.markdown("---")
-        st.markdown("### 🔎 Rastreador Individual")
-        st.caption("Clique em uma linha da tabela abaixo para ver detalhes completos")
+        st.markdown("#### 🔍 Buscar Proposição Específica")
 
         q = st.text_input(
-            "🔍 Buscar proposição",
+            "Filtrar proposições",
             value="",
             placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'",
             help="Busque por sigla/número/ano ou palavras na ementa"
@@ -1421,6 +1440,9 @@ def main():
         
         df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
+        
+        # Marca tramitações recentes (15 dias)
+        df_tbl["_recente"] = df_rast_enriched["Parado (dias)"].apply(lambda x: x <= 15 if pd.notna(x) else False)
 
         show_cols_r = [
             "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
@@ -1431,8 +1453,16 @@ def main():
             if c not in df_tbl.columns:
                 df_tbl[c] = ""
 
+        # Aplica estilo destacando tramitações recentes
+        def highlight_recente(row):
+            if row.get("_recente", False):
+                return ['background-color: #fff59d; font-weight: 500'] * len(row)
+            return [''] * len(row)
+
+        df_display = df_tbl[show_cols_r + ["_recente"]].copy()
+        
         sel = st.dataframe(
-            df_tbl[show_cols_r],
+            df_display[show_cols_r],
             use_container_width=True,
             hide_index=True,
             on_select="rerun",
@@ -1442,6 +1472,9 @@ def main():
                 "Ementa": st.column_config.TextColumn("Ementa", width="large"),
             }
         )
+        
+        # Legenda
+        st.caption("💡 Proposições com tramitação nos últimos 15 dias aparecem destacadas em amarelo")
 
         selected_id = None
         try:
@@ -1500,6 +1533,11 @@ def main():
             ementa = status.get("ementa") or ""
 
             st.markdown("#### 🧾 Contexto")
+            
+            # Alerta de tramitação recente
+            if parado_dias is not None and parado_dias <= 15:
+                st.warning("🔔 **TRAMITAÇÃO RECENTE** - Movimentação nos últimos 15 dias!")
+            
             st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
             st.markdown(f"**Órgão:** {org_sigla}")
             st.markdown(f"**Situação atual:** {situacao}")
