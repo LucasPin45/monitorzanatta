@@ -1269,17 +1269,27 @@ if bt_status:
 
     if df_status_view.empty:
         st.info("Clique em **Carregar/Atualizar status** para preencher Situação/Órgão/Data e habilitar filtros por mês/ano.")
-    else:
-        df_fil = df_status_view.copy()
+  else:
+    df_fil = df_status_view.copy()
 
-        if status_sel:
-            df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
-        if org_sel:
-            df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
-        if ano_status_sel:
-            df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
-        if mes_status_sel:
-            df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
+    if status_sel:
+        df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
+    if org_sel:
+        df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
+    if ano_status_sel:
+        df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
+    if mes_status_sel:
+        df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
+
+    # 👉 COLE AQUI 👇
+    st.markdown("---")
+    bytes_out, mime, ext = to_xlsx_bytes(df_fil[show_cols_r], "Base_Rastreador_Ordenada")
+    st.download_button(
+        f"⬇️ Baixar base do rastreador ({ext.upper()})",
+        data=bytes_out,
+        file_name=f"rastreador_ordenado_por_status.{ext}",
+        mime=mime,
+    )
 
             df_counts = (
                 df_fil.assign(_s=df_fil["Situação atual"].fillna("—").replace("", "—"))
@@ -1542,14 +1552,3 @@ st.download_button(
     )
 
 st.markdown("---")
-
-bytes_out, mime, ext = to_xlsx_bytes(df_fil[show_cols_r], "Base_Rastreador_Ordenada")
-st.download_button(
-    f"⬇️ Baixar base do rastreador ({ext.upper()})",
-    data=bytes_out,
-    file_name=f"rastreador_ordenado_por_status.{ext}",
-    mime=mime,
-)
-
-if __name__ == "__main__":
-    main()
