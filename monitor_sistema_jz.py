@@ -1,7 +1,7 @@
 # monitor_sistema_jz.py - v12
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 2.0: Busca centralizada com tramitações completas + relator
+# VERSÃO 12: Busca centralizada com tramitações completas + relator
 # ============================================================
 
 import datetime
@@ -28,7 +28,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/2.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/12.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -977,23 +977,37 @@ def estrategia_por_situacao(situacao: str) -> list[str]:
     s = normalize_text(canonical_situacao(situacao or ""))
 
     if "aguardando designacao de relator" in s or "aguardando designação de relator" in s:
-        return ["Buscar entre os membros da Comissão, parlamentar parceiro."]
+        return ["Pressionar Presidência da Comissão para evitar relator governista; buscar nome técnico ou neutro."]
 
     if "aguardando parecer" in s:
-        return [
-            "Se o relator for parceiro/neutro: tentar acelerar a apresentação do parecer.",
-            "Se o relator for adversário: articular um VTS com membros parceiros da Comissão.",
-        ]
+        return ["Cobrar celeridade e confrontar viés ideológico; preparar voto em separado ou emenda supressiva."]
+
+    if "tramitando em conjunto" in s:
+        return ["Identificar projeto principal e expor 'jabutis'; atuar para desmembrar ou travar avanço."]
 
     if "pronta para pauta" in s:
-        return [
-            "Se o parecer for favorável: articular na Comissão para o parecer entrar na pauta.",
-            "Se o parecer for contrário: articular pra não entrar na pauta.",
-            "Caso entre na pauta: articular retirada de pauta; se não funcionar, articular obstrução e VTS.",
-        ]
+        return ["Atuar pela retirada de pauta; se não houver recuo, preparar obstrução e discurso crítico."]
+
+    if "aguardando deliberacao" in s or "aguardando deliberação" in s:
+        return ["Mapear ambiente político da comissão; usar requerimentos para ganhar tempo ou inviabilizar votação."]
+
+    if "aguardando apreciacao" in s or "aguardando apreciação" in s:
+        return ["Pressionar Presidência para não pautar; evitar avanço silencioso do governo."]
+
+    if "aguardando distribuicao" in s or "aguardando distribuição" in s:
+        return ["Atuar para impedir envio a comissão dominada pela esquerda; antecipar contenção política."]
+
+    if "aguardando designacao" in s or "aguardando designação" in s:
+        return ["Cobrar despacho e denunciar engavetamento seletivo; manter controle do rito."]
+
+    if "aguardando votacao" in s or "aguardando votação" in s:
+        return ["Fazer contagem voto a voto; acionar obstrução, destaques e narrativa contra aumento de poder do Estado."]
+
+    if "arquivada" in s:
+        return ["Mapear possibilidade de desarquivamento ou reapresentação; avaliar custo político e timing."]
 
     if "aguardando despacho" in s and "presidente" in s and "camara" in s:
-        return ["Articular com a Mesa para acelerar a tramitação."]
+        return ["Atuar junto à Mesa para evitar despacho desfavorável; antecipar reação conforme comissão designada."]
 
     return ["—"]
 
@@ -1252,7 +1266,7 @@ def main():
             df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
         st.markdown("---")
-        st.markdown("#### 📊 Filtro por matéria")
+        st.markdown("#### 📊 Filtro por Matéria")
 
         cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
        
