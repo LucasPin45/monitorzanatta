@@ -1267,26 +1267,42 @@ if bt_status:
         df_status_view = enrich_with_status(df_base.head(int(max_status)), status_map)
         st.session_state["df_status_last"] = df_status_view
 
+# =========================
+# FILTRO + RESULTADOS
+# =========================
+
 if df_status_view.empty:
-    st.info("Clique em **Carregar/Atualizar status** para preencher Situação/Órgão/Data e habilitar filtros por mês/ano.")
+    st.info(
+        "Clique em **Carregar/Atualizar status** para preencher "
+        "Situação/Órgão/Data e habilitar filtros por mês/ano."
+    )
+
 else:
+    # Base filtrável
     df_fil = df_status_view.copy()
 
     if status_sel:
         df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
+
     if org_sel:
         df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
+
     if ano_status_sel:
         df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
+
     if mes_status_sel:
         df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
 
-    # 👉 COLE AQUI 👇
+    # -------------------------
+    # DOWNLOAD BASE FILTRADA
+    # -------------------------
     st.markdown("---")
+
     bytes_out, mime, ext = to_xlsx_bytes(
         df_fil[show_cols_r],
         "Base_Rastreador_Ordenada"
     )
+
     st.download_button(
         f"⬇️ Baixar base do rastreador ({ext.upper()})",
         data=bytes_out,
@@ -1294,51 +1310,31 @@ else:
         mime=mime,
     )
 
-            df_counts = (
-                df_fil.assign(_s=df_fil["Situação atual"].fillna("—").replace("", "—"))
-                .groupby("_s", as_index=False)
-                .size()
-                .rename(columns={"_s": "Situação atual", "size": "Qtde"})
-                .sort_values("Qtde", ascending=False)
-            )
+    # -------------------------
+    # CONTAGEM POR SITUAÇÃO
+    # -------------------------
+    df_counts = (
+        df_fil.assign(
+            _s=df_fil["Situação atual"].fillna("-").replace("", "-")
+        )
+        .groupby("_s", as_index=False)
+        .size()
+        .rename(columns={"_s": "Situação atual", "size": "Qtde"})
+        .sort_values("Qtde", ascending=False)
+    )
 
-            cC1, cC2 = st.columns([1.0, 2.0])
+    cC1, cC2 = st.columns([1.0, 2.0])
 
-            with cC1:
-                st.markdown("**Contagem por Situação atual (clique = filtra / clique de novo = desmarca)**")
+    with cC1:
+        st.markdown(
+            "**Contagem por Situação atual"
+            "(clique = filtra / clique de novo = desmarca)**"
+        )
+        st.dataframe(df_counts, hide_index=True, use_container_width=True)
 
-                sel_counts = st.dataframe(
-                    df_counts,
-                    use_container_width=True,
-                    hide_index=True,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                )
-
-                # toggle
-                try:
-                    if sel_counts and isinstance(sel_counts, dict) and sel_counts.get("selection") and sel_counts["selection"].get("rows"):
-                        row_idx = sel_counts["selection"]["rows"][0]
-                        clicked_status = str(df_counts.iloc[row_idx]["Situação atual"])
-                        if clicked_status and clicked_status != "—":
-                            current = st.session_state.get("status_click_sel")
-                            st.session_state["status_click_sel"] = None if current == clicked_status else clicked_status
-                except Exception:
-                    pass
-
-                if st.session_state.get("status_click_sel"):
-                    st.caption(f"Filtro por clique ativo: **{st.session_state['status_click_sel']}**")
-
-                bytes_out, mime, ext = to_xlsx_bytes(df_counts, "Contagem_Status")
-                st.download_button(
-                    f"⬇️ Baixar contagem ({ext.upper()})",
-                    data=bytes_out,
-                    file_name=f"contagem_situacao_atual.{ext}",
-                    mime=mime,
-                )
-
-            with cC2:
-                st.markdown("**Lista filtrada (Link = Ficha de Tramitação)**")
+    with cC2:
+        st.markdown("**Lista filtrada (Link = Ficha de Tramitação)**")
+        st.dataframe(df_fil, hide_index=True, use_container_width=True)
 
                 df_tbl_status = df_fil.copy()
                 df_tbl_status["Parado há"] = df_tbl_status["Parado (dias)"].apply(
@@ -1555,4 +1551,5 @@ st.download_button(
     )
 
 st.markdown("---")
+
 
