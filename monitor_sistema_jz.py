@@ -259,32 +259,44 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
     except Exception as e:
         st.error(f"Erro ao buscar dados básicos: {e}")
     
-    # 2. TRAMITAÇÕES COMPLETAS
+    # 2. TRAMITAÇÕES - TENTATIVA 1: Com paginação
     try:
         tramitacoes = []
-        pagina = 1
         
-        while pagina <= 10:
-            params = {"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora", "pagina": pagina}
-            tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes", params=params)
+        # Primeira tentativa: busca simples SEM parâmetros de paginação
+        tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes")
+        
+        if tram_data and isinstance(tram_data, dict) and tram_data.get("dados"):
+            tramitacoes = tram_data.get("dados", [])
+            st.info(f"🔍 Método 1 (simples): {len(tramitacoes)} tramitações encontradas")
+        
+        # Se não funcionou, tenta com paginação explícita
+        if not tramitacoes:
+            pagina = 1
+            while pagina <= 10:
+                params = {"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora", "pagina": pagina}
+                tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes", params=params)
+                
+                if not tram_data or "__error__" in tram_data:
+                    break
+                
+                dados = tram_data.get("dados", [])
+                if not dados:
+                    break
+                
+                tramitacoes.extend(dados)
+                
+                has_next = any(link.get("rel") == "next" for link in tram_data.get("links", []))
+                if not has_next:
+                    break
+                
+                pagina += 1
             
-            if not tram_data or "__error__" in tram_data:
-                break
-            
-            dados = tram_data.get("dados", [])
-            if not dados:
-                break
-            
-            tramitacoes.extend(dados)
-            
-            # Verifica próxima página
-            has_next = any(link.get("rel") == "next" for link in tram_data.get("links", []))
-            if not has_next:
-                break
-            
-            pagina += 1
+            if tramitacoes:
+                st.info(f"🔍 Método 2 (paginação): {len(tramitacoes)} tramitações encontradas")
         
         resultado["tramitacoes"] = tramitacoes
+        
     except Exception as e:
         st.error(f"Erro ao buscar tramitações: {e}")
     
@@ -297,6 +309,7 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
             r'Parecer\s+(?:do|da)\s+Relator[a]?,?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
         ]
         
+        encontrou_em_tram = False
         for t in resultado["tramitacoes"]:
             despacho = t.get("despacho") or ""
             desc = t.get("descricaoTramitacao") or ""
@@ -311,6 +324,8 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                     
                     if nome and len(nome) > 3:
                         relator_info = {"nome": nome, "partido": partido, "uf": uf}
+                        encontrou_em_tram = True
+                        st.info(f"✅ Relator encontrado nas tramitações: {nome}")
                         break
             
             if relator_info:
@@ -328,8 +343,10 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                     uf = r.get("siglaUf") or r.get("uf") or ""
                     if nome:
                         relator_info = {"nome": nome, "partido": partido, "uf": uf}
+                        st.info(f"✅ Relator encontrado no endpoint /relatores: {nome}")
         
         resultado["relator"] = relator_info
+        
     except Exception as e:
         st.error(f"Erro ao buscar relator: {e}")
     
