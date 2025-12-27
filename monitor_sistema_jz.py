@@ -1501,14 +1501,20 @@ if bt_status:
             if status.get("urlInteiroTeor"):
                 st.markdown("**Inteiro teor**")
                 st.write(status["urlInteiroTeor"])
+                
+selected_id = st.session_state.get("selected_id")
 
-st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
+if selected_id:
+    st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
 
 
-            # Estratégia (tabela)
+# Estratégia (tabela)
 st.markdown("---")
-st.markdown("### 🧠 Estratégia (tabela)")
-df_estr = montar_estrategia_tabela(situacao, relator_alerta=alerta_relator)
+st.markdown("### 🧠 Estratégia")
+df_estr = montar_estrategia_tabela(
+    situacao, 
+    relator_alerta=alerta_relator
+)
 st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
             # Linha do tempo (últimas 10)
@@ -1539,6 +1545,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
