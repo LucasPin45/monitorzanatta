@@ -1224,7 +1224,7 @@ def main():
 with f1:
     status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel)
 
-bt_status = st.button("Filtrar", type='primary")
+bt_status = st.button("Filtrar", type="primary")
 
 org_opts = []
 ano_status_opts = []
@@ -1537,5 +1537,6 @@ st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
 
 if __name__ == "__main__":
     main()
+
 
 
