@@ -1106,7 +1106,7 @@ def main():
         bt_rodar_monitor = st.button("🔍 Rodar monitoramento (pauta)", type="primary")
 
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Tramitação (independente) + RIC + Carteira por Status"]
+        ["1️⃣ Autoria/Relatoria na pauta", "2️⃣ Palavras-chave na pauta", "3️⃣ Comissões estratégicas", "4️⃣ Tramitação+Filtro por matéria"]
     )
 
     df = pd.DataFrame()
@@ -1252,7 +1252,7 @@ def main():
             df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
         st.markdown("---")
-        st.markdown("#### 📊 Carteira por Situação Atual")
+        st.markdown("#### 📊 Filtro por matéria")
 
         cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
        
