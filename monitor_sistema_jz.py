@@ -645,49 +645,63 @@ def fetch_status_proposicao(id_proposicao):
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_tramitacoes_proposicao_paginado(id_proposicao):
     """
-    Paginação robusta do endpoint /tramitacoes (não assume que ordem/itens funciona sempre).
-    Retorna dataframe com Data/Hora + colunas úteis.
+    Paginação robusta do endpoint /tramitacoes.
+    Retorna dataframe com:
+      - dataHora (str)
+      - dataHora_dt (datetime)
+      - Data (dd/mm/aaaa)
+      - Hora (hh:mm)
+      - siglaOrgao
+      - uriOrgao
+      - descricaoTramitacao
+      - despacho
     """
     rows = []
     url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
-    params = {"itens": 100, "ordem": "ASC", "ordenarPor": "dataHora"}  # alguns servidores ignoram, mas ok
+    params = {"itens": 100, "ordem": "ASC", "ordenarPor": "dataHora"}
 
     while True:
         data = safe_get(url, params=params)
         if data is None or "__error__" in data:
             break
 
-        for t in data.get("dados", []):
-            rows.append(
-                {
-                    "dataHora": t.get("dataHora") or "",
-                    "siglaOrgao": t.get("siglaOrgao") or "",
-                    "uriOrgao": t.get("uriOrgao") or "",
-                    "descricaoTramitacao": t.get("descricaoTramitacao") or "",
-                    "despacho": t.get("despacho") or "",
-                }
-            )
+        dados = data.get("dados", []) or []
+        for t in dados:
+            rows.append({
+                "dataHora": t.get("dataHora") or "",
+                "siglaOrgao": t.get("siglaOrgao") or "",
+                "uriOrgao": t.get("uriOrgao") or "",
+                "descricaoTramitacao": t.get("descricaoTramitacao") or "",
+                "despacho": t.get("despacho") or "",
+            })
 
+        # pega o próximo link (paginação)
         next_link = None
-        for link in data.get("links", []):
+        for link in (data.get("links", []) or []):
             if link.get("rel") == "next":
                 next_link = link.get("href")
                 break
+
         if not next_link:
             break
 
         url = next_link
-        params = {}
+        params = {}  # next já vem completo
 
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    dt = pd.to_datetime(df["dataHora"], errors="coerce")
-    df["dataHora_dt"] = dt
-    df["Data"] = dt.dt.strftime("%d/%m/%Y")
-    df["Hora"] = dt.dt.strftime("%H:%M")
-    return df
+    # Normaliza datas
+    df["dataHora_dt"] = pd.to_datetime(df["dataHora"], errors="coerce")
+    df["Data"] = df["dataHora_dt"].dt.strftime("%d/%m/%Y")
+    df["Hora"] = df["dataHora_dt"].dt.strftime("%H:%M")
+
+    # Ordenação consistente (mais antigo → mais novo)
+    df = df.sort_values("dataHora_dt", ascending=True)
+
+    return df.reset_index(drop=True)
+
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
@@ -1175,11 +1189,10 @@ def main():
         # CARTEIRA POR STATUS + Toggle na contagem + filtros órgão/mês/ano
         # ============================================================
         st.markdown("---")
-        st.markdown("## 📌 Carteira por Situação atual (status) — filtros por órgão/mês/ano + clique (toggle)")
+        st.markdown("📌 Matérias de autoria filtradas por situação atual")
 
         cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
-        with cS1:
-            bt_status = st.button("📥 Carregar/Atualizar status da lista filtrada", type="primary")
+       
         with cS2:
             max_status = st.number_input(
                 "Limite (performance)",
@@ -1210,6 +1223,9 @@ def main():
 
         with f1:
             status_sel = st.multiselect("Situação atual", options=status_opts, default=default_status_sel)
+          
+    bt_status = st.button("📥 Filtrar", type="primary")
+
 
         org_opts = []
         ano_status_opts = []
@@ -1470,6 +1486,9 @@ def main():
             if status.get("urlInteiroTeor"):
                 st.markdown("**Inteiro teor**")
                 st.write(status["urlInteiroTeor"])
+
+st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
+
 
             # Estratégia (tabela)
             st.markdown("---")
