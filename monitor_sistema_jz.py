@@ -1228,11 +1228,11 @@ with f1:
 
 bt_status = st.button("Filtrar", type="primary")
 
+df_status_view = st.session_state.get("df_status_last", pd.DataFrame())
+
 org_opts = []
 ano_status_opts = []
 mes_status_opts = []
-
-       
 
 if not df_status_view.empty:
     org_opts = sorted(
@@ -1539,6 +1539,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
