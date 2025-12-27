@@ -1214,12 +1214,12 @@ def main():
             dynamic_status = [s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()]
         status_opts = merge_status_options(dynamic_status)
 
-        # filtros (aparecem só depois de ter status carregado)
-        f1, f2, f3, f4 = st.columns([1.6, 1.1, 1.1, 1.1])
+# filtros (aparecem só depois de ter status carregado)
+f1, f2, f3, f4 = st.columns([1.6, 1.1, 1.1, 1.1])
 
-        default_status_sel = []
-        if st.session_state.get("status_click_sel"):
-            default_status_sel = [st.session_state["status_click_sel"]]
+default_status_sel = []
+if st.session_state.get("status_click_sel"):
+    default_status_sel = [st.session_state["status_click_sel"]]
 
 with f1:
     status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel)
@@ -1537,6 +1537,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
