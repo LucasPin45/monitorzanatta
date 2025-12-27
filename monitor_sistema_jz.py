@@ -1038,7 +1038,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta (v12)")
+    st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -1190,13 +1190,13 @@ def main():
                 )
 
     with tab4:
-        st.subheader("Tramitação (independente) – inclui PL/PEC/PDL/PLP e RIC")
+        st.subheader("Tramitação - PL/PEC/PDL/PLP e RIC")
 
         colA, colB = st.columns([1.2, 1.8])
         with colA:
             bt_refresh = st.button("🧹 Limpar cache (TUDO)")
         with colB:
-            st.caption("v12: Busca centralizada otimizada")
+            st.caption("Busca centralizada otimizada")
 
         if bt_refresh:
             fetch_proposicao_completa.clear()
@@ -1232,7 +1232,7 @@ def main():
             df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
         st.markdown("---")
-        st.markdown("📌 Matérias de autoria filtradas por situação atual")
+        st.markdown("### 📊 Carteira por Situação Atual")
 
         cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
        
@@ -1389,12 +1389,14 @@ def main():
             )
 
         st.markdown("---")
-        st.markdown("## 🔎 Rastreador individual (clique em uma linha da tabela abaixo)")
+        st.markdown("### 🔎 Rastreador Individual")
+        st.caption("Clique em uma linha da tabela abaixo para ver detalhes completos")
 
         q = st.text_input(
-            "Buscar no rastreador (sigla/número/ano OU ementa)",
+            "🔍 Buscar proposição",
             value="",
-            placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'"
+            placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'",
+            help="Busque por sigla/número/ano ou palavras na ementa"
         )
 
         df_rast = df_base.copy()
@@ -1450,7 +1452,7 @@ def main():
             selected_id = None
 
         st.markdown("---")
-        st.markdown("### 📋 Detalhes (clique em uma linha acima)")
+        st.markdown("#### 📋 Detalhes da Proposição Selecionada")
 
         if not selected_id:
             st.info("Clique em uma proposição para carregar status, estratégia e linha do tempo.")
