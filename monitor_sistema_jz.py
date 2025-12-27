@@ -707,35 +707,70 @@ def get_tramitacoes_ultimas10(id_prop):
     Retorna histórico completo de tramitações com:
     Data | Hora | Órgão | Tramitação
     """
+    rows = []
     url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
+    params = {"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora"}
     
-    try:
-        data = safe_get(url, params={"ordem": "DESC", "ordenarPor": "dataHora"})
-        
-        if data and isinstance(data, dict) and data.get("dados"):
-            df = pd.DataFrame(data.get("dados", []))
+    # Busca com paginação para garantir que pega todas as tramitações
+    tentativas = 0
+    while tentativas < 3:  # Limita a 3 páginas para performance
+        try:
+            data = safe_get(url, params=params)
             
-            if not df.empty:
-                # Processa datas
-                df['dataHora_dt'] = pd.to_datetime(df['dataHora'], errors='coerce')
-                df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
-                df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
+            if not data or "__error__" in data or not data.get("dados"):
+                break
+            
+            dados = data.get("dados", [])
+            if not dados:
+                break
                 
-                # Ordena do mais recente para o mais antigo
-                df = df.sort_values('dataHora_dt', ascending=False)
-                
-                # Monta view final
-                view = pd.DataFrame({
-                    "Data": df["Data"],
-                    "Hora": df["Hora"],
-                    "Órgão": df.get("siglaOrgao", "").fillna("—"),
-                    "Tramitação": df.get("descricaoTramitacao", "").fillna("—"),
+            for t in dados:
+                rows.append({
+                    "dataHora": t.get("dataHora") or "",
+                    "siglaOrgao": t.get("siglaOrgao") or "—",
+                    "descricaoTramitacao": t.get("descricaoTramitacao") or "—",
                 })
+            
+            # Se já temos mais de 10, podemos parar
+            if len(rows) >= 10:
+                break
+            
+            # Verifica se há próxima página
+            next_link = None
+            for link in data.get("links", []):
+                if link.get("rel") == "next":
+                    next_link = link.get("href")
+                    break
+            
+            if not next_link:
+                break
                 
-                return view.head(10).reset_index(drop=True)
+            url = next_link
+            params = {}
+            tentativas += 1
+            
+        except Exception:
+            break
     
-    except Exception:
-        pass
+    # Se conseguiu dados, processa
+    if rows:
+        df = pd.DataFrame(rows)
+        df['dataHora_dt'] = pd.to_datetime(df['dataHora'], errors='coerce')
+        df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
+        df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
+        
+        # Ordena do mais recente para o mais antigo
+        df = df.sort_values('dataHora_dt', ascending=False)
+        
+        # Monta view final com as 10 primeiras
+        view = pd.DataFrame({
+            "Data": df["Data"],
+            "Hora": df["Hora"],
+            "Órgão": df["siglaOrgao"],
+            "Tramitação": df["descricaoTramitacao"],
+        })
+        
+        return view.head(10).reset_index(drop=True)
     
     # FALLBACK: usa statusProposicao se não conseguir tramitações
     status = fetch_status_proposicao(id_prop)
