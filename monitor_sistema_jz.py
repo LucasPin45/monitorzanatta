@@ -704,75 +704,68 @@ def fetch_tramitacoes_proposicao_paginado(id_proposicao):
 def get_tramitacoes_ultimas10(id_prop):
     """
     Linha do Tempo (últimas 10 movimentações).
-    Retorna histórico completo de tramitações com:
-    Data | Hora | Órgão | Tramitação
+    Busca TODAS as tramitações e retorna as 10 mais recentes.
     """
     rows = []
     url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
     params = {"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora"}
     
-    # Busca com paginação para garantir que pega todas as tramitações
-    tentativas = 0
-    while tentativas < 3:  # Limita a 3 páginas para performance
-        try:
-            data = safe_get(url, params=params)
-            
-            if not data or "__error__" in data or not data.get("dados"):
-                break
-            
-            dados = data.get("dados", [])
-            if not dados:
-                break
-                
-            for t in dados:
-                rows.append({
-                    "dataHora": t.get("dataHora") or "",
-                    "siglaOrgao": t.get("siglaOrgao") or "—",
-                    "descricaoTramitacao": t.get("descricaoTramitacao") or "—",
-                })
-            
-            # Se já temos mais de 10, podemos parar
-            if len(rows) >= 10:
-                break
-            
-            # Verifica se há próxima página
-            next_link = None
-            for link in data.get("links", []):
-                if link.get("rel") == "next":
-                    next_link = link.get("href")
-                    break
-            
-            if not next_link:
-                break
-                
-            url = next_link
-            params = {}
-            tentativas += 1
-            
-        except Exception:
-            break
+    max_paginas = 5
+    pagina_atual = 0
     
-    # Se conseguiu dados, processa
+    while pagina_atual < max_paginas:
+        data = safe_get(url, params=params)
+        
+        if not data or "__error__" in data:
+            break
+        
+        dados = data.get("dados", [])
+        if not dados:
+            break
+        
+        # Adiciona todos os registros desta página
+        for t in dados:
+            rows.append({
+                "dataHora": t.get("dataHora") or "",
+                "siglaOrgao": t.get("siglaOrgao") or "—",
+                "descricaoTramitacao": t.get("descricaoTramitacao") or "—",
+            })
+        
+        # Verifica próxima página
+        next_link = None
+        for link in data.get("links", []):
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+        
+        if not next_link:
+            break
+        
+        url = next_link
+        params = {}
+        pagina_atual += 1
+    
+    # Processa os dados coletados
     if rows:
         df = pd.DataFrame(rows)
         df['dataHora_dt'] = pd.to_datetime(df['dataHora'], errors='coerce')
-        df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
-        df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
+        df = df.dropna(subset=['dataHora_dt'])  # Remove linhas sem data válida
         
-        # Ordena do mais recente para o mais antigo
-        df = df.sort_values('dataHora_dt', ascending=False)
-        
-        # Monta view final com as 10 primeiras
-        view = pd.DataFrame({
-            "Data": df["Data"],
-            "Hora": df["Hora"],
-            "Órgão": df["siglaOrgao"],
-            "Tramitação": df["descricaoTramitacao"],
-        })
-        
-        return view.head(10).reset_index(drop=True)
+        if not df.empty:
+            df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
+            df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
+            df = df.sort_values('dataHora_dt', ascending=False)
+            
+            view = pd.DataFrame({
+                "Data": df["Data"],
+                "Hora": df["Hora"],
+                "Órgão": df["siglaOrgao"],
+                "Tramitação": df["descricaoTramitacao"],
+            })
+            
+            return view.head(10).reset_index(drop=True)
     
-    # FALLBACK: usa statusProposicao se não conseguir tramitações
+    # FALLBACK: usa statusProposicao
     status = fetch_status_proposicao(id_prop)
     if not status or not status.get("status_dataHora"):
         return pd.DataFrame()
@@ -879,7 +872,10 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
 @st.cache_data(show_spinner=False, ttl=1800)
 def fetch_relator_atual(id_proposicao: str) -> dict:
     """
-    Tenta obter relator atual/mais recente.
+    Tenta obter relator atual usando múltiplas estratégias:
+    1. Endpoint /relatores
+    2. Endpoint /relatoria  
+    3. Extração do despacho na tramitação
     Retorna: {"nome":..., "partido":..., "uf":...} ou {}.
     """
     pid = str(id_proposicao).strip()
@@ -888,48 +884,77 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
 
     candidatos = []
 
+    # ESTRATÉGIA 1: endpoint /relatores
     data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
     if isinstance(data, dict) and data.get("dados"):
         candidatos = data.get("dados") or []
 
+    # ESTRATÉGIA 2: endpoint /relatoria (fallback)
     if not candidatos:
         data2 = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatoria")
         if isinstance(data2, dict) and data2.get("dados"):
             candidatos = data2.get("dados") or []
 
-    if not candidatos:
-        return {}
+    # Se encontrou candidatos via API, processa
+    if candidatos:
+        def _pick_dt(x):
+            for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria"):
+                if x.get(k):
+                    dt = pd.to_datetime(x.get(k), errors="coerce")
+                    if pd.notna(dt):
+                        return dt
+            return pd.NaT
 
-    def _pick_dt(x):
-        for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria"):
-            if x.get(k):
-                dt = pd.to_datetime(x.get(k), errors="coerce")
-                if pd.notna(dt):
-                    return dt
-        return pd.NaT
+        dfc = pd.DataFrame(candidatos)
+        if not dfc.empty:
+            if any(k in dfc.columns for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria")):
+                dfc["_dt"] = dfc.apply(lambda r: _pick_dt(r.to_dict()), axis=1)
+                dfc = dfc.sort_values("_dt", ascending=False)
 
-    dfc = pd.DataFrame(candidatos)
-    if dfc.empty:
-        return {}
+            r = (dfc.iloc[0].to_dict() if not dfc.empty else {}) or {}
 
-    if any(k in dfc.columns for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria")):
-        dfc["_dt"] = dfc.apply(lambda r: _pick_dt(r.to_dict()), axis=1)
-        dfc = dfc.sort_values("_dt", ascending=False)
+            nome = r.get("nome") or r.get("nomeRelator") or ""
+            partido = r.get("siglaPartido") or r.get("partido") or r.get("sigla") or ""
+            uf = r.get("siglaUf") or r.get("uf") or ""
 
-    r = (dfc.iloc[0].to_dict() if not dfc.empty else {}) or {}
+            dep = r.get("deputado") or r.get("parlamentar") or {}
+            if isinstance(dep, dict):
+                nome = nome or dep.get("nome") or dep.get("nomeCivil") or ""
+                partido = partido or dep.get("siglaPartido") or dep.get("partido") or ""
+                uf = uf or dep.get("siglaUf") or dep.get("uf") or ""
 
-    nome = r.get("nome") or r.get("nomeRelator") or ""
-    partido = r.get("siglaPartido") or r.get("partido") or r.get("sigla") or ""
-    uf = r.get("siglaUf") or r.get("uf") or ""
+            partido = party_norm(partido)
+            
+            if nome:  # Se encontrou nome, retorna
+                return {"nome": str(nome).strip(), "partido": str(partido).strip(), "uf": str(uf).strip()}
 
-    dep = r.get("deputado") or r.get("parlamentar") or {}
-    if isinstance(dep, dict):
-        nome = nome or dep.get("nome") or dep.get("nomeCivil") or ""
-        partido = partido or dep.get("siglaPartido") or dep.get("partido") or ""
-        uf = uf or dep.get("siglaUf") or dep.get("uf") or ""
+    # ESTRATÉGIA 3: Extrai do despacho na tramitação
+    import re
+    
+    tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes", 
+                         params={"itens": 50, "ordem": "DESC", "ordenarPor": "dataHora"})
+    
+    if isinstance(tram_data, dict) and tram_data.get("dados"):
+        for t in tram_data.get("dados", []):
+            despacho = t.get("despacho") or ""
+            
+            # Padrão: "Designado Relator, Dep. NOME (PARTIDO-UF)"
+            match = re.search(r'Designado\s+Relator[^,]*,\s*Dep\.\s*([^(]+)\s*\(([^-]+)-([^)]+)\)', despacho, re.IGNORECASE)
+            if match:
+                nome = match.group(1).strip()
+                partido = party_norm(match.group(2).strip())
+                uf = match.group(3).strip()
+                return {"nome": nome, "partido": partido, "uf": uf}
+            
+            # Padrão alternativo: "Dep. NOME (PARTIDO-UF)"
+            match2 = re.search(r'Dep\.\s*([^(]+)\s*\(([^-]+)-([^)]+)\)', despacho, re.IGNORECASE)
+            if match2 and "relator" in despacho.lower():
+                nome = match2.group(1).strip()
+                partido = party_norm(match2.group(2).strip())
+                uf = match2.group(3).strip()
+                return {"nome": nome, "partido": partido, "uf": uf}
 
-    partido = party_norm(partido)
-    return {"nome": str(nome).strip(), "partido": str(partido).strip(), "uf": str(uf).strip()}
+    return {}
 
 
 def relator_adversario_alert(relator_info: dict) -> str:
@@ -1447,10 +1472,25 @@ def main():
         if not selected_id:
             st.info("Clique em uma proposição para carregar status, estratégia e linha do tempo.")
         else:
-            with st.spinner("Carregando status + relator (alerta) + linha do tempo..."):
+            with st.spinner("Carregando status + relator + linha do tempo..."):
                 status = fetch_status_proposicao(selected_id)
-                relator = fetch_relator_atual(selected_id)
-                alerta_relator = relator_adversario_alert(relator)
+                situacao = status.get("status_descricaoSituacao") or "—"
+                
+                # Busca relator SEMPRE que estiver em situações específicas
+                situacao_norm = normalize_text(situacao)
+                precisa_relator = (
+                    "pronta para pauta" in situacao_norm or 
+                    "pronto para pauta" in situacao_norm or
+                    "aguardando parecer" in situacao_norm
+                )
+                
+                relator = {}
+                alerta_relator = ""
+                
+                if precisa_relator:
+                    relator = fetch_relator_atual(selected_id)
+                    alerta_relator = relator_adversario_alert(relator)
+                
                 df_tram10 = get_tramitacoes_ultimas10(selected_id)
 
                 status_dt = parse_dt(status.get("status_dataHora") or "")
@@ -1458,7 +1498,6 @@ def main():
 
             proposicao_fmt = format_sigla_num_ano(status.get("sigla"), status.get("numero"), status.get("ano")) or ""
             org_sigla = status.get("status_siglaOrgao") or "—"
-            situacao = status.get("status_descricaoSituacao") or "—"
             andamento = status.get("status_descricaoTramitacao") or "—"
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
@@ -1467,16 +1506,19 @@ def main():
             st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
             st.markdown(f"**Órgão:** {org_sigla}")
             st.markdown(f"**Situação atual:** {situacao}")
+            
+            # Mostra relator se encontrado (especialmente para as situações críticas)
             if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
                 rel_txt = f"{relator.get('nome','—')}"
                 if relator.get("partido") or relator.get("uf"):
                     rel_txt += f" ({relator.get('partido','')}/{relator.get('uf','')})".replace("//", "/")
                 st.markdown(f"**Relator(a):** {rel_txt}")
-            else:
-                st.markdown("**Relator(a):** —")
-            if alerta_relator:
-                st.markdown(f"**Alerta:** {alerta_relator}")
-
+                
+                if alerta_relator:
+                    st.warning(alerta_relator)
+            elif precisa_relator:
+                st.markdown("**Relator(a):** Não identificado")
+            
             c1, c2, c3 = st.columns([1.2, 1.2, 1.2])
             c1.metric("Data do Status", fmt_dt_br(status_dt))
             c2.metric("Última mov.", fmt_dt_br(ultima_dt))
