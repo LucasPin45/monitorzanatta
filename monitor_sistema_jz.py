@@ -1221,6 +1221,8 @@ default_status_sel = []
 if st.session_state.get("status_click_sel"):
     default_status_sel = [st.session_state["status_click_sel"]]
 
+status_opts = status_opts if "status_opts" in locals() else []
+
 with f1:
     status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel)
 
@@ -1537,6 +1539,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
