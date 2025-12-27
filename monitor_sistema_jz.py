@@ -703,23 +703,41 @@ def fetch_tramitacoes_proposicao_paginado(id_proposicao):
 @st.cache_data(show_spinner=False, ttl=1800)
 def get_tramitacoes_ultimas10(id_prop):
     """
-    Linha do Tempo (últimas 10 movimentações) – formato do anexo:
+    Linha do Tempo (últimas 10 movimentações).
+    Retorna histórico completo de tramitações com:
     Data | Hora | Órgão | Tramitação
-
-    Se /tramitacoes vier vazio, faz FALLBACK usando statusProposicao.
     """
-    df = fetch_tramitacoes_proposicao_paginado(id_prop)
-
-    if df is not None and not df.empty:
-        df = df.sort_values("dataHora_dt", ascending=False)
-        view = pd.DataFrame({
-            "Data": df["Data"],
-            "Hora": df["Hora"],
-            "Órgão": df.get("siglaOrgao", ""),
-            "Tramitação": df.get("descricaoTramitacao", ""),
-        })
-        return view.head(10).reset_index(drop=True)
-
+    url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
+    
+    try:
+        data = safe_get(url, params={"ordem": "DESC", "ordenarPor": "dataHora"})
+        
+        if data and isinstance(data, dict) and data.get("dados"):
+            df = pd.DataFrame(data.get("dados", []))
+            
+            if not df.empty:
+                # Processa datas
+                df['dataHora_dt'] = pd.to_datetime(df['dataHora'], errors='coerce')
+                df['Data'] = df['dataHora_dt'].dt.strftime('%d/%m/%Y')
+                df['Hora'] = df['dataHora_dt'].dt.strftime('%H:%M')
+                
+                # Ordena do mais recente para o mais antigo
+                df = df.sort_values('dataHora_dt', ascending=False)
+                
+                # Monta view final
+                view = pd.DataFrame({
+                    "Data": df["Data"],
+                    "Hora": df["Hora"],
+                    "Órgão": df.get("siglaOrgao", "").fillna("—"),
+                    "Tramitação": df.get("descricaoTramitacao", "").fillna("—"),
+                })
+                
+                return view.head(10).reset_index(drop=True)
+    
+    except Exception:
+        pass
+    
+    # FALLBACK: usa statusProposicao se não conseguir tramitações
     status = fetch_status_proposicao(id_prop)
     if not status or not status.get("status_dataHora"):
         return pd.DataFrame()
