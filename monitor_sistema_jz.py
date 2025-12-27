@@ -1,13 +1,12 @@
 # monitor_sistema_jz.py
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# Versão estável (SEM relator) + abas + toggle + filtros por órgão/mês/ano
-# Ajustes pedidos:
-# - Removido relator (UI e lógica)
-# - Busca (texto) fica só no Rastreador individual
-# - Fonte menor na tabela do mapeamento (status/carteira)
-# - Quebra de linha/ementa completa (wrap)
-# - Regras fixas de estratégia por status (como você definiu)
+# Versão estável (baseline) + abas + toggle + filtros por órgão/mês/ano
+# Ajustes pedidos (26/12):
+# - Linha do Tempo (últimas 10 movimentações) no formato do anexo, ao clicar na matéria
+# - Estratégia em tabela, mas o "título" em linhas (contexto fora da tabela)
+# - Alerta na estratégia quando relator for PT, PV, PSB, PCdoB, PSOL, REDE: "Relator adversário"
+# - Quebra de texto em TODAS as tabelas (sem precisar passar o mouse)
 # ============================================================
 
 import datetime
@@ -33,7 +32,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559  # ajuste se necessário
 
-HEADERS = {"User-Agent": "MonitorZanatta/5.1 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/5.2 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -61,6 +60,8 @@ MESES_PT = {
     1: "Jan", 2: "Fev", 3: "Mar", 4: "Abr", 5: "Mai", 6: "Jun",
     7: "Jul", 8: "Ago", 9: "Set", 10: "Out", 11: "Nov", 12: "Dez"
 }
+
+PARTIDOS_RELATOR_ADVERSARIO = {"PT", "PV", "PSB", "PCDOB", "PSOL", "REDE"}
 
 # ============================================================
 # UTILITÁRIOS
@@ -153,7 +154,6 @@ def canonical_situacao(situacao: str) -> str:
     s = normalize_text(s_raw)
 
     if "parecer" in s:
-        # abrange: "Aguardando Parecer", "Aguardando Parecer do Relator", "Parecer do Relator" etc.
         return "Aguardando Parecer de Relator(a)"
 
     return s_raw
@@ -169,6 +169,11 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
             merged.append(s)
             seen.add(s)
     return merged
+
+
+def party_norm(sigla: str) -> str:
+    s = (sigla or "").strip().upper()
+    return "PCDOB" if s in {"PCDOB", "PC DO B", "PCD0B", "PCdOB", "PCdoB".upper()} else s
 
 
 # ============================================================
@@ -592,7 +597,7 @@ def fetch_lista_proposicoes_autoria(id_deputada):
 
 
 # ============================================================
-# STATUS / TRAMITAÇÕES (SEM RELATOR)
+# STATUS / TRAMITAÇÕES (BASE)
 # ============================================================
 
 @st.cache_data(show_spinner=False, ttl=1800)
@@ -633,46 +638,35 @@ def fetch_status_proposicao(id_proposicao):
     }
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def fetch_tramitacoes_proposicao(id_proposicao):
-    rows = []
-    url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
-    params = {"itens": 100, "ordem": "ASC", "ordenarPor": "dataHora"}
+# ============================================================
+# LINHA DO TEMPO (últimas 10 movimentações) – formato do anexo
+# (função no estilo que você mandou, mas usando safe_get/retry)
+# ============================================================
 
-    while True:
-        data = safe_get(url, params=params)
-        if data is None or "__error__" in data:
-            break
+@st.cache_data(show_spinner=False, ttl=1800)
+def get_tramitacoes(id_prop):
+    """Retorna o histórico de tramitações (ordenado DESC por dataHora)."""
+    url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
+    data = safe_get(url, params={"itens": 200, "ordem": "DESC", "ordenarPor": "dataHora"})
+    if data is None or "__error__" in data:
+        return pd.DataFrame()
 
-        for t in data.get("dados", []):
-            rows.append(
-                {
-                    "dataHora": t.get("dataHora") or "",
-                    "siglaOrgao": t.get("siglaOrgao") or "",
-                    "uriOrgao": t.get("uriOrgao") or "",
-                    "descricaoTramitacao": t.get("descricaoTramitacao") or "",
-                    "despacho": t.get("despacho") or "",
-                }
-            )
+    df = pd.DataFrame(data.get("dados", []))
+    if df.empty:
+        return df
 
-        next_link = None
-        for link in data.get("links", []):
-            if link.get("rel") == "next":
-                next_link = link.get("href")
-                break
-        if not next_link:
-            break
+    # Normaliza colunas principais do anexo
+    df["dataHora"] = pd.to_datetime(df.get("dataHora"), errors="coerce")
+    df["Data"] = df["dataHora"].dt.strftime("%d/%m/%Y")
+    df["Hora"] = df["dataHora"].dt.strftime("%H:%M")
 
-        url = next_link
-        params = {}
+    # Órgão e Tramitação (texto)
+    if "siglaOrgao" not in df.columns:
+        df["siglaOrgao"] = ""
+    if "descricaoTramitacao" not in df.columns:
+        df["descricaoTramitacao"] = ""
 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        dt = pd.to_datetime(df["dataHora"], errors="coerce")
-        df["DataHora_dt"] = dt
-        df["Data"] = dt.dt.strftime("%d/%m/%Y")
-        df["Hora"] = dt.dt.strftime("%H:%M")
-        df = df[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho", "dataHora", "DataHora_dt"]]
+    df = df.sort_values("dataHora", ascending=False)
     return df
 
 
@@ -680,10 +674,7 @@ def calc_ultima_mov(df_tram: pd.DataFrame, status_dataHora: str):
     last = None
 
     if df_tram is not None and not df_tram.empty:
-        dt = df_tram.get("DataHora_dt")
-        if dt is None:
-            dt = pd.to_datetime(df_tram["dataHora"], errors="coerce")
-        dt = dt.dropna()
+        dt = pd.to_datetime(df_tram.get("dataHora"), errors="coerce").dropna()
         if not dt.empty:
             last = dt.max()
 
@@ -756,14 +747,89 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
 
 
 # ============================================================
+# RELATOR (somente para ALERTA no detalhe)
+# ============================================================
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def fetch_relator_atual(id_proposicao: str) -> dict:
+    """
+    Tenta obter relator atual/mais recente.
+    A API pode variar; então tentamos endpoints comuns e fazemos parsing defensivo.
+    Retorna: {"nome":..., "partido":..., "uf":...} ou {}.
+    """
+    pid = str(id_proposicao).strip()
+    if not pid:
+        return {}
+
+    # 1) Tentativa: /proposicoes/{id}/relatores (muito usado em integrações)
+    data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
+    candidatos = []
+    if isinstance(data, dict) and data.get("dados"):
+        candidatos = data.get("dados") or []
+
+    # 2) Fallback: alguns retornam em /proposicoes/{id}/relatoria ou similares (se existir)
+    if not candidatos:
+        data2 = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatoria")
+        if isinstance(data2, dict) and data2.get("dados"):
+            candidatos = data2.get("dados") or []
+
+    if not candidatos:
+        return {}
+
+    # Escolha do "mais recente" por chaves comuns (dataDesignacao / dataHora / data)
+    def _pick_dt(x):
+        for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria"):
+            if x.get(k):
+                dt = pd.to_datetime(x.get(k), errors="coerce")
+                if pd.notna(dt):
+                    return dt
+        return pd.NaT
+
+    dfc = pd.DataFrame(candidatos)
+    if dfc.empty:
+        return {}
+
+    if any(k in dfc.columns for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria")):
+        dfc["_dt"] = dfc.apply(lambda r: _pick_dt(r.to_dict()), axis=1)
+        dfc = dfc.sort_values("_dt", ascending=False)
+
+    r = (dfc.iloc[0].to_dict() if not dfc.empty else {}) or {}
+
+    # Campos variáveis
+    nome = r.get("nome") or r.get("nomeRelator") or ""
+    partido = r.get("siglaPartido") or r.get("partido") or r.get("sigla") or ""
+    uf = r.get("siglaUf") or r.get("uf") or ""
+
+    # Alguns retornam objeto "deputado"
+    dep = r.get("deputado") or r.get("parlamentar") or {}
+    if isinstance(dep, dict):
+        nome = nome or dep.get("nome") or dep.get("nomeCivil") or ""
+        partido = partido or dep.get("siglaPartido") or dep.get("partido") or ""
+        uf = uf or dep.get("siglaUf") or dep.get("uf") or ""
+
+    partido = party_norm(partido)
+    return {"nome": str(nome).strip(), "partido": str(partido).strip(), "uf": str(uf).strip()}
+
+
+def relator_adversario_alert(relator_info: dict) -> str:
+    """
+    Retorna alerta se partido do relator estiver na lista adversária.
+    """
+    if not relator_info:
+        return ""
+    p = party_norm(relator_info.get("partido") or "")
+    if p and p in PARTIDOS_RELATOR_ADVERSARIO:
+        return "⚠️ Relator adversário"
+    return ""
+
+
+# ============================================================
 # ESTRATÉGIAS (REGRAS FIXAS)
 # ============================================================
 
 def estrategia_por_situacao(situacao: str) -> list[str]:
     """
     Regras fixas (como você definiu).
-    Observação: Como removemos o relator do sistema, o texto mantém as bifurcações
-    (parceiro/neutro vs adversário) como orientação para o gabinete decidir.
     """
     s = normalize_text(canonical_situacao(situacao or ""))
 
@@ -789,20 +855,19 @@ def estrategia_por_situacao(situacao: str) -> list[str]:
     return ["—"]
 
 
-def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, despacho: str, parado_dias):
-    s = canonical_situacao(situacao or "")
-    linhas = estrategia_por_situacao(s)
-    sinal = "🔴" if isinstance(parado_dias, int) and parado_dias >= 90 else ("🟠" if isinstance(parado_dias, int) and parado_dias >= 30 else "🟢")
-
-    return pd.DataFrame([{
-        "Órgão (sigla)": org_sigla or "—",
-        "Situação atual": s or "—",
-        "Sinal": sinal,
-        "Estratégia sugerida": " | ".join(linhas),
-        "Último andamento": andamento or "—",
-        "Despacho": despacho or "—",
-        "Parado há (dias)": parado_dias if isinstance(parado_dias, int) else None,
-    }])
+def montar_estrategia_tabela(situacao: str, relator_alerta: str = "") -> pd.DataFrame:
+    """
+    Estratégia em tabela (somente o essencial) — título/contexto fica em linhas fora da tabela.
+    """
+    linhas = estrategia_por_situacao(situacao)
+    rows = []
+    if relator_alerta:
+        rows.append({"Estratégia sugerida": relator_alerta})
+    for it in linhas:
+        rows.append({"Estratégia sugerida": it})
+    if not rows:
+        rows = [{"Estratégia sugerida": "—"}]
+    return pd.DataFrame(rows)
 
 
 # ============================================================
@@ -812,18 +877,29 @@ def montar_estrategia_tabela(org_sigla: str, situacao: str, andamento: str, desp
 def main():
     st.set_page_config(page_title="Monitor – Dep. Júlia Zanatta", layout="wide")
 
-    # CSS: fonte menor nas tabelas do "mapeamento" + wrap de texto (ementa completa)
+    # CSS: quebra de texto em TODAS as tabelas + fonte menor onde necessário
     st.markdown(
         """
         <style>
+        /* Força wrap em tudo que for tabela/dataframe/data_editor */
+        div[data-testid="stDataFrame"] td,
+        div[data-testid="stDataFrame"] th,
+        div[data-testid="stTable"] td,
+        div[data-testid="stTable"] th {
+            white-space: normal !important;
+            word-break: break-word !important;
+        }
+        div[data-testid="stDataFrame"] tbody tr td,
+        div[data-testid="stTable"] tbody tr td {
+            line-height: 1.25em;
+        }
+
         /* Fonte menor (mapeamento/carteira) */
         .map-small div[data-testid="stDataFrame"] * { font-size: 11px; }
-        .map-small div[data-testid="stDataFrame"] td { white-space: normal !important; }
-        .map-small div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
+        .map-small div[data-testid="stTable"] * { font-size: 11px; }
 
-        /* Wrap geral no data_editor */
-        div[data-testid="stDataFrame"] td { white-space: normal !important; }
-        div[data-testid="stDataFrame"] tbody tr td { line-height: 1.25em; }
+        /* Melhora leitura em links longos */
+        a { word-break: break-word; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -994,7 +1070,7 @@ def main():
 
         colA, colB = st.columns([1.2, 1.8])
         with colA:
-            bt_refresh = st.button("🧹 Limpar cache (autoria/status/tramitação)")
+            bt_refresh = st.button("🧹 Limpar cache (autoria/status/tramitação/relator)")
         with colB:
             st.caption("Coluna **Link** abre a **Ficha de Tramitação** (site da Câmara).")
 
@@ -1003,8 +1079,9 @@ def main():
             fetch_rics_por_autor.clear()
             fetch_lista_proposicoes_autoria.clear()
             fetch_status_proposicao.clear()
-            fetch_tramitacoes_proposicao.clear()
+            get_tramitacoes.clear()
             build_status_map.clear()
+            fetch_relator_atual.clear()
             st.session_state.pop("df_status_last", None)
             st.session_state["status_click_sel"] = None
 
@@ -1177,7 +1254,6 @@ def main():
                     if c not in df_tbl_status.columns:
                         df_tbl_status[c] = ""
 
-                # wrapper com classe para fonte menor
                 st.markdown('<div class="map-small">', unsafe_allow_html=True)
                 st.data_editor(
                     df_tbl_status[show_cols],
@@ -1250,11 +1326,14 @@ def main():
         st.markdown("### 📍 Detalhes (clique em uma linha acima)")
 
         if not selected_id:
-            st.info("Clique em uma proposição para carregar status e tramitações.")
+            st.info("Clique em uma proposição para carregar status e linha do tempo.")
         else:
-            with st.spinner("Carregando status + tramitações..."):
+            with st.spinner("Carregando status + relator (alerta) + linha do tempo..."):
                 status = fetch_status_proposicao(selected_id)
-                df_tram = fetch_tramitacoes_proposicao(selected_id)
+                relator = fetch_relator_atual(selected_id)
+                alerta_relator = relator_adversario_alert(relator)
+                df_tram = get_tramitacoes(selected_id)
+
                 status_dt = parse_dt(status.get("status_dataHora") or "")
                 ultima_dt, parado_dias = calc_ultima_mov(df_tram, status.get("status_dataHora") or "")
 
@@ -1265,25 +1344,34 @@ def main():
             despacho = status.get("status_despacho") or ""
             ementa = status.get("ementa") or ""
 
-            c1, c2, c3, c4, c5 = st.columns([1.2, 1.1, 1.2, 1.2, 1.0])
-            c1.metric("Proposição", proposicao_fmt or "—")
-            c2.metric("Órgão", org_sigla)
-            c3.metric("Data do Status", fmt_dt_br(status_dt))
-            c4.metric("Última mov.", fmt_dt_br(ultima_dt))
-            c5.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
+            # ----------------------------------------------------------
+            # "TÍTULO" EM LINHAS (contexto fora da tabela)
+            # ----------------------------------------------------------
+            st.markdown("#### 🧾 Contexto")
+            st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
+            st.markdown(f"**Órgão:** {org_sigla}")
+            st.markdown(f"**Situação atual:** {situacao}")
+            if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
+                rel_txt = f"{relator.get('nome','—')}"
+                if relator.get("partido") or relator.get("uf"):
+                    rel_txt += f" ({relator.get('partido','')}/{relator.get('uf','')})".replace("//", "/").replace("( /", "(").replace("/)", ")")
+                st.markdown(f"**Relator(a):** {rel_txt}")
+            else:
+                st.markdown("**Relator(a):** —")
+            if alerta_relator:
+                st.markdown(f"**Alerta:** {alerta_relator}")
+
+            c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.2])
+            c1.metric("Data do Status", fmt_dt_br(status_dt))
+            c2.metric("Última mov.", fmt_dt_br(ultima_dt))
+            c3.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
+            c4.metric("Link", "abrir")
 
             st.markdown("**Link da tramitação**")
             st.write(camara_link_tramitacao(selected_id))
 
             st.markdown("**Ementa**")
             st.write(ementa)
-
-            st.markdown("**Situação atual**")
-            st.write(situacao)
-
-            st.markdown("**Estratégia sugerida (por status):**")
-            for item in estrategia_por_situacao(situacao):
-                st.markdown(f"- {item}")
 
             st.markdown("**Último andamento**")
             st.write(andamento)
@@ -1296,23 +1384,36 @@ def main():
                 st.markdown("**Inteiro teor**")
                 st.write(status["urlInteiroTeor"])
 
+            # ----------------------------------------------------------
+            # ESTRATÉGIA (tabela) + alerta do relator adversário
+            # ----------------------------------------------------------
+            st.markdown("---")
             st.markdown("### 🧠 Estratégia (tabela)")
-            df_estr = montar_estrategia_tabela(org_sigla, situacao, andamento, despacho, parado_dias)
+            df_estr = montar_estrategia_tabela(situacao, relator_alerta=alerta_relator)
             st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
-            st.markdown("### 🧭 Linha do tempo (tramitações)")
+            # ----------------------------------------------------------
+            # LINHA DO TEMPO (últimas 10 movimentações) – FORMATO DO ANEXO
+            # ----------------------------------------------------------
+            st.markdown("---")
+            st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
+
             if df_tram.empty:
                 st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
             else:
-                view_tram = df_tram[["Data", "Hora", "siglaOrgao", "descricaoTramitacao", "despacho"]].copy()
-                view_tram = view_tram.rename(columns={"siglaOrgao": "Órgão", "descricaoTramitacao": "Andamento", "despacho": "Despacho"})
+                view_tram = df_tram.copy()
+                # garante colunas padrão
+                view_tram["Órgão"] = view_tram.get("siglaOrgao", "")
+                view_tram["Tramitação"] = view_tram.get("descricaoTramitacao", "")
+                view_tram = view_tram[["Data", "Hora", "Órgão", "Tramitação"]].head(10)
+
                 st.dataframe(view_tram, use_container_width=True, hide_index=True)
 
-                bytes_out, mime, ext = to_xlsx_bytes(view_tram, "Tramitacoes")
+                bytes_out, mime, ext = to_xlsx_bytes(view_tram, "LinhaDoTempo_10")
                 st.download_button(
-                    f"⬇️ Baixar tramitações ({ext.upper()})",
+                    f"⬇️ Baixar linha do tempo ({ext.upper()})",
                     data=bytes_out,
-                    file_name=f"tramitacoes_{selected_id}.{ext}",
+                    file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
                     mime=mime,
                 )
 
