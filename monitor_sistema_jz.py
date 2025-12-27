@@ -1,7 +1,7 @@
 # monitor_sistema_jz.py - v12
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 12: Busca centralizada com tramitações completas + relator
+# VERSÃO 2.0: Busca centralizada com tramitações completas + relator
 # ============================================================
 
 import datetime
@@ -28,7 +28,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/12.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/2.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -268,7 +268,6 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         
         if tram_data and isinstance(tram_data, dict) and tram_data.get("dados"):
             tramitacoes = tram_data.get("dados", [])
-            st.info(f"🔍 Método 1 (simples): {len(tramitacoes)} tramitações encontradas")
         
         # Se não funcionou, tenta com paginação explícita
         if not tramitacoes:
