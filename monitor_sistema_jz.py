@@ -309,10 +309,17 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
             r'Parecer\s+(?:do|da)\s+Relator[a]?,?\s*Dep\.\s*([^(]+?)\s*\(([A-ZÀ-Ú][A-Za-zÀ-úà-ù]+)(?:-([A-Z]{2}))?\)',
         ]
         
-        encontrou_em_tram = False
+        # Pega o órgão atual para priorizar relator deste órgão
+        orgao_atual = resultado.get("status_siglaOrgao", "")
+        
+        # Busca o relator mais recente do órgão atual
+        relator_orgao_atual = None
+        relator_qualquer = None
+        
         for t in resultado["tramitacoes"]:
             despacho = t.get("despacho") or ""
             desc = t.get("descricaoTramitacao") or ""
+            orgao_tram = t.get("siglaOrgao") or ""
             texto = f"{despacho} {desc}"
             
             for pattern in patterns:
@@ -323,15 +330,27 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                     uf = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else ""
                     
                     if nome and len(nome) > 3:
-                        relator_info = {"nome": nome, "partido": partido, "uf": uf}
-                        encontrou_em_tram = True
-                        st.info(f"✅ Relator encontrado nas tramitações: {nome}")
+                        candidato = {"nome": nome, "partido": partido, "uf": uf}
+                        
+                        # Se não temos nenhum relator ainda, guarda este
+                        if not relator_qualquer:
+                            relator_qualquer = candidato
+                        
+                        # Se é do órgão atual, prioriza
+                        if orgao_tram and orgao_atual and orgao_tram.upper() == orgao_atual.upper():
+                            if not relator_orgao_atual:
+                                relator_orgao_atual = candidato
+                                st.info(f"✅ Relator do órgão atual ({orgao_atual}): {nome} ({partido}/{uf})")
+                        
                         break
-            
-            if relator_info:
-                break
         
-        # Fallback para endpoint
+        # Prioriza relator do órgão atual, senão pega qualquer um
+        relator_info = relator_orgao_atual or relator_qualquer
+        
+        if relator_info and not relator_orgao_atual:
+            st.warning(f"⚠️ Relator encontrado em outro órgão: {relator_info.get('nome')} - pode não ser o atual")
+        
+        # Fallback para endpoint /relatores
         if not relator_info:
             rel_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
             if isinstance(rel_data, dict) and rel_data.get("dados"):
