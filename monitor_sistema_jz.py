@@ -875,14 +875,30 @@ def build_status_map(ids: list[str]) -> dict:
         return out
 
     def _one(pid: str):
-        s = fetch_status_proposicao(pid)
-        situacao = canonical_situacao((s.get("status_descricaoSituacao") or "").strip())
-        andamento = (s.get("status_descricaoTramitacao") or "").strip()
+        # Usa a função centralizada para pegar tudo de uma vez
+        dados_completos = fetch_proposicao_completa(pid)
+        
+        situacao = canonical_situacao(dados_completos.get("status_descricaoSituacao", ""))
+        andamento = dados_completos.get("status_descricaoTramitacao", "")
+        relator_info = dados_completos.get("relator", {})
+        
+        # Formata relator
+        relator_txt = ""
+        if relator_info and relator_info.get("nome"):
+            nome = relator_info.get("nome", "")
+            partido = relator_info.get("partido", "")
+            uf = relator_info.get("uf", "")
+            if partido or uf:
+                relator_txt = f"{nome} ({partido}/{uf})".replace("//", "/").replace("(/", "(").replace("/)", ")")
+            else:
+                relator_txt = nome
+        
         return pid, {
             "situacao": situacao,
             "andamento": andamento,
-            "status_dataHora": (s.get("status_dataHora") or "").strip(),
-            "siglaOrgao": (s.get("status_siglaOrgao") or "").strip(),
+            "status_dataHora": dados_completos.get("status_dataHora", ""),
+            "siglaOrgao": dados_completos.get("status_siglaOrgao", ""),
+            "relator": relator_txt,
         }
 
     max_workers = 10 if len(ids) >= 40 else 6
@@ -899,6 +915,7 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["Andamento (status)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("andamento", ""))
     df["Data do status (raw)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("status_dataHora", ""))
     df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
+    df["Relator(a)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator", "—"))
 
     dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
     df["DataStatus_dt"] = dt
@@ -923,6 +940,10 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
             return "—"
 
     df["Sinal"] = df["Parado (dias)"].apply(_sinal)
+    
+    # ORDENA DO MAIS ANTIGO PARA O MAIS NOVO (ascending=True)
+    df = df.sort_values("DataStatus_dt", ascending=True)
+    
     return df
 
 
@@ -1298,7 +1319,7 @@ def main():
             })
 
             show_cols = [
-                "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)",
+                "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Relator(a)",
                 "Data do status", "Sinal", "Parado há", "id", "LinkTramitacao", "Ementa"
             ]
             for c in show_cols:
@@ -1322,7 +1343,7 @@ def main():
                 st.dataframe(df_counts, hide_index=True, use_container_width=True)
 
             with cC2:
-                st.markdown("**Lista filtrada (Link = Ficha de Tramitação)**")
+                st.markdown("**Lista filtrada (mais antigo no topo)**")
                 
                 st.markdown('<div class="map-small">', unsafe_allow_html=True)
                 st.dataframe(
@@ -1332,6 +1353,7 @@ def main():
                     column_config={
                         "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
                         "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                        "Relator(a)": st.column_config.TextColumn("Relator(a)", width="medium"),
                     },
                 )
                 st.markdown("</div>", unsafe_allow_html=True)
