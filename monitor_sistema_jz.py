@@ -876,8 +876,11 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
     1. Endpoint /relatores
     2. Endpoint /relatoria  
     3. Extração do despacho na tramitação
+    4. Status da proposição
     Retorna: {"nome":..., "partido":..., "uf":...} ou {}.
     """
+    import re
+    
     pid = str(id_proposicao).strip()
     if not pid:
         return {}
@@ -928,31 +931,57 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
             if nome:  # Se encontrou nome, retorna
                 return {"nome": str(nome).strip(), "partido": str(partido).strip(), "uf": str(uf).strip()}
 
-    # ESTRATÉGIA 3: Extrai do despacho na tramitação
-    import re
-    
+    # ESTRATÉGIA 3: Busca no status da proposição primeiro
+    status_data = safe_get(f"{BASE_URL}/proposicoes/{pid}")
+    if isinstance(status_data, dict) and status_data.get("dados"):
+        status_prop = status_data.get("dados", {}).get("statusProposicao", {})
+        despacho_status = status_prop.get("despacho") or ""
+        
+        # Procura no despacho do status
+        if despacho_status:
+            # Padrão: "Designada Relatora, Dep. Gisela Simona (UNIÃO-MT)"
+            patterns = [
+                r'Designad[oa]\s+Relator[a]?,\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+                r'Relator[a]?\s*Designad[oa]:\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+                r'Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, despacho_status, re.IGNORECASE)
+                if match:
+                    nome = match.group(1).strip()
+                    partido = party_norm(match.group(2).strip())
+                    uf = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else ""
+                    if nome:
+                        return {"nome": nome, "partido": partido, "uf": uf}
+
+    # ESTRATÉGIA 4: Extrai das tramitações
     tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes", 
-                         params={"itens": 50, "ordem": "DESC", "ordenarPor": "dataHora"})
+                         params={"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora"})
     
     if isinstance(tram_data, dict) and tram_data.get("dados"):
         for t in tram_data.get("dados", []):
             despacho = t.get("despacho") or ""
+            desc_tram = t.get("descricaoTramitacao") or ""
             
-            # Padrão: "Designado Relator, Dep. NOME (PARTIDO-UF)"
-            match = re.search(r'Designado\s+Relator[^,]*,\s*Dep\.\s*([^(]+)\s*\(([^-]+)-([^)]+)\)', despacho, re.IGNORECASE)
-            if match:
-                nome = match.group(1).strip()
-                partido = party_norm(match.group(2).strip())
-                uf = match.group(3).strip()
-                return {"nome": nome, "partido": partido, "uf": uf}
+            # Procura em ambos os campos
+            texto_busca = f"{despacho} {desc_tram}"
             
-            # Padrão alternativo: "Dep. NOME (PARTIDO-UF)"
-            match2 = re.search(r'Dep\.\s*([^(]+)\s*\(([^-]+)-([^)]+)\)', despacho, re.IGNORECASE)
-            if match2 and "relator" in despacho.lower():
-                nome = match2.group(1).strip()
-                partido = party_norm(match2.group(2).strip())
-                uf = match2.group(3).strip()
-                return {"nome": nome, "partido": partido, "uf": uf}
+            # Múltiplos padrões para capturar o relator
+            patterns = [
+                r'Designad[oa]\s+Relator[a]?,\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+                r'Relator[a]?\s*Designad[oa]:\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+                r'Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, texto_busca, re.IGNORECASE)
+                if match and ("relator" in texto_busca.lower() or "designad" in texto_busca.lower()):
+                    nome = match.group(1).strip()
+                    partido = party_norm(match.group(2).strip())
+                    uf = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else ""
+                    if nome:
+                        return {"nome": nome, "partido": partido, "uf": uf}
 
     return {}
 
