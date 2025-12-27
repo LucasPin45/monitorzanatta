@@ -695,23 +695,34 @@ def get_tramitacoes_ultimas10(id_prop):
     """
     Linha do Tempo (últimas 10 movimentações) – formato do anexo:
     Data | Hora | Órgão | Tramitação
+
+    Se /tramitacoes vier vazio, faz FALLBACK usando statusProposicao.
     """
     df = fetch_tramitacoes_proposicao_paginado(id_prop)
-    if df is None or df.empty:
+
+    # Caso exista histórico de tramitações
+    if df is not None and not df.empty:
+        df = df.sort_values("dataHora_dt", ascending=False)
+        view = pd.DataFrame({
+            "Data": df["Data"],
+            "Hora": df["Hora"],
+            "Órgão": df.get("siglaOrgao", ""),
+            "Tramitação": df.get("descricaoTramitacao", ""),
+        })
+        return view.head(10).reset_index(drop=True)
+
+    # FALLBACK: usa statusProposicao (para não ficar "sem linha do tempo")
+    status = fetch_status_proposicao(id_prop)
+    if not status or not status.get("status_dataHora"):
         return pd.DataFrame()
 
-    # ordena desc (mais recentes primeiro)
-    df = df.sort_values("dataHora_dt", ascending=False)
-
-    view = pd.DataFrame({
-        "Data": df["Data"],
-        "Hora": df["Hora"],
-        "Órgão": df.get("siglaOrgao", ""),
-        "Tramitação": df.get("descricaoTramitacao", ""),
-    })
-
-    return view.head(10).reset_index(drop=True)
-
+    dt = parse_dt(status.get("status_dataHora"))
+    return pd.DataFrame([{
+        "Data": dt.strftime("%d/%m/%Y") if pd.notna(dt) else "—",
+        "Hora": dt.strftime("%H:%M") if pd.notna(dt) else "—",
+        "Órgão": status.get("status_siglaOrgao") or "—",
+        "Tramitação": status.get("status_descricaoTramitacao") or "Situação atual",
+    }])
 
 def calc_ultima_mov(df_tram_ult10: pd.DataFrame, status_dataHora: str):
     """
@@ -1360,10 +1371,25 @@ def main():
         df_tbl = df_rast_enriched.rename(
             columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
         ).copy()
+        
+        df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
+
 
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
 
-        show_cols_r = ["Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)", "Situação atual", "Data do status", "LinkTramitacao"]
+        show_cols_r = [
+    "Proposição",
+    "Ementa",
+    "ID",
+    "Ano",
+    "Tipo",
+    "Órgão (sigla)",
+    "Situação atual",
+    "Último andamento",
+    "Data do status",
+    "LinkTramitacao",
+]
+
         for c in show_cols_r:
             if c not in df_tbl.columns:
                 df_tbl[c] = ""
@@ -1375,9 +1401,10 @@ def main():
             on_select="rerun",
             selection_mode="single-row",
             column_config={
-                "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
-                "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-            },
+    "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+    "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+}
+
         )
 
         selected_id = None
