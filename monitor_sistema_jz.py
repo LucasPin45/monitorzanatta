@@ -1542,27 +1542,14 @@ st.download_button(
     )
 
 st.markdown("---")
-bytes_out, mime, ext = to_xlsx_bytes(df_tbl[show_cols_r], "Base_Rastreador_Ordenada")
+
+bytes_out, mime, ext = to_xlsx_bytes(df_fil[show_cols_r], "Base_Rastreador_Ordenada")
 st.download_button(
     f"⬇️ Baixar base do rastreador ({ext.upper()})",
     data=bytes_out,
     file_name=f"rastreador_ordenado_por_status.{ext}",
     mime=mime,
-    )
-
+)
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
