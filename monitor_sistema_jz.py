@@ -1428,42 +1428,35 @@ def main():
         df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
         
-        # Marca tramitações recentes (15 dias) para destacar
-        df_tbl["Dias parados"] = df_rast_enriched["Parado (dias)"]
+        # Adiciona coluna visual para destaque (emoji)
+        df_tbl["🔔"] = df_rast_enriched["Parado (dias)"].apply(
+            lambda x: "🔔" if pd.notna(x) and x <= 15 else ""
+        )
 
         show_cols_r = [
-            "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
+            "🔔", "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
             "Situação atual", "Último andamento", "Data do status", "LinkTramitacao",
         ]
 
         for c in show_cols_r:
             if c not in df_tbl.columns:
                 df_tbl[c] = ""
-
-        # Função para destacar linhas com tramitação recente
-        def highlight_row(row):
-            dias = row.get("Dias parados", None)
-            if pd.notna(dias) and dias <= 15:
-                return ['background-color: #fff9c4'] * len(row)
-            return [''] * len(row)
-        
-        # Aplica estilo
-        df_styled = df_tbl[show_cols_r].style.apply(highlight_row, axis=1)
         
         sel = st.dataframe(
-            df_styled,
+            df_tbl[show_cols_r],
             use_container_width=True,
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
             column_config={
+                "🔔": st.column_config.TextColumn("🔔", width="small", help="Tramitação recente (≤15 dias)"),
                 "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
                 "Ementa": st.column_config.TextColumn("Ementa", width="large"),
             }
         )
         
         # Legenda
-        st.caption("💡 Proposições com tramitação nos últimos 15 dias aparecem destacadas em amarelo")
+        st.caption("🔔 = Tramitação nos últimos 15 dias")
 
         selected_id = None
         try:
@@ -1480,7 +1473,6 @@ def main():
             st.info("Clique em uma proposição para carregar status, estratégia e linha do tempo.")
         else:
             with st.spinner("Carregando informações completas (status + relator + tramitações)..."):
-                # USA A FUNÇÃO CENTRALIZADA
                 dados_completos = fetch_proposicao_completa(selected_id)
                 
                 status = {
