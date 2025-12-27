@@ -1227,7 +1227,7 @@ def main():
     bt_status = st.button("📥 Filtrar", type="primary")
 
 
-   org_opts = []
+org_opts = []
 ano_status_opts = []
 mes_status_opts = []
 
