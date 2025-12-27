@@ -1224,8 +1224,7 @@ def main():
         with f1:
             status_sel = st.multiselect("Situação atual", options=status_opts, default=default_status_sel)
           
-    bt_status = st.button("📥 Filtrar", type="primary")
-
+bt_status = st.button("📥 Filtrar", type="primary")
 
 org_opts = []
 ano_status_opts = []
@@ -1235,10 +1234,12 @@ if not df_status_view.empty:
     org_opts = sorted(
         [o for o in df_status_view["Órgão (sigla)"].dropna().unique().tolist() if str(o).strip()]
     )
+
     ano_status_opts = sorted(
         [int(a) for a in df_status_view["AnoStatus"].dropna().unique().tolist() if pd.notna(a)],
         reverse=True
     )
+
     mes_status_opts = sorted(
         [int(m) for m in df_status_view["MesStatus"].dropna().unique().tolist() if pd.notna(m)]
     )
@@ -1255,27 +1256,26 @@ with f4:
     mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[])
     mes_status_sel = [mes_map[x] for x in mes_sel_labels if x in mes_map]
 
+if bt_status:
+    with st.spinner("Buscando status..."):
+        ids_list = df_base["id"].astype(str).head(int(max_status)).tolist()
+        status_map = build_status_map(ids_list)
+        df_status_view = enrich_with_status(df_base.head(int(max_status)), status_map)
+        st.session_state["df_status_last"] = df_status_view
 
-        if bt_status:
-            with st.spinner("Buscando status..."):
-                ids_list = df_base["id"].astype(str).head(int(max_status)).tolist()
-                status_map = build_status_map(ids_list)
-                df_status_view = enrich_with_status(df_base.head(int(max_status)), status_map)
-                st.session_state["df_status_last"] = df_status_view
+    if df_status_view.empty:
+        st.info("Clique em **Carregar/Atualizar status** para preencher Situação/Órgão/Data e habilitar filtros por mês/ano.")
+    else:
+        df_fil = df_status_view.copy()
 
-        if df_status_view.empty:
-            st.info("Clique em **Carregar/Atualizar status** para preencher Situação/Órgão/Data e habilitar filtros por mês/ano.")
-        else:
-            df_fil = df_status_view.copy()
-
-            if status_sel:
-                df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
-            if org_sel:
-                df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
-            if ano_status_sel:
-                df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
-            if mes_status_sel:
-                df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
+        if status_sel:
+            df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
+        if org_sel:
+            df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
+        if ano_status_sel:
+            df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
+        if mes_status_sel:
+            df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
 
             df_counts = (
                 df_fil.assign(_s=df_fil["Situação atual"].fillna("—").replace("", "—"))
