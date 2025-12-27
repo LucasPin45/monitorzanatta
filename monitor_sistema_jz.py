@@ -340,15 +340,11 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                         if orgao_tram and orgao_atual and orgao_tram.upper() == orgao_atual.upper():
                             if not relator_orgao_atual:
                                 relator_orgao_atual = candidato
-                                st.info(f"✅ Relator do órgão atual ({orgao_atual}): {nome} ({partido}/{uf})")
                         
                         break
         
         # Prioriza relator do órgão atual, senão pega qualquer um
         relator_info = relator_orgao_atual or relator_qualquer
-        
-        if relator_info and not relator_orgao_atual:
-            st.warning(f"⚠️ Relator encontrado em outro órgão: {relator_info.get('nome')} - pode não ser o atual")
         
         # Fallback para endpoint /relatores (que traz mais informações)
         if not relator_info:
@@ -372,7 +368,6 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                     
                     if nome:
                         relator_info = {"nome": nome, "partido": partido, "uf": uf, "id_deputado": str(id_dep)}
-                        st.info(f"✅ Relator encontrado no endpoint /relatores: {nome}")
         
         # Tenta buscar ID do deputado pelo nome (para pegar a foto)
         if relator_info and not relator_info.get("id_deputado"):
@@ -402,7 +397,6 @@ def get_tramitacoes_ultimas10(id_prop):
         tramitacoes = dados_completos.get("tramitacoes", [])
         
         if not tramitacoes:
-            st.warning(f"Nenhuma tramitação encontrada para ID {id_prop}")
             return pd.DataFrame()
         
         rows = []
@@ -437,11 +431,9 @@ def get_tramitacoes_ultimas10(id_prop):
         })
         
         resultado = view.head(10).reset_index(drop=True)
-        st.success(f"✅ {len(tramitacoes)} tramitações encontradas, mostrando as 10 mais recentes")
         
         return resultado
     except Exception as e:
-        st.error(f"Erro em get_tramitacoes_ultimas10: {e}")
         return pd.DataFrame()
 
 
@@ -451,13 +443,8 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
     try:
         dados_completos = fetch_proposicao_completa(id_proposicao)
         relator = dados_completos.get("relator", {})
-        if relator:
-            st.info(f"✅ Relator encontrado: {relator.get('nome', 'N/A')}")
-        else:
-            st.warning("⚠️ Relator não identificado")
         return relator
     except Exception as e:
-        st.error(f"Erro ao buscar relator: {e}")
         return {}
 
 
@@ -1441,8 +1428,8 @@ def main():
         df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
         
-        # Marca tramitações recentes (15 dias)
-        df_tbl["_recente"] = df_rast_enriched["Parado (dias)"].apply(lambda x: x <= 15 if pd.notna(x) else False)
+        # Marca tramitações recentes (15 dias) para destacar
+        df_tbl["Dias parados"] = df_rast_enriched["Parado (dias)"]
 
         show_cols_r = [
             "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
@@ -1453,16 +1440,18 @@ def main():
             if c not in df_tbl.columns:
                 df_tbl[c] = ""
 
-        # Aplica estilo destacando tramitações recentes
-        def highlight_recente(row):
-            if row.get("_recente", False):
-                return ['background-color: #fff59d; font-weight: 500'] * len(row)
+        # Função para destacar linhas com tramitação recente
+        def highlight_row(row):
+            dias = row.get("Dias parados", None)
+            if pd.notna(dias) and dias <= 15:
+                return ['background-color: #fff9c4'] * len(row)
             return [''] * len(row)
-
-        df_display = df_tbl[show_cols_r + ["_recente"]].copy()
+        
+        # Aplica estilo
+        df_styled = df_tbl[show_cols_r].style.apply(highlight_row, axis=1)
         
         sel = st.dataframe(
-            df_display[show_cols_r],
+            df_styled,
             use_container_width=True,
             hide_index=True,
             on_select="rerun",
