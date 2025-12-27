@@ -1267,9 +1267,9 @@ if bt_status:
         df_status_view = enrich_with_status(df_base.head(int(max_status)), status_map)
         st.session_state["df_status_last"] = df_status_view
 
-    if df_status_view.empty:
-        st.info("Clique em **Carregar/Atualizar status** para preencher Situação/Órgão/Data e habilitar filtros por mês/ano.")
-  else:
+if df_status_view.empty:
+    st.info("Clique em **Carregar/Atualizar status** para preencher Situação/Órgão/Data e habilitar filtros por mês/ano.")
+else:
     df_fil = df_status_view.copy()
 
     if status_sel:
@@ -1283,7 +1283,10 @@ if bt_status:
 
     # 👉 COLE AQUI 👇
     st.markdown("---")
-    bytes_out, mime, ext = to_xlsx_bytes(df_fil[show_cols_r], "Base_Rastreador_Ordenada")
+    bytes_out, mime, ext = to_xlsx_bytes(
+        df_fil[show_cols_r],
+        "Base_Rastreador_Ordenada"
+    )
     st.download_button(
         f"⬇️ Baixar base do rastreador ({ext.upper()})",
         data=bytes_out,
@@ -1552,3 +1555,4 @@ st.download_button(
     )
 
 st.markdown("---")
+
