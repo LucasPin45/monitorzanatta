@@ -1227,23 +1227,34 @@ def main():
     bt_status = st.button("📥 Filtrar", type="primary")
 
 
-    org_opts = []
-        ano_status_opts = []
-        mes_status_opts = []
-        if not df_status_view.empty:
-            org_opts = sorted([o for o in df_status_view["Órgão (sigla)"].dropna().unique().tolist() if str(o).strip()])
-            ano_status_opts = sorted([int(a) for a in df_status_view["AnoStatus"].dropna().unique().tolist() if pd.notna(a)], reverse=True)
-            mes_status_opts = sorted([int(m) for m in df_status_view["MesStatus"].dropna().unique().tolist() if pd.notna(m)])
+   org_opts = []
+ano_status_opts = []
+mes_status_opts = []
 
-        with f2:
-            org_sel = st.multiselect("Órgão (sigla)", options=org_opts, default=[])
-        with f3:
-            ano_status_sel = st.multiselect("Ano (do status)", options=ano_status_opts, default=[])
-        with f4:
-            mes_labels = [f"{m:02d}-{MESES_PT.get(m,'')}" for m in mes_status_opts]
-            mes_map = {f"{m:02d}-{MESES_PT.get(m,'')}": m for m in mes_status_opts}
-            mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[])
-            mes_status_sel = [mes_map[x] for x in mes_sel_labels if x in mes_map]
+if not df_status_view.empty:
+    org_opts = sorted(
+        [o for o in df_status_view["Órgão (sigla)"].dropna().unique().tolist() if str(o).strip()]
+    )
+    ano_status_opts = sorted(
+        [int(a) for a in df_status_view["AnoStatus"].dropna().unique().tolist() if pd.notna(a)],
+        reverse=True
+    )
+    mes_status_opts = sorted(
+        [int(m) for m in df_status_view["MesStatus"].dropna().unique().tolist() if pd.notna(m)]
+    )
+
+with f2:
+    org_sel = st.multiselect("Órgão (sigla)", options=org_opts, default=[])
+
+with f3:
+    ano_status_sel = st.multiselect("Ano (do status)", options=ano_status_opts, default=[])
+
+with f4:
+    mes_labels = [f"{m:02d}-{MESES_PT.get(m, '')}" for m in mes_status_opts]
+    mes_map = {f"{m:02d}-{MESES_PT.get(m, '')}": m for m in mes_status_opts}
+    mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[])
+    mes_status_sel = [mes_map[x] for x in mes_sel_labels if x in mes_map]
+
 
         if bt_status:
             with st.spinner("Buscando status..."):
