@@ -350,7 +350,7 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         if relator_info and not relator_orgao_atual:
             st.warning(f"⚠️ Relator encontrado em outro órgão: {relator_info.get('nome')} - pode não ser o atual")
         
-        # Fallback para endpoint /relatores
+        # Fallback para endpoint /relatores (que traz mais informações)
         if not relator_info:
             rel_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
             if isinstance(rel_data, dict) and rel_data.get("dados"):
@@ -360,9 +360,31 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                     nome = r.get("nome") or r.get("nomeRelator") or ""
                     partido = party_norm(r.get("siglaPartido") or r.get("partido") or "")
                     uf = r.get("siglaUf") or r.get("uf") or ""
+                    id_dep = r.get("id") or r.get("idDeputado") or ""
+                    
+                    # Tenta pegar ID do deputado do objeto aninhado
+                    dep = r.get("deputado") or r.get("parlamentar") or {}
+                    if isinstance(dep, dict):
+                        nome = nome or dep.get("nome") or dep.get("nomeCivil") or ""
+                        partido = partido or party_norm(dep.get("siglaPartido") or dep.get("partido") or "")
+                        uf = uf or dep.get("siglaUf") or dep.get("uf") or ""
+                        id_dep = id_dep or dep.get("id") or ""
+                    
                     if nome:
-                        relator_info = {"nome": nome, "partido": partido, "uf": uf}
+                        relator_info = {"nome": nome, "partido": partido, "uf": uf, "id_deputado": str(id_dep)}
                         st.info(f"✅ Relator encontrado no endpoint /relatores: {nome}")
+        
+        # Tenta buscar ID do deputado pelo nome (para pegar a foto)
+        if relator_info and not relator_info.get("id_deputado"):
+            nome_relator = relator_info.get("nome", "")
+            if nome_relator:
+                # Busca deputado pelo nome
+                dep_data = safe_get(f"{BASE_URL}/deputados", params={"nome": nome_relator, "itens": 5})
+                if isinstance(dep_data, dict) and dep_data.get("dados"):
+                    deps = dep_data.get("dados", [])
+                    if deps:
+                        # Pega o primeiro resultado (mais próximo)
+                        relator_info["id_deputado"] = str(deps[0].get("id", ""))
         
         resultado["relator"] = relator_info
         
@@ -1480,15 +1502,37 @@ def main():
             st.markdown(f"**Órgão:** {org_sigla}")
             st.markdown(f"**Situação atual:** {situacao}")
             
-            # Mostra relator se encontrado
+            # Mostra relator com foto se encontrado
             if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
-                rel_txt = f"{relator.get('nome','—')}"
-                if relator.get("partido") or relator.get("uf"):
-                    rel_txt += f" ({relator.get('partido','')}/{relator.get('uf','')})".replace("//", "/")
-                st.markdown(f"**Relator(a):** {rel_txt}")
+                rel_nome = relator.get('nome','—')
+                rel_partido = relator.get('partido','')
+                rel_uf = relator.get('uf','')
+                rel_id = relator.get('id_deputado','')
                 
-                if alerta_relator:
-                    st.warning(alerta_relator)
+                rel_txt = f"{rel_nome}"
+                if rel_partido or rel_uf:
+                    rel_txt += f" ({rel_partido}/{rel_uf})".replace("//", "/")
+                
+                # Cria colunas para foto + info
+                col_foto, col_info = st.columns([1, 3])
+                
+                with col_foto:
+                    if rel_id:
+                        foto_url = f"https://www.camara.leg.br/internet/deputado/bandep/{rel_id}.jpg"
+                        try:
+                            st.image(foto_url, width=120, caption=rel_nome)
+                        except:
+                            st.markdown(f"**Relator(a):** {rel_txt}")
+                    else:
+                        st.markdown("📷")
+                
+                with col_info:
+                    st.markdown(f"**Relator(a):**")
+                    st.markdown(f"**{rel_txt}**")
+                    
+                    if alerta_relator:
+                        st.warning(alerta_relator)
+                        
             elif precisa_relator:
                 st.markdown("**Relator(a):** Não identificado")
             
