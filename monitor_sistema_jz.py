@@ -1221,14 +1221,17 @@ def main():
         if st.session_state.get("status_click_sel"):
             default_status_sel = [st.session_state["status_click_sel"]]
 
-        with f1:
-            status_sel = st.multiselect("Situação atual", options=status_opts, default=default_status_sel)
-          
-bt_status = st.button("📥 Filtrar", type="primary")
+with f1:
+    status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel)
+
+bt_status = st.button("Filtrar", type="primary")
 
 org_opts = []
 ano_status_opts = []
 mes_status_opts = []
+
+
+        
 
 if not df_status_view.empty:
     org_opts = sorted(
@@ -1535,3 +1538,4 @@ st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
 
 if __name__ == "__main__":
     main()
+
