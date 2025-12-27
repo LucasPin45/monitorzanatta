@@ -1523,6 +1523,11 @@ st.dataframe(df_estr, use_container_width=True, hide_index=True)
 # Linha do tempo (últimas 10)
 st.markdown("---")
 st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
+
+df_tram10 = pd.DataFrame()
+if selected_id:
+    df_tram10 = get_tramitacoes_ultimas10(selected_id)
+
 if df_tram10.empty:
     st.info("Sem tramitações retornadas (ou endpoint instável no momento).")
 else:
@@ -1548,6 +1553,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
