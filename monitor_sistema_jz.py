@@ -872,12 +872,8 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
 @st.cache_data(show_spinner=False, ttl=1800)
 def fetch_relator_atual(id_proposicao: str) -> dict:
     """
-    Tenta obter relator atual usando múltiplas estratégias:
-    1. Endpoint /relatores
-    2. Endpoint /relatoria  
-    3. Extração do despacho na tramitação
-    4. Status da proposição
-    Retorna: {"nome":..., "partido":..., "uf":...} ou {}.
+    Busca relator com múltiplas estratégias robustas.
+    Prioriza dados estruturados da API antes de regex.
     """
     import re
     
@@ -885,20 +881,33 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
     if not pid:
         return {}
 
-    candidatos = []
+    # ========================================
+    # ESTRATÉGIA 1: Endpoint /autores (relator como autor especial)
+    # ========================================
+    autores_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/autores")
+    if isinstance(autores_data, dict) and autores_data.get("dados"):
+        for autor in autores_data.get("dados", []):
+            tipo_autor = (autor.get("tipoAutor") or "").lower()
+            if "relator" in tipo_autor:
+                nome = autor.get("nome") or ""
+                partido = party_norm(autor.get("siglaPartido") or "")
+                uf = autor.get("siglaUF") or autor.get("uf") or ""
+                if nome:
+                    return {"nome": nome, "partido": partido, "uf": uf}
 
-    # ESTRATÉGIA 1: endpoint /relatores
+    # ========================================
+    # ESTRATÉGIA 2: Endpoint /relatores
+    # ========================================
+    candidatos = []
     data = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatores")
     if isinstance(data, dict) and data.get("dados"):
         candidatos = data.get("dados") or []
 
-    # ESTRATÉGIA 2: endpoint /relatoria (fallback)
     if not candidatos:
         data2 = safe_get(f"{BASE_URL}/proposicoes/{pid}/relatoria")
         if isinstance(data2, dict) and data2.get("dados"):
             candidatos = data2.get("dados") or []
 
-    # Se encontrou candidatos via API, processa
     if candidatos:
         def _pick_dt(x):
             for k in ("dataDesignacao", "dataHora", "data", "dataRelatoria"):
@@ -915,7 +924,6 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
                 dfc = dfc.sort_values("_dt", ascending=False)
 
             r = (dfc.iloc[0].to_dict() if not dfc.empty else {}) or {}
-
             nome = r.get("nome") or r.get("nomeRelator") or ""
             partido = r.get("siglaPartido") or r.get("partido") or r.get("sigla") or ""
             uf = r.get("siglaUf") or r.get("uf") or ""
@@ -927,23 +935,21 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
                 uf = uf or dep.get("siglaUf") or dep.get("uf") or ""
 
             partido = party_norm(partido)
-            
-            if nome:  # Se encontrou nome, retorna
+            if nome:
                 return {"nome": str(nome).strip(), "partido": str(partido).strip(), "uf": str(uf).strip()}
 
-    # ESTRATÉGIA 3: Busca no status da proposição primeiro
+    # ========================================
+    # ESTRATÉGIA 3: Despacho no statusProposicao
+    # ========================================
     status_data = safe_get(f"{BASE_URL}/proposicoes/{pid}")
     if isinstance(status_data, dict) and status_data.get("dados"):
         status_prop = status_data.get("dados", {}).get("statusProposicao", {})
         despacho_status = status_prop.get("despacho") or ""
         
-        # Procura no despacho do status
         if despacho_status:
-            # Padrão: "Designada Relatora, Dep. Gisela Simona (UNIÃO-MT)"
             patterns = [
-                r'Designad[oa]\s+Relator[a]?,\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
-                r'Relator[a]?\s*Designad[oa]:\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
-                r'Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+                r'Designad[oa]\s+Relator[a]?,\s*Dep\.\s*([^(]+?)\s*\(([A-Z]+)(?:-([A-Z]{2}))?\)',
+                r'Relator[a]?\s*Designad[oa]:\s*Dep\.\s*([^(]+?)\s*\(([A-Z]+)(?:-([A-Z]{2}))?\)',
             ]
             
             for pattern in patterns:
@@ -955,33 +961,66 @@ def fetch_relator_atual(id_proposicao: str) -> dict:
                     if nome:
                         return {"nome": nome, "partido": partido, "uf": uf}
 
-    # ESTRATÉGIA 4: Extrai das tramitações
+    # ========================================
+    # ESTRATÉGIA 4: Tramitações (despacho + descricaoTramitacao)
+    # ========================================
     tram_data = safe_get(f"{BASE_URL}/proposicoes/{pid}/tramitacoes", 
-                         params={"itens": 100, "ordem": "DESC", "ordenarPor": "dataHora"})
+                         params={"itens": 150, "ordem": "DESC", "ordenarPor": "dataHora"})
     
     if isinstance(tram_data, dict) and tram_data.get("dados"):
         for t in tram_data.get("dados", []):
             despacho = t.get("despacho") or ""
             desc_tram = t.get("descricaoTramitacao") or ""
             
-            # Procura em ambos os campos
+            # Procura em ambos
             texto_busca = f"{despacho} {desc_tram}"
             
-            # Múltiplos padrões para capturar o relator
+            # Padrões mais específicos primeiro
             patterns = [
-                r'Designad[oa]\s+Relator[a]?,\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
-                r'Relator[a]?\s*Designad[oa]:\s*Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
-                r'Dep\.\s*([^(]+)\s*\(([^-\)]+)(?:-([^)]+))?\)',
+                # Padrão principal: Designado Relator, Dep. Nome (PARTIDO-UF)
+                r'Designad[oa]\s+Relator[a]?,\s*Dep\.\s*([^(]+?)\s*\(([A-Z]+)(?:-([A-Z]{2}))?\)',
+                # Relator: Dep. Nome (PARTIDO-UF)
+                r'Relator[a]?:\s*Dep\.\s*([^(]+?)\s*\(([A-Z]+)(?:-([A-Z]{2}))?\)',
+                # Dep. Nome (PARTIDO-UF) quando menciona relator
+                r'Dep\.\s*([^(]+?)\s*\(([A-Z]+)(?:-([A-Z]{2}))?\)',
             ]
             
-            for pattern in patterns:
+            for idx, pattern in enumerate(patterns):
                 match = re.search(pattern, texto_busca, re.IGNORECASE)
-                if match and ("relator" in texto_busca.lower() or "designad" in texto_busca.lower()):
+                # Para o último padrão genérico, exige que tenha "relator" no texto
+                if match:
+                    if idx == 2 and "relator" not in texto_busca.lower():
+                        continue
+                    
                     nome = match.group(1).strip()
                     partido = party_norm(match.group(2).strip())
                     uf = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else ""
-                    if nome:
+                    
+                    # Validação: nome não pode ser muito curto ou suspeito
+                    if nome and len(nome) > 3:
                         return {"nome": nome, "partido": partido, "uf": uf}
+
+    # ========================================
+    # ESTRATÉGIA 5: Busca no órgão atual (comissão)
+    # ========================================
+    if isinstance(status_data, dict) and status_data.get("dados"):
+        status_prop = status_data.get("dados", {}).get("statusProposicao", {})
+        uri_orgao = status_prop.get("uriOrgao") or ""
+        
+        if uri_orgao:
+            id_orgao = extract_id_from_uri(uri_orgao)
+            if id_orgao:
+                # Tenta buscar membros do órgão
+                membros_data = safe_get(f"{BASE_URL}/orgaos/{id_orgao}/membros")
+                if isinstance(membros_data, dict) and membros_data.get("dados"):
+                    for membro in membros_data.get("dados", []):
+                        titulo = (membro.get("titulo") or "").lower()
+                        if "relator" in titulo:
+                            nome = membro.get("nome") or ""
+                            partido = party_norm(membro.get("siglaPartido") or "")
+                            uf = membro.get("siglaUf") or ""
+                            if nome:
+                                return {"nome": nome, "partido": partido, "uf": uf}
 
     return {}
 
