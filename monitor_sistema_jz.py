@@ -268,7 +268,6 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         
         if tram_data and isinstance(tram_data, dict) and tram_data.get("dados"):
             tramitacoes = tram_data.get("dados", [])
-            st.info(f"🔍 Método 1 (simples): {len(tramitacoes)} tramitações encontradas")
         
         # Se não funcionou, tenta com paginação explícita
         if not tramitacoes:
