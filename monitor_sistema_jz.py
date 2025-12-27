@@ -256,8 +256,8 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                 "status_descricaoSituacao": canonical_situacao(status.get("descricaoSituacao") or ""),
                 "status_despacho": status.get("despacho") or "",
             })
-    except Exception as e:
-        st.error(f"Erro ao buscar dados básicos: {e}")
+    except Exception:
+        pass
     
     # 2. TRAMITAÇÕES - TENTATIVA 1: Com paginação
     try:
@@ -383,8 +383,8 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         
         resultado["relator"] = relator_info
         
-    except Exception as e:
-        st.error(f"Erro ao buscar relator: {e}")
+    except Exception:
+        pass
     
     return resultado
 
@@ -1428,13 +1428,22 @@ def main():
         df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
         df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
         
-        # Adiciona coluna visual para destaque (emoji)
-        df_tbl["🔔"] = df_rast_enriched["Parado (dias)"].apply(
-            lambda x: "🔔" if pd.notna(x) and x <= 15 else ""
-        )
+        # Adiciona coluna visual para destaque por urgência
+        def get_alerta_emoji(dias):
+            if pd.isna(dias):
+                return ""
+            if dias <= 2:
+                return "🚨"  # Sirene - URGENTÍSSIMO
+            if dias <= 5:
+                return "⚠️"  # Alerta - URGENTE
+            if dias <= 15:
+                return "🔔"  # Sino - Recente
+            return ""
+        
+        df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
 
         show_cols_r = [
-            "🔔", "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
+            "Alerta", "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
             "Situação atual", "Último andamento", "Data do status", "LinkTramitacao",
         ]
 
@@ -1449,14 +1458,14 @@ def main():
             on_select="rerun",
             selection_mode="single-row",
             column_config={
-                "🔔": st.column_config.TextColumn("🔔", width="small", help="Tramitação recente (≤15 dias)"),
+                "Alerta": st.column_config.TextColumn("", width="small", help="Urgência da tramitação"),
                 "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
                 "Ementa": st.column_config.TextColumn("Ementa", width="large"),
             }
         )
         
         # Legenda
-        st.caption("🔔 = Tramitação nos últimos 15 dias")
+        st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
 
         selected_id = None
         try:
@@ -1515,9 +1524,14 @@ def main():
 
             st.markdown("#### 🧾 Contexto")
             
-            # Alerta de tramitação recente
-            if parado_dias is not None and parado_dias <= 15:
-                st.warning("🔔 **TRAMITAÇÃO RECENTE** - Movimentação nos últimos 15 dias!")
+            # Alertas de tramitação recente por urgência
+            if parado_dias is not None:
+                if parado_dias <= 2:
+                    st.error("🚨 **URGENTÍSSIMO** - Tramitação há 2 dias ou menos!")
+                elif parado_dias <= 5:
+                    st.warning("⚠️ **URGENTE** - Tramitação há 5 dias ou menos!")
+                elif parado_dias <= 15:
+                    st.info("🔔 **TRAMITAÇÃO RECENTE** - Movimentação nos últimos 15 dias")
             
             st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
             st.markdown(f"**Órgão:** {org_sigla}")
