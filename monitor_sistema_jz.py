@@ -1511,6 +1511,8 @@ if selected_id:
 # Estratégia (tabela)
 st.markdown("---")
 st.markdown("### 🧠 Estratégia")
+alerta_relator = False
+
 df_estr = montar_estrategia_tabela(
     status_sel,
     relator_alerta=alerta_relator
@@ -1546,6 +1548,7 @@ st.download_button(
 
 if __name__ == "__main__":
     main()
+
 
 
 
