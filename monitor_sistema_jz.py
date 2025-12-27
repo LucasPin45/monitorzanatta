@@ -268,6 +268,7 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         
         if tram_data and isinstance(tram_data, dict) and tram_data.get("dados"):
             tramitacoes = tram_data.get("dados", [])
+            st.info(f"🔍 Método 1 (simples): {len(tramitacoes)} tramitações encontradas")
         
         # Se não funcionou, tenta com paginação explícita
         if not tramitacoes:
@@ -300,6 +301,8 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         st.error(f"Erro ao buscar tramitações: {e}")
     
     # 3. EXTRAI RELATOR DAS TRAMITAÇÕES
+    # IMPORTANTE: As tramitações vêm em ordem DESC (mais recente primeiro)
+    # Então precisamos pegar o PRIMEIRO relator encontrado do órgão atual
     try:
         relator_info = {}
         patterns = [
@@ -315,7 +318,14 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
         relator_orgao_atual = None
         relator_qualquer = None
         
-        for t in resultado["tramitacoes"]:
+        # Ordena tramitações por data decrescente para garantir que pegamos o mais recente
+        tramitacoes_ordenadas = sorted(
+            resultado["tramitacoes"],
+            key=lambda x: x.get("dataHora") or x.get("data") or "",
+            reverse=True  # Mais recente primeiro
+        )
+        
+        for t in tramitacoes_ordenadas:
             despacho = t.get("despacho") or ""
             desc = t.get("descricaoTramitacao") or ""
             orgao_tram = t.get("siglaOrgao") or ""
@@ -331,16 +341,21 @@ def fetch_proposicao_completa(id_proposicao: str) -> dict:
                     if nome and len(nome) > 3:
                         candidato = {"nome": nome, "partido": partido, "uf": uf}
                         
-                        # Se não temos nenhum relator ainda, guarda este
-                        if not relator_qualquer:
-                            relator_qualquer = candidato
-                        
-                        # Se é do órgão atual, prioriza
+                        # Se é do órgão atual e ainda não temos relator do órgão atual, guarda
                         if orgao_tram and orgao_atual and orgao_tram.upper() == orgao_atual.upper():
                             if not relator_orgao_atual:
                                 relator_orgao_atual = candidato
+                                break  # Já encontrou o mais recente do órgão atual
+                        
+                        # Guarda o primeiro encontrado como fallback
+                        if not relator_qualquer:
+                            relator_qualquer = candidato
                         
                         break
+            
+            # Se já encontrou relator do órgão atual, pode parar
+            if relator_orgao_atual:
+                break
         
         # Prioriza relator do órgão atual, senão pega qualquer um
         relator_info = relator_orgao_atual or relator_qualquer
