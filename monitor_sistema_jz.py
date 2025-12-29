@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v15
+# monitor_sistema_jz.py - v16
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 15: Abas limpas, Gráficos ordenados, Performance otimizada
+# VERSÃO 16: Aba de apresentação, Gráficos Plotly com rótulos
 # ============================================================
 
 import datetime
@@ -28,7 +28,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/15.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/16.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -1242,53 +1242,112 @@ def montar_estrategia_tabela(situacao: str, relator_alerta: str = "") -> pd.Data
 
 
 # ============================================================
-# GRÁFICOS
+# GRÁFICOS - COM PLOTLY PARA MELHOR VISUALIZAÇÃO
 # ============================================================
 
 def render_grafico_barras_situacao(df: pd.DataFrame):
-    """Renderiza gráfico de barras horizontal por situação usando Streamlit nativo."""
+    """Renderiza gráfico de barras horizontal por situação com Plotly."""
     if df.empty or "Situação atual" not in df.columns:
         st.info("Sem dados para gráfico de situação.")
         return
     
-    df_counts = (
-        df.assign(_s=df["Situação atual"].fillna("-").replace("", "-"))
-        .groupby("_s", as_index=False)
-        .size()
-        .rename(columns={"_s": "Situação", "size": "Quantidade"})
-        .sort_values("Quantidade", ascending=True)
-    )
-    
-    if df_counts.empty:
-        st.info("Sem dados para gráfico.")
-        return
-    
-    st.markdown("##### 📊 Distribuição por Situação Atual")
-    st.bar_chart(df_counts.set_index("Situação")["Quantidade"], horizontal=True, use_container_width=True)
+    try:
+        import plotly.express as px
+        
+        df_counts = (
+            df.assign(_s=df["Situação atual"].fillna("-").replace("", "-"))
+            .groupby("_s", as_index=False)
+            .size()
+            .rename(columns={"_s": "Situação", "size": "Quantidade"})
+            .sort_values("Quantidade", ascending=True)  # Ascendente para horizontal (maiores no topo)
+        )
+        
+        if df_counts.empty:
+            st.info("Sem dados para gráfico.")
+            return
+        
+        st.markdown("##### 📊 Distribuição por Situação Atual")
+        
+        fig = px.bar(
+            df_counts, 
+            x="Quantidade", 
+            y="Situação", 
+            orientation='h',
+            text="Quantidade",
+            color_discrete_sequence=["#1f77b4"]
+        )
+        fig.update_traces(textposition='outside', textfont_size=10)
+        fig.update_layout(
+            height=max(300, len(df_counts) * 25),
+            margin=dict(l=10, r=10, t=10, b=10),
+            yaxis=dict(tickfont=dict(size=10)),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except ImportError:
+        # Fallback para Streamlit nativo
+        df_counts = (
+            df.assign(_s=df["Situação atual"].fillna("-").replace("", "-"))
+            .groupby("_s", as_index=False)
+            .size()
+            .rename(columns={"_s": "Situação", "size": "Quantidade"})
+            .sort_values("Quantidade", ascending=True)
+        )
+        st.markdown("##### 📊 Distribuição por Situação Atual")
+        st.bar_chart(df_counts.set_index("Situação")["Quantidade"], horizontal=True, use_container_width=True)
 
 
 def render_grafico_barras_tema(df: pd.DataFrame):
-    """Renderiza gráfico de barras por tema."""
+    """Renderiza gráfico de barras por tema com Plotly."""
     if df.empty or "Tema" not in df.columns:
         st.info("Sem dados para gráfico de tema.")
         return
     
-    df_counts = (
-        df.groupby("Tema", as_index=False)
-        .size()
-        .rename(columns={"size": "Quantidade"})
-        .sort_values("Quantidade", ascending=False)
-    )
-    
-    if df_counts.empty:
-        return
-    
-    st.markdown("##### 📊 Distribuição por Tema")
-    st.bar_chart(df_counts.set_index("Tema")["Quantidade"], use_container_width=True)
+    try:
+        import plotly.express as px
+        
+        df_counts = (
+            df.groupby("Tema", as_index=False)
+            .size()
+            .rename(columns={"size": "Quantidade"})
+            .sort_values("Quantidade", ascending=False)
+        )
+        
+        if df_counts.empty:
+            return
+        
+        st.markdown("##### 📊 Distribuição por Tema")
+        
+        fig = px.bar(
+            df_counts, 
+            x="Tema", 
+            y="Quantidade",
+            text="Quantidade",
+            color_discrete_sequence=["#2ca02c"]
+        )
+        fig.update_traces(textposition='outside', textfont_size=10)
+        fig.update_layout(
+            height=400,
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis=dict(tickangle=45, tickfont=dict(size=9)),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except ImportError:
+        df_counts = (
+            df.groupby("Tema", as_index=False)
+            .size()
+            .rename(columns={"size": "Quantidade"})
+            .sort_values("Quantidade", ascending=False)
+        )
+        st.markdown("##### 📊 Distribuição por Tema")
+        st.bar_chart(df_counts.set_index("Tema")["Quantidade"], use_container_width=True)
 
 
 def render_grafico_mensal(df: pd.DataFrame):
-    """Renderiza gráfico de tendência mensal."""
+    """Renderiza gráfico de tendência mensal com formato MM/YYYY."""
     if df.empty or "AnoStatus" not in df.columns or "MesStatus" not in df.columns:
         st.info("Sem dados para gráfico mensal.")
         return
@@ -1297,26 +1356,59 @@ def render_grafico_mensal(df: pd.DataFrame):
     if df_valid.empty:
         return
     
-    df_valid["AnoMes"] = df_valid.apply(
-        lambda r: f"{int(r['AnoStatus'])}-{int(r['MesStatus']):02d}", axis=1
+    # Formato MM/YYYY
+    df_valid["MesAno"] = df_valid.apply(
+        lambda r: f"{int(r['MesStatus']):02d}/{int(r['AnoStatus'])}", axis=1
+    )
+    df_valid["AnoMes_sort"] = df_valid.apply(
+        lambda r: f"{int(r['AnoStatus'])}{int(r['MesStatus']):02d}", axis=1
     )
     
     df_mensal = (
-        df_valid.groupby("AnoMes", as_index=False)
+        df_valid.groupby(["AnoMes_sort", "MesAno"], as_index=False)
         .size()
         .rename(columns={"size": "Movimentações"})
-        .sort_values("AnoMes")
+        .sort_values("AnoMes_sort")
     )
     
     if df_mensal.empty or len(df_mensal) < 2:
         return
     
-    st.markdown("##### 📈 Tendência de Movimentações por Mês")
-    st.line_chart(df_mensal.set_index("AnoMes")["Movimentações"], use_container_width=True)
+    try:
+        import plotly.express as px
+        
+        st.markdown("##### 📈 Tendência de Movimentações por Mês")
+        
+        fig = px.line(
+            df_mensal, 
+            x="MesAno", 
+            y="Movimentações",
+            markers=True,
+            text="Movimentações"
+        )
+        fig.update_traces(
+            textposition='top center', 
+            textfont_size=10,
+            line=dict(color="#ff7f0e", width=2),
+            marker=dict(size=8)
+        )
+        fig.update_layout(
+            height=350,
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis_title="Mês/Ano",
+            yaxis_title="Movimentações",
+            xaxis=dict(tickangle=45, tickfont=dict(size=10)),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except ImportError:
+        st.markdown("##### 📈 Tendência de Movimentações por Mês")
+        st.line_chart(df_mensal.set_index("MesAno")["Movimentações"], use_container_width=True)
 
 
 def render_grafico_tipo(df: pd.DataFrame):
-    """Renderiza gráfico por tipo de proposição."""
+    """Renderiza gráfico por tipo de proposição com Plotly."""
     if df.empty or "siglaTipo" not in df.columns:
         return
     
@@ -1330,12 +1422,34 @@ def render_grafico_tipo(df: pd.DataFrame):
     if df_counts.empty:
         return
     
-    st.markdown("##### 📊 Distribuição por Tipo de Proposição")
-    st.bar_chart(df_counts.set_index("Tipo")["Quantidade"], use_container_width=True)
+    try:
+        import plotly.express as px
+        
+        st.markdown("##### 📊 Distribuição por Tipo de Proposição")
+        
+        fig = px.bar(
+            df_counts, 
+            x="Tipo", 
+            y="Quantidade",
+            text="Quantidade",
+            color_discrete_sequence=["#9467bd"]
+        )
+        fig.update_traces(textposition='outside', textfont_size=11)
+        fig.update_layout(
+            height=350,
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis=dict(tickfont=dict(size=11)),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except ImportError:
+        st.markdown("##### 📊 Distribuição por Tipo de Proposição")
+        st.bar_chart(df_counts.set_index("Tipo")["Quantidade"], use_container_width=True)
 
 
 def render_grafico_orgao(df: pd.DataFrame):
-    """Renderiza gráfico por órgão atual."""
+    """Renderiza gráfico por órgão atual com Plotly."""
     if df.empty or "Órgão (sigla)" not in df.columns:
         return
     
@@ -1354,8 +1468,30 @@ def render_grafico_orgao(df: pd.DataFrame):
     if df_counts.empty:
         return
     
-    st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
-    st.bar_chart(df_counts.set_index("Órgão")["Quantidade"], use_container_width=True)
+    try:
+        import plotly.express as px
+        
+        st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
+        
+        fig = px.bar(
+            df_counts, 
+            x="Órgão", 
+            y="Quantidade",
+            text="Quantidade",
+            color_discrete_sequence=["#d62728"]
+        )
+        fig.update_traces(textposition='outside', textfont_size=10)
+        fig.update_layout(
+            height=350,
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis=dict(tickangle=45, tickfont=dict(size=9)),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except ImportError:
+        st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
+        st.bar_chart(df_counts.set_index("Órgão")["Quantidade"], use_container_width=True)
 
 
 # ============================================================
@@ -1381,20 +1517,10 @@ def main():
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # TÍTULO COM FOTO DA DEPUTADA (como na v12)
+    # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
-    col_foto_titulo, col_titulo = st.columns([1, 9])
-    
-    with col_foto_titulo:
-        foto_deputada_url = f"https://www.camara.leg.br/internet/deputado/bandep/{DEPUTADA_ID_PADRAO}.jpg"
-        try:
-            st.image(foto_deputada_url, width=80)
-        except:
-            st.markdown("👤")
-    
-    with col_titulo:
-        st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-        st.caption("v15 – Abas limpas, Gráficos ordenados, Performance otimizada")
+    st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
+    st.caption("v16 – Aba de apresentação, Gráficos aprimorados")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -1506,20 +1632,156 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     st.markdown("---")
 
     # ============================================================
-    # ABAS REORGANIZADAS
+    # ABAS REORGANIZADAS (6 abas)
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "1️⃣ Autoria & Relatoria na pauta",
-        "2️⃣ Palavras-chave na pauta",
-        "3️⃣ Comissões estratégicas",
-        "4️⃣ Buscar Proposição Específica",
-        "5️⃣ Matérias por situação atual"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "1️⃣ Apresentação",
+        "2️⃣ Autoria & Relatoria na pauta",
+        "3️⃣ Palavras-chave na pauta",
+        "4️⃣ Comissões estratégicas",
+        "5️⃣ Buscar Proposição Específica",
+        "6️⃣ Matérias por situação atual"
     ])
 
     # ============================================================
-    # ABA 1 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
+    # ABA 1 - APRESENTAÇÃO E GLOSSÁRIO
     # ============================================================
     with tab1:
+        st.subheader("📖 Apresentação do Sistema")
+        
+        st.markdown("""
+Este **Monitor Legislativo** foi desenvolvido para acompanhar em tempo real a atuação parlamentar 
+da Deputada Federal **Júlia Zanatta (PL-SC)** na Câmara dos Deputados.
+
+O sistema consulta a **API de Dados Abertos da Câmara dos Deputados** para fornecer informações 
+atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
+        """)
+        
+        st.markdown("---")
+        st.markdown("### 🎯 Funcionalidades por Aba")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+**2️⃣ Autoria & Relatoria na pauta**
+- Proposições de **autoria** da deputada que estão na pauta
+- Proposições onde a deputada é **relatora**
+- Filtrado pelo período selecionado na barra lateral
+
+**3️⃣ Palavras-chave na pauta**
+- Busca por **palavras-chave** configuradas
+- Identifica proposições de interesse temático
+- Vacinas, armas, aborto, PIX, DREX, etc.
+
+**4️⃣ Comissões estratégicas**
+- Eventos nas comissões de interesse
+- CDC, CCOM, CE, CREDN, CCJC
+            """)
+        
+        with col2:
+            st.markdown("""
+**5️⃣ Buscar Proposição Específica**
+- Busca livre por qualquer proposição
+- Filtros por ano e tipo
+- Detalhes completos com linha do tempo
+
+**6️⃣ Matérias por situação atual**
+- Visão geral da **carteira de proposições**
+- Gráficos analíticos por situação, tema, órgão
+- Filtros multi-nível avançados
+            """)
+        
+        st.markdown("---")
+        st.markdown("### 📚 Glossário de Termos")
+        
+        with st.expander("📋 Tipos de Proposições", expanded=False):
+            st.markdown("""
+| Sigla | Nome Completo | Descrição |
+|-------|---------------|-----------|
+| **PL** | Projeto de Lei | Proposta de lei ordinária |
+| **PLP** | Projeto de Lei Complementar | Lei que complementa a Constituição |
+| **PEC** | Proposta de Emenda à Constituição | Altera a Constituição Federal |
+| **PDL** | Projeto de Decreto Legislativo | Matérias de competência exclusiva do Congresso |
+| **PRC** | Projeto de Resolução da Câmara | Normas internas da Câmara |
+| **PLV** | Projeto de Lei de Conversão | Conversão de Medida Provisória em lei |
+| **MPV** | Medida Provisória | Ato do Presidente com força de lei |
+| **RIC** | Requerimento de Informação | Pedido de informações a órgãos públicos |
+            """)
+        
+        with st.expander("📊 Situações de Tramitação", expanded=False):
+            st.markdown("""
+| Situação | Significado |
+|----------|-------------|
+| **Aguardando Designação de Relator** | Proposição aguarda indicação de parlamentar para analisar |
+| **Aguardando Parecer** | Relator designado, aguardando elaboração do parecer |
+| **Pronta para Pauta** | Parecer aprovado, aguarda inclusão em pauta de votação |
+| **Tramitando em Conjunto** | Apensada a outra proposição principal |
+| **Aguardando Deliberação** | Na pauta, aguardando votação |
+| **Arquivada** | Proposição arquivada (fim de legislatura ou rejeição) |
+            """)
+        
+        with st.expander("🚦 Indicadores de Urgência", expanded=False):
+            st.markdown("""
+| Sinal | Tempo parado | Nível |
+|-------|--------------|-------|
+| 🚨 | ≤ 2 dias | **URGENTÍSSIMO** - Ação imediata necessária |
+| ⚠️ | ≤ 5 dias | **URGENTE** - Requer atenção prioritária |
+| 🔔 | ≤ 15 dias | **RECENTE** - Acompanhar de perto |
+| 🟢 | < 7 dias | Normal - Em movimento |
+| 🟡 | 7-14 dias | Atenção - Verificar |
+| 🟠 | 15-29 dias | Alerta - Possível estagnação |
+| 🔴 | ≥ 30 dias | Crítico - Parado há muito tempo |
+            """)
+        
+        with st.expander("🏛️ Comissões Estratégicas Monitoradas", expanded=False):
+            st.markdown("""
+| Sigla | Nome Completo |
+|-------|---------------|
+| **CDC** | Comissão de Defesa do Consumidor |
+| **CCOM** | Comissão de Comunicação |
+| **CE** | Comissão de Educação |
+| **CREDN** | Comissão de Relações Exteriores e Defesa Nacional |
+| **CCJC** | Comissão de Constituição e Justiça e de Cidadania |
+            """)
+        
+        with st.expander("🏷️ Categorias de Temas", expanded=False):
+            st.markdown("""
+O sistema categoriza automaticamente as proposições nos seguintes temas:
+
+- **Saúde** - Vacinas, hospitais, medicamentos, SUS, ANVISA
+- **Segurança Pública** - Armas, polícia, crimes, sistema penal
+- **Economia e Tributos** - PIX, DREX, impostos, IRPF, previdência
+- **Família e Costumes** - Aborto, CONANDA, crianças, gênero
+- **Educação** - Escolas, universidades, MEC, FUNDEB
+- **Agronegócio** - Produtores rurais, terra, MST, defensivos
+- **Meio Ambiente** - IBAMA, florestas, clima, saneamento
+- **Comunicação e Tecnologia** - Internet, redes sociais, LGPD, IA
+- **Administração Pública** - Servidores, concursos, licitações
+- **Transporte e Infraestrutura** - Rodovias, portos, mobilidade
+- **Defesa e Soberania** - Forças Armadas, fronteiras, militar
+- **Direito e Justiça** - STF, STJ, tribunais, processos
+- **Relações Exteriores** - Diplomacia, tratados, comércio exterior
+            """)
+        
+        st.markdown("---")
+        st.markdown("### ⚙️ Como Usar")
+        
+        st.info("""
+1. **Configure o período** na barra lateral (datas de início e fim)
+2. **Clique em "Rodar monitoramento"** para buscar eventos da pauta
+3. **Navegue pelas abas** para ver diferentes visões dos dados
+4. **Use os filtros** para refinar os resultados
+5. **Exporte para XLSX** os dados que precisar
+        """)
+        
+        st.markdown("---")
+        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+
+    # ============================================================
+    # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
+    # ============================================================
+    with tab2:
         st.subheader("Autoria & Relatoria na pauta")
         
         if df.empty:
@@ -1578,17 +1840,17 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         prop_selecionada = st.selectbox(
                             "Selecione uma proposição para ver detalhes:",
                             options=list(opcoes_props.keys()),
-                            key="select_prop_autoria_tab1"
+                            key="select_prop_autoria_tab2"
                         )
                         
                         if prop_selecionada:
-                            selected_id_tab1 = opcoes_props[prop_selecionada]
-                            exibir_detalhes_proposicao(selected_id_tab1, key_prefix="tab1")
+                            selected_id_tab2 = opcoes_props[prop_selecionada]
+                            exibir_detalhes_proposicao(selected_id_tab2, key_prefix="tab2")
 
     # ============================================================
-    # ABA 2 - PALAVRAS-CHAVE
+    # ABA 3 - PALAVRAS-CHAVE
     # ============================================================
-    with tab2:
+    with tab3:
         st.subheader("Palavras-chave na pauta")
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
@@ -1614,9 +1876,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 )
 
     # ============================================================
-    # ABA 3 - COMISSÕES ESTRATÉGICAS
+    # ABA 4 - COMISSÕES ESTRATÉGICAS
     # ============================================================
-    with tab3:
+    with tab4:
         st.subheader("Comissões estratégicas")
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
@@ -1642,16 +1904,16 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 )
 
     # ============================================================
-    # ABA 4 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
+    # ABA 5 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
     # ============================================================
-    with tab4:
+    with tab5:
         st.markdown("### 🔍 Buscar Proposição Específica")
         st.caption("Busque proposições de autoria da deputada e veja detalhes completos")
 
         # Botão de limpar cache
         col_cache, col_info = st.columns([1, 3])
         with col_cache:
-            if st.button("🧹 Limpar cache", key="limpar_cache_tab4"):
+            if st.button("🧹 Limpar cache", key="limpar_cache_tab5"):
                 fetch_proposicao_completa.clear()
                 fetch_lista_proposicoes_autoria_geral.clear()
                 fetch_rics_por_autor.clear()
@@ -1674,10 +1936,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             col_ano, col_tipo = st.columns([1, 1])
             with col_ano:
                 anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
-                anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos, key="anos_tab4")
+                anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos, key="anos_tab6")
             with col_tipo:
                 tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
-                tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos, key="tipos_tab4")
+                tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos, key="tipos_tab6")
 
             df_base = df_aut.copy()
             if anos_sel:
@@ -1693,7 +1955,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 value="",
                 placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'",
                 help="Busque por sigla/número/ano ou palavras na ementa",
-                key="busca_tab4"
+                key="busca_tab5"
             )
 
             df_rast = df_base.copy()
@@ -1753,7 +2015,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
                     "Ementa": st.column_config.TextColumn("Ementa", width="large"),
                 },
-                key="df_busca_tab4"
+                key="df_busca_tab5"
             )
             
             st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
@@ -1765,7 +2027,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 data=bytes_rast,
                 file_name=f"busca_especifica_proposicoes.{ext_rast}",
                 mime=mime_rast,
-                key="export_busca_tab4"
+                key="export_busca_tab5"
             )
 
             # Detalhes da proposição selecionada
@@ -1783,38 +2045,38 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if not selected_id:
                 st.info("Clique em uma proposição acima para ver detalhes completos.")
             else:
-                exibir_detalhes_proposicao(selected_id, key_prefix="tab4")
+                exibir_detalhes_proposicao(selected_id, key_prefix="tab5")
 
     # ============================================================
-    # ABA 5 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
+    # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
     # ============================================================
-    with tab5:
+    with tab6:
         st.markdown("### 📊 Matérias por situação atual")
         st.caption("Análise da carteira de proposições por status de tramitação")
 
         with st.spinner("Carregando proposições de autoria..."):
-            df_aut5 = fetch_lista_proposicoes_autoria(id_deputada)
+            df_aut6 = fetch_lista_proposicoes_autoria(id_deputada)
 
-        if df_aut5.empty:
+        if df_aut6.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
         else:
-            df_aut5 = df_aut5[df_aut5["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
+            df_aut6 = df_aut6[df_aut6["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
             st.markdown("#### 🗂️ Filtros de Proposições")
             
             col2, col3 = st.columns([1.1, 1.1])
             with col2:
-                anos5 = sorted([a for a in df_aut5["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
-                anos_sel5 = st.multiselect("Ano (da proposição)", options=anos5, default=anos5[:3] if len(anos5) >= 3 else anos5, key="anos_tab5")
+                anos6 = sorted([a for a in df_aut6["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
+                anos_sel6 = st.multiselect("Ano (da proposição)", options=anos6, default=anos6[:3] if len(anos6) >= 3 else anos6, key="anos_tab6")
             with col3:
-                tipos5 = sorted([t for t in df_aut5["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
-                tipos_sel5 = st.multiselect("Tipo", options=tipos5, default=tipos5, key="tipos_tab5")
+                tipos6 = sorted([t for t in df_aut6["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
+                tipos_sel6 = st.multiselect("Tipo", options=tipos6, default=tipos6, key="tipos_tab6")
 
-            df_base5 = df_aut5.copy()
-            if anos_sel5:
-                df_base5 = df_base5[df_base5["ano"].isin(anos_sel5)].copy()
-            if tipos_sel5:
-                df_base5 = df_base5[df_base5["siglaTipo"].isin(tipos_sel5)].copy()
+            df_base6 = df_aut6.copy()
+            if anos_sel6:
+                df_base6 = df_base6[df_base6["ano"].isin(anos_sel6)].copy()
+            if tipos_sel6:
+                df_base6 = df_base6[df_base6["siglaTipo"].isin(tipos_sel6)].copy()
 
             st.markdown("---")
 
@@ -1825,14 +2087,14 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     "Limite (performance)",
                     min_value=20,
                     max_value=600,
-                    value=min(200, len(df_base5)) if len(df_base5) else 20,
+                    value=min(200, len(df_base6)) if len(df_base6) else 20,
                     step=20,
-                    key="max_status_tab5"
+                    key="max_status_tab6"
                 )
             with cS3:
                 st.caption("Aplique filtros acima (Ano/Tipo) e depois carregue o status.")
             with cS4:
-                if st.button("✖ Limpar filtro por clique", key="limpar_click_tab5"):
+                if st.button("✖ Limpar filtro por clique", key="limpar_click_tab6"):
                     st.session_state["status_click_sel"] = None
 
             df_status_view = st.session_state.get("df_status_last", pd.DataFrame()).copy()
@@ -1883,25 +2145,25 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     )
 
             with f1:
-                status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel, key="status_sel_tab5")
+                status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel, key="status_sel_tab6")
 
             with f2:
-                org_sel = st.multiselect("Órgão (sigla)", options=org_opts, default=[], key="org_sel_tab5")
+                org_sel = st.multiselect("Órgão (sigla)", options=org_opts, default=[], key="org_sel_tab6")
 
             with f3:
-                ano_status_sel = st.multiselect("Ano (do status)", options=ano_status_opts, default=[], key="ano_status_sel_tab5")
+                ano_status_sel = st.multiselect("Ano (do status)", options=ano_status_opts, default=[], key="ano_status_sel_tab6")
 
             with f4:
                 mes_labels = [f"{m:02d}-{MESES_PT.get(m, '')}" for m in mes_status_opts]
                 mes_map = {f"{m:02d}-{MESES_PT.get(m, '')}": m for m in mes_status_opts}
-                mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[], key="mes_sel_tab5")
+                mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[], key="mes_sel_tab6")
                 mes_status_sel = [mes_map[x] for x in mes_sel_labels if x in mes_map]
             
             # Segunda linha de filtros multi-nível
             f5, f6, f7 = st.columns([1.2, 1.2, 1.6])
             
             with f5:
-                tema_sel = st.multiselect("Tema", options=tema_opts, default=[], key="tema_sel_tab5")
+                tema_sel = st.multiselect("Tema", options=tema_opts, default=[], key="tema_sel_tab6")
             
             with f6:
                 relator_sel = st.multiselect("Relator(a)", options=relator_opts, default=[], key="relator_sel_tab5")
@@ -1918,9 +2180,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
             if bt_status:
                 with st.spinner("Buscando status..."):
-                    ids_list = df_base5["id"].astype(str).head(int(max_status)).tolist()
+                    ids_list = df_base6["id"].astype(str).head(int(max_status)).tolist()
                     status_map = build_status_map(ids_list)
-                    df_status_view = enrich_with_status(df_base5.head(int(max_status)), status_map)
+                    df_status_view = enrich_with_status(df_base6.head(int(max_status)), status_map)
                     st.session_state["df_status_last"] = df_status_view
 
             if df_status_view.empty:
