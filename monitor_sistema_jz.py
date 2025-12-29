@@ -1284,12 +1284,10 @@ def render_grafico_barras_situacao(df: pd.DataFrame):
             showlegend=False
         )
         config = {
-    "scrollZoom": False,      # trava zoom pelo scroll do mouse
-    "displayModeBar": False  # remove barra de ferramentas
-}
-
-st.plotly_chart(fig, use_container_width=True, config=config)
-
+            "scrollZoom": False,
+            "displayModeBar": False
+        }
+        st.plotly_chart(fig, use_container_width=True, config=config)
         
     except ImportError:
         # Fallback para Streamlit nativo
@@ -1348,12 +1346,10 @@ def render_grafico_barras_tema(df: pd.DataFrame):
             showlegend=False
         )
         config = {
-    "scrollZoom": False,      # trava zoom pelo scroll do mouse
-    "displayModeBar": False  # remove barra de ferramentas
-}
-
-st.plotly_chart(fig, use_container_width=True, config=config)
-
+            "scrollZoom": False,
+            "displayModeBar": False
+        }
+        st.plotly_chart(fig, use_container_width=True, config=config)
         
     except ImportError:
         df_counts = (
@@ -1438,14 +1434,11 @@ def render_grafico_mensal(df: pd.DataFrame):
             ),
             showlegend=False,
         )
-
         config = {
-    "scrollZoom": False,      # trava zoom pelo scroll do mouse
-    "displayModeBar": False  # remove barra de ferramentas
-}
-
-st.plotly_chart(fig, use_container_width=True, config=config)
-
+            "scrollZoom": False,
+            "displayModeBar": False
+        }
+        st.plotly_chart(fig, use_container_width=True, config=config)
 
     except ImportError:
         # Fallback (Streamlit) — mantém rótulo ordenado
@@ -1498,12 +1491,10 @@ def render_grafico_tipo(df: pd.DataFrame):
             showlegend=False
         )
         config = {
-    "scrollZoom": False,      # trava zoom pelo scroll do mouse
-    "displayModeBar": False  # remove barra de ferramentas
-}
-
-st.plotly_chart(fig, use_container_width=True, config=config)
-
+            "scrollZoom": False,
+            "displayModeBar": False
+        }
+        st.plotly_chart(fig, use_container_width=True, config=config)
         
     except ImportError:
         st.markdown("##### 📊 Distribuição por Tipo de Proposição")
@@ -1558,12 +1549,10 @@ def render_grafico_orgao(df: pd.DataFrame):
             showlegend=False
         )
         config = {
-    "scrollZoom": False,      # trava zoom pelo scroll do mouse
-    "displayModeBar": False  # remove barra de ferramentas
-}
-
-st.plotly_chart(fig, use_container_width=True, config=config)
-
+            "scrollZoom": False,
+            "displayModeBar": False
+        }
+        st.plotly_chart(fig, use_container_width=True, config=config)
         
     except ImportError:
         st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
