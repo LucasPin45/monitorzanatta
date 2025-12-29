@@ -1276,10 +1276,10 @@ def render_grafico_barras_situacao(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#1f77b4"]
         )
-        fig.update_traces(textposition='outside', textfont=dict(size=10), cliponaxis=False)
+        fig.update_traces(textposition='outside', textfont_size=10)
         fig.update_layout(
-            height=max(320, len(df_counts) * 26),
-            margin=dict(l=120, r=20, t=30, b=30),
+            height=max(300, len(df_counts) * 25),
+            margin=dict(l=10, r=10, t=10, b=10),
             yaxis=dict(tickfont=dict(size=10)),
             showlegend=False
         )
@@ -1329,10 +1329,10 @@ def render_grafico_barras_tema(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#2ca02c"]
         )
-        fig.update_traces(textposition='outside', textfont=dict(size=10), cliponaxis=False)
+        fig.update_traces(textposition='outside', textfont_size=10)
         fig.update_layout(
-            height=420,
-            margin=dict(l=40, r=20, t=30, b=90),
+            height=400,
+            margin=dict(l=10, r=10, t=10, b=10),
             xaxis=dict(
                 tickangle=45, 
                 tickfont=dict(size=9),
@@ -1355,15 +1355,10 @@ def render_grafico_barras_tema(df: pd.DataFrame):
 
 
 def render_grafico_mensal(df: pd.DataFrame):
-    """Renderiza gráfico de tendência mensal.
+    """Renderiza gráfico de tendência mensal em ordem cronológica garantida.
 
-    Problema observado: em alguns ambientes o Plotly/Streamlit acaba serializando o eixo X como *categoria*
-    (strings) e a ordenação vira alfabética.
-
-    Solução definitiva (sem mexer na estrutura do app):
-    - ordenar por uma coluna datetime real (DataMes)
-    - exibir no eixo X um *label amigável* (ex.: "Dez/2025")
-    - travar a ordem com categoryorder='array' + categoryarray.
+    Estratégia: usa eixo X numérico (YYYYMM) e define ticktext (YYYY/MM).
+    Isso evita qualquer ordenação alfabética do Plotly.
     """
     if df.empty or "AnoStatus" not in df.columns or "MesStatus" not in df.columns:
         st.info("Sem dados para gráfico mensal.")
@@ -1373,40 +1368,30 @@ def render_grafico_mensal(df: pd.DataFrame):
     if df_valid.empty:
         return
 
-    # Coluna datetime (1º dia do mês) para ordenação cronológica real
-    df_valid["DataMes"] = pd.to_datetime(
-        df_valid["AnoStatus"].astype(int).astype(str)
-        + "-"
-        + df_valid["MesStatus"].astype(int).astype(str).str.zfill(2)
-        + "-01",
-        errors="coerce",
+    # Chave numérica (YYYYMM) para garantir ordem cronológica
+    df_valid["AnoMes_sort"] = df_valid.apply(
+        lambda r: int(r["AnoStatus"]) * 100 + int(r["MesStatus"]), axis=1
     )
-    df_valid = df_valid[df_valid["DataMes"].notna()].copy()
-    if df_valid.empty:
-        return
 
     df_mensal = (
-        df_valid.groupby("DataMes", as_index=False)
+        df_valid.groupby("AnoMes_sort", as_index=False)
         .size()
         .rename(columns={"size": "Movimentações"})
-        .sort_values("DataMes")
+        .sort_values("AnoMes_sort")
         .reset_index(drop=True)
     )
 
     if df_mensal.empty or len(df_mensal) < 2:
         return
 
-    # Label no formato "Dez/2025" (evita mm/yyyy virar alfabético)
-    def _label_mes(dt):
-        try:
-            dt = pd.Timestamp(dt)
-            mes_nome = MESES_PT.get(int(dt.month), str(dt.month).zfill(2))
-            return f"{mes_nome}/{int(dt.year)}"
-        except Exception:
-            return "—"
+    # Rótulo no formato YYYY/MM (ex.: 2023/01)
+    df_mensal["Label"] = df_mensal["AnoMes_sort"].apply(
+        lambda ym: f"{int(ym)//100:04d}/{int(ym)%100:02d}"
+    )
 
-    df_mensal["LabelMes"] = df_mensal["DataMes"].apply(_label_mes)
-    categorias_ordenadas = df_mensal["LabelMes"].tolist()
+    x_vals = df_mensal["AnoMes_sort"].tolist()
+    y_vals = df_mensal["Movimentações"].tolist()
+    tick_text = df_mensal["Label"].tolist()
 
     try:
         import plotly.graph_objects as go
@@ -1414,46 +1399,43 @@ def render_grafico_mensal(df: pd.DataFrame):
         st.markdown("##### 📈 Tendência de Movimentações por Mês")
 
         fig = go.Figure()
-
         fig.add_trace(
             go.Scatter(
-                x=df_mensal["LabelMes"],
-                y=df_mensal["Movimentações"],
+                x=x_vals,
+                y=y_vals,
                 mode="lines+markers+text",
-                text=df_mensal["Movimentações"],
+                text=y_vals,
                 textposition="top center",
                 textfont=dict(size=10),
+                line=dict(color="#ff7f0e", width=2),
                 marker=dict(size=8),
             )
         )
 
-        fig.update_traces(cliponaxis=False)
-
         fig.update_layout(
             height=380,
-            margin=dict(l=40, r=20, t=30, b=70),
-            xaxis_title="Mês/Ano",
+            margin=dict(l=40, r=20, t=30, b=80),
+            xaxis_title="Ano/Mês",
             yaxis_title="Movimentações",
+            xaxis=dict(
+                tickmode="array",
+                tickvals=x_vals,
+                ticktext=tick_text,
+                tickangle=45,
+                tickfont=dict(size=10),
+            ),
             showlegend=False,
         )
-
-        # TRAVA a ordem cronológica (sem chance de virar alfabético)
-        fig.update_xaxes(
-            type="category",
-            categoryorder="array",
-            categoryarray=categorias_ordenadas,
-            tickangle=45,
-            tickfont=dict(size=10),
-        )
-        fig.update_yaxes(tickfont=dict(size=10))
 
         st.plotly_chart(fig, use_container_width=True)
 
     except ImportError:
+        # Fallback (Streamlit) — mantém rótulo ordenado
         st.markdown("##### 📈 Tendência de Movimentações por Mês")
-        # Fallback simples (já ordenado)
-        st.line_chart(df_mensal.set_index("LabelMes")["Movimentações"], use_container_width=True)
-
+        st.line_chart(
+            df_mensal.set_index("Label")["Movimentações"],
+            use_container_width=True
+        )
 
 
 def render_grafico_tipo(df: pd.DataFrame):
@@ -1486,10 +1468,10 @@ def render_grafico_tipo(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#1f77b4"]
         )
-        fig.update_traces(textposition='outside', textfont=dict(size=11), cliponaxis=False)
+        fig.update_traces(textposition='outside', textfont_size=11)
         fig.update_layout(
-            height=420,
-            margin=dict(l=40, r=20, t=30, b=90),
+            height=350,
+            margin=dict(l=10, r=10, t=10, b=10),
             xaxis=dict(
                 tickfont=dict(size=11),
                 categoryorder='array',
@@ -1539,10 +1521,10 @@ def render_grafico_orgao(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#1f77b4"]
         )
-        fig.update_traces(textposition='outside', textfont=dict(size=10), cliponaxis=False)
+        fig.update_traces(textposition='outside', textfont_size=10)
         fig.update_layout(
-            height=420,
-            margin=dict(l=40, r=20, t=30, b=90),
+            height=350,
+            margin=dict(l=10, r=10, t=10, b=10),
             xaxis=dict(
                 tickangle=45, 
                 tickfont=dict(size=9),
