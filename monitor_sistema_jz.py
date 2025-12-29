@@ -1299,7 +1299,7 @@ def render_grafico_barras_situacao(df: pd.DataFrame):
 
 
 def render_grafico_barras_tema(df: pd.DataFrame):
-    """Renderiza gráfico de barras por tema com Plotly."""
+    """Renderiza gráfico de barras por tema com Plotly - ordem decrescente."""
     if df.empty or "Tema" not in df.columns:
         st.info("Sem dados para gráfico de tema.")
         return
@@ -1317,6 +1317,9 @@ def render_grafico_barras_tema(df: pd.DataFrame):
         if df_counts.empty:
             return
         
+        # Lista ordenada por quantidade decrescente
+        ordem_temas = df_counts["Tema"].tolist()
+        
         st.markdown("##### 📊 Distribuição por Tema")
         
         fig = px.bar(
@@ -1330,7 +1333,12 @@ def render_grafico_barras_tema(df: pd.DataFrame):
         fig.update_layout(
             height=400,
             margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(tickangle=45, tickfont=dict(size=9)),
+            xaxis=dict(
+                tickangle=45, 
+                tickfont=dict(size=9),
+                categoryorder='array',
+                categoryarray=ordem_temas
+            ),
             showlegend=False
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -1369,6 +1377,7 @@ def render_grafico_mensal(df: pd.DataFrame):
         .size()
         .rename(columns={"size": "Movimentações"})
         .sort_values("AnoMes_sort")  # Ordenar pela chave numérica
+        .reset_index(drop=True)
     )
     
     if df_mensal.empty or len(df_mensal) < 2:
@@ -1378,23 +1387,24 @@ def render_grafico_mensal(df: pd.DataFrame):
     categorias_ordenadas = df_mensal["MesAno"].tolist()
     
     try:
-        import plotly.express as px
+        import plotly.graph_objects as go
         
         st.markdown("##### 📈 Tendência de Movimentações por Mês")
         
-        fig = px.line(
-            df_mensal, 
-            x="MesAno", 
-            y="Movimentações",
-            markers=True,
-            text="Movimentações"
-        )
-        fig.update_traces(
-            textposition='top center', 
-            textfont_size=10,
+        # Usar graph_objects para controle total
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=categorias_ordenadas,
+            y=df_mensal["Movimentações"].tolist(),
+            mode='lines+markers+text',
+            text=df_mensal["Movimentações"].tolist(),
+            textposition='top center',
+            textfont=dict(size=10),
             line=dict(color="#ff7f0e", width=2),
             marker=dict(size=8)
-        )
+        ))
+        
         fig.update_layout(
             height=350,
             margin=dict(l=10, r=10, t=10, b=10),
@@ -1403,8 +1413,7 @@ def render_grafico_mensal(df: pd.DataFrame):
             xaxis=dict(
                 tickangle=45, 
                 tickfont=dict(size=10),
-                categoryorder='array',  # Forçar ordem do array
-                categoryarray=categorias_ordenadas  # Lista ordenada cronologicamente
+                type='category'  # Forçar categoria para manter ordem
             ),
             showlegend=False
         )
@@ -1416,7 +1425,7 @@ def render_grafico_mensal(df: pd.DataFrame):
 
 
 def render_grafico_tipo(df: pd.DataFrame):
-    """Renderiza gráfico por tipo de proposição com Plotly."""
+    """Renderiza gráfico por tipo de proposição com Plotly - ordem decrescente."""
     if df.empty or "siglaTipo" not in df.columns:
         return
     
@@ -1430,6 +1439,9 @@ def render_grafico_tipo(df: pd.DataFrame):
     if df_counts.empty:
         return
     
+    # Lista ordenada por quantidade decrescente
+    ordem_tipos = df_counts["Tipo"].tolist()
+    
     try:
         import plotly.express as px
         
@@ -1440,13 +1452,17 @@ def render_grafico_tipo(df: pd.DataFrame):
             x="Tipo", 
             y="Quantidade",
             text="Quantidade",
-            color_discrete_sequence=["#9467bd"]
+            color_discrete_sequence=["#1f77b4"]
         )
         fig.update_traces(textposition='outside', textfont_size=11)
         fig.update_layout(
             height=350,
             margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(tickfont=dict(size=11)),
+            xaxis=dict(
+                tickfont=dict(size=11),
+                categoryorder='array',
+                categoryarray=ordem_tipos
+            ),
             showlegend=False
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -1457,7 +1473,7 @@ def render_grafico_tipo(df: pd.DataFrame):
 
 
 def render_grafico_orgao(df: pd.DataFrame):
-    """Renderiza gráfico por órgão atual com Plotly."""
+    """Renderiza gráfico por órgão atual com Plotly - ordem decrescente."""
     if df.empty or "Órgão (sigla)" not in df.columns:
         return
     
@@ -1476,6 +1492,9 @@ def render_grafico_orgao(df: pd.DataFrame):
     if df_counts.empty:
         return
     
+    # Lista ordenada por quantidade decrescente
+    ordem_orgaos = df_counts["Órgão"].tolist()
+    
     try:
         import plotly.express as px
         
@@ -1486,13 +1505,18 @@ def render_grafico_orgao(df: pd.DataFrame):
             x="Órgão", 
             y="Quantidade",
             text="Quantidade",
-            color_discrete_sequence=["#d62728"]
+            color_discrete_sequence=["#1f77b4"]
         )
         fig.update_traces(textposition='outside', textfont_size=10)
         fig.update_layout(
             height=350,
             margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(tickangle=45, tickfont=dict(size=9)),
+            xaxis=dict(
+                tickangle=45, 
+                tickfont=dict(size=9),
+                categoryorder='array',
+                categoryarray=ordem_orgaos
+            ),
             showlegend=False
         )
         st.plotly_chart(fig, use_container_width=True)
