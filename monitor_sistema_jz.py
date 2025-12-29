@@ -1276,10 +1276,10 @@ def render_grafico_barras_situacao(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#1f77b4"]
         )
-        fig.update_traces(textposition='outside', textfont_size=10)
+        fig.update_traces(textposition='outside', textfont=dict(size=10), cliponaxis=False)
         fig.update_layout(
-            height=max(300, len(df_counts) * 25),
-            margin=dict(l=10, r=10, t=10, b=10),
+            height=max(320, len(df_counts) * 26),
+            margin=dict(l=120, r=20, t=30, b=30),
             yaxis=dict(tickfont=dict(size=10)),
             showlegend=False
         )
@@ -1329,10 +1329,10 @@ def render_grafico_barras_tema(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#2ca02c"]
         )
-        fig.update_traces(textposition='outside', textfont_size=10)
+        fig.update_traces(textposition='outside', textfont=dict(size=10), cliponaxis=False)
         fig.update_layout(
-            height=400,
-            margin=dict(l=10, r=10, t=10, b=10),
+            height=420,
+            margin=dict(l=40, r=20, t=30, b=90),
             xaxis=dict(
                 tickangle=45, 
                 tickfont=dict(size=9),
@@ -1406,14 +1406,16 @@ def render_grafico_mensal(df: pd.DataFrame):
         ))
         
         fig.update_layout(
-            height=350,
-            margin=dict(l=10, r=10, t=10, b=10),
+            height=380,
+            margin=dict(l=40, r=20, t=30, b=60),
             xaxis_title="Mês/Ano",
             yaxis_title="Movimentações",
             xaxis=dict(
-                tickangle=45, 
+                tickangle=45,
                 tickfont=dict(size=10),
-                type='category'  # Forçar categoria para manter ordem
+                type='category',  # Forçar categoria para manter ordem
+                categoryorder='array',
+                categoryarray=categorias_ordenadas
             ),
             showlegend=False
         )
@@ -1454,10 +1456,10 @@ def render_grafico_tipo(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#1f77b4"]
         )
-        fig.update_traces(textposition='outside', textfont_size=11)
+        fig.update_traces(textposition='outside', textfont=dict(size=11), cliponaxis=False)
         fig.update_layout(
-            height=350,
-            margin=dict(l=10, r=10, t=10, b=10),
+            height=420,
+            margin=dict(l=40, r=20, t=30, b=90),
             xaxis=dict(
                 tickfont=dict(size=11),
                 categoryorder='array',
@@ -1507,10 +1509,10 @@ def render_grafico_orgao(df: pd.DataFrame):
             text="Quantidade",
             color_discrete_sequence=["#1f77b4"]
         )
-        fig.update_traces(textposition='outside', textfont_size=10)
+        fig.update_traces(textposition='outside', textfont=dict(size=10), cliponaxis=False)
         fig.update_layout(
-            height=350,
-            margin=dict(l=10, r=10, t=10, b=10),
+            height=420,
+            margin=dict(l=40, r=20, t=30, b=90),
             xaxis=dict(
                 tickangle=45, 
                 tickfont=dict(size=9),
