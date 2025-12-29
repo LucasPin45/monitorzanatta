@@ -1347,7 +1347,7 @@ def render_grafico_barras_tema(df: pd.DataFrame):
 
 
 def render_grafico_mensal(df: pd.DataFrame):
-    """Renderiza gráfico de tendência mensal com formato MM/YYYY."""
+    """Renderiza gráfico de tendência mensal com formato MM/YYYY em ordem cronológica."""
     if df.empty or "AnoStatus" not in df.columns or "MesStatus" not in df.columns:
         st.info("Sem dados para gráfico mensal.")
         return
@@ -1356,23 +1356,26 @@ def render_grafico_mensal(df: pd.DataFrame):
     if df_valid.empty:
         return
     
-    # Formato MM/YYYY
+    # Criar chave de ordenação numérica (YYYYMM) e label de exibição (MM/YYYY)
+    df_valid["AnoMes_sort"] = df_valid.apply(
+        lambda r: int(r['AnoStatus']) * 100 + int(r['MesStatus']), axis=1
+    )
     df_valid["MesAno"] = df_valid.apply(
         lambda r: f"{int(r['MesStatus']):02d}/{int(r['AnoStatus'])}", axis=1
-    )
-    df_valid["AnoMes_sort"] = df_valid.apply(
-        lambda r: f"{int(r['AnoStatus'])}{int(r['MesStatus']):02d}", axis=1
     )
     
     df_mensal = (
         df_valid.groupby(["AnoMes_sort", "MesAno"], as_index=False)
         .size()
         .rename(columns={"size": "Movimentações"})
-        .sort_values("AnoMes_sort")
+        .sort_values("AnoMes_sort")  # Ordenar pela chave numérica
     )
     
     if df_mensal.empty or len(df_mensal) < 2:
         return
+    
+    # Lista ordenada de categorias para forçar ordem no eixo X
+    categorias_ordenadas = df_mensal["MesAno"].tolist()
     
     try:
         import plotly.express as px
@@ -1397,7 +1400,12 @@ def render_grafico_mensal(df: pd.DataFrame):
             margin=dict(l=10, r=10, t=10, b=10),
             xaxis_title="Mês/Ano",
             yaxis_title="Movimentações",
-            xaxis=dict(tickangle=45, tickfont=dict(size=10)),
+            xaxis=dict(
+                tickangle=45, 
+                tickfont=dict(size=10),
+                categoryorder='array',  # Forçar ordem do array
+                categoryarray=categorias_ordenadas  # Lista ordenada cronologicamente
+            ),
             showlegend=False
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -1734,7 +1742,7 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 | 🔴 | ≥ 30 dias | Crítico - Parado há muito tempo |
             """)
         
-        with st.expander("🏛️ Comissões Estratégicas Monitoradas (Comissões que a Deputada faz parte)", expanded=False):
+        with st.expander("🏛️ Comissões Estratégicas Monitoradas", expanded=False):
             st.markdown("""
 | Sigla | Nome Completo |
 |-------|---------------|
@@ -1776,7 +1784,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
         """)
         
         st.markdown("---")
-        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     # ============================================================
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
@@ -2308,5 +2316,4 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
 
 
 if __name__ == "__main__":
-
     main()
