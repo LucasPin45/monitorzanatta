@@ -1734,7 +1734,7 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 | 🔴 | ≥ 30 dias | Crítico - Parado há muito tempo |
             """)
         
-        with st.expander("🏛️ Comissões Estratégicas Monitoradas", expanded=False):
+        with st.expander("🏛️ Comissões Estratégicas Monitoradas (Comissões que a Deputada faz parte)", expanded=False):
             st.markdown("""
 | Sigla | Nome Completo |
 |-------|---------------|
@@ -1776,7 +1776,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
         """)
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     # ============================================================
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
@@ -2308,4 +2308,5 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
 
 
 if __name__ == "__main__":
+
     main()
