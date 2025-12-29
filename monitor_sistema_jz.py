@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v13
+# monitor_sistema_jz.py - v14
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 13: Gráficos, Exportação XLSX, Filtros Multi-nível
+# VERSÃO 14: Gráficos ordenados, Temas refinados, Abas reorganizadas
 # ============================================================
 
 import datetime
@@ -28,7 +28,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/13.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/14.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -61,13 +61,77 @@ PARTIDOS_RELATOR_ADVERSARIO = {"PT", "PV", "PSB", "PCDOB", "PSOL", "REDE"}
 
 # Temas para categorização (palavras-chave por tema)
 TEMAS_CATEGORIAS = {
-    "Saúde": ["vacina", "saude", "saúde", "hospital", "medicamento", "sus", "anvisa"],
-    "Segurança": ["arma", "armas", "seguranca", "segurança", "policia", "polícia", "violencia", "violência"],
-    "Economia": ["pix", "drex", "imposto", "irpf", "tributo", "economia", "financeiro"],
-    "Direitos Humanos": ["aborto", "conanda", "crianca", "criança", "menor", "familia", "família"],
-    "Educação": ["educacao", "educação", "escola", "ensino", "universidade"],
-    "Meio Ambiente": ["ambiente", "ambiental", "clima", "floresta", "agro"],
-    "Outros": []
+    "Saúde": [
+        "vacina", "saude", "saúde", "hospital", "medicamento", "sus", "anvisa", 
+        "medico", "médico", "enfermeiro", "farmacia", "farmácia", "tratamento",
+        "doenca", "doença", "epidemia", "pandemia", "leito", "uti", "plano de saude"
+    ],
+    "Segurança Pública": [
+        "arma", "armas", "seguranca", "segurança", "policia", "polícia", "violencia", 
+        "violência", "crime", "criminal", "penal", "prisao", "prisão", "preso",
+        "bandido", "trafic", "roubo", "furto", "homicidio", "homicídio", "legítima defesa",
+        "porte", "posse de arma", "cac", "atirador", "caçador", "colecionador"
+    ],
+    "Economia e Tributos": [
+        "pix", "drex", "imposto", "irpf", "tributo", "economia", "financeiro",
+        "taxa", "contribuicao", "contribuição", "fiscal", "orcamento", "orçamento",
+        "divida", "dívida", "inflacao", "inflação", "juros", "banco", "credito", "crédito",
+        "renda", "salario", "salário", "aposentadoria", "previdencia", "previdência",
+        "inss", "fgts", "trabalhista", "clt", "emprego", "desemprego"
+    ],
+    "Família e Costumes": [
+        "aborto", "conanda", "crianca", "criança", "menor", "familia", "família",
+        "genero", "gênero", "ideologia", "lgb", "trans", "casamento", "uniao", "união",
+        "mae", "mãe", "pai", "filho", "maternidade", "paternidade", "nascituro",
+        "vida", "pro-vida", "pró-vida", "adocao", "adoção", "tutela", "guarda"
+    ],
+    "Educação": [
+        "educacao", "educação", "escola", "ensino", "universidade", "professor",
+        "aluno", "estudante", "enem", "vestibular", "mec", "fundeb", "creche",
+        "alfabetizacao", "alfabetização", "curriculo", "currículo", "didatico", "didático"
+    ],
+    "Agronegócio": [
+        "agro", "rural", "fazenda", "produtor", "agricult", "pecuaria", "pecuária",
+        "gado", "soja", "milho", "cafe", "café", "cana", "algodao", "algodão",
+        "fertilizante", "agrotox", "defensivo", "irrigacao", "irrigação", "funrural",
+        "terra", "propriedade rural", "mst", "invasao", "invasão", "demarcacao", "demarcação"
+    ],
+    "Meio Ambiente": [
+        "ambiente", "ambiental", "clima", "floresta", "desmatamento", "ibama",
+        "icmbio", "reserva", "unidade de conserv", "carbono", "emissao", "emissão",
+        "poluicao", "poluição", "saneamento", "residuo", "resíduo", "lixo", "reciclagem"
+    ],
+    "Comunicação e Tecnologia": [
+        "internet", "digital", "tecnologia", "telecom", "comunicacao", "comunicação",
+        "imprensa", "midia", "mídia", "censura", "liberdade de expressao", "expressão",
+        "rede social", "plataforma", "fake news", "desinformacao", "desinformação",
+        "inteligencia artificial", "ia", "dados pessoais", "lgpd", "privacidade"
+    ],
+    "Administração Pública": [
+        "servidor", "funcionalismo", "concurso", "licitacao", "licitação", "contrato",
+        "administracao", "administração", "gestao", "gestão", "ministerio", "ministério",
+        "autarquia", "estatal", "privatizacao", "privatização", "reforma administrativa"
+    ],
+    "Transporte e Infraestrutura": [
+        "transporte", "rodovia", "ferrovia", "aeroporto", "porto", "infraestrutura",
+        "mobilidade", "transito", "trânsito", "veiculo", "veículo", "combustivel", "combustível",
+        "pedagio", "pedágio", "concessao", "concessão", "obra", "construcao", "construção"
+    ],
+    "Defesa e Soberania": [
+        "defesa", "militar", "forcas armadas", "forças armadas", "exercito", "exército",
+        "marinha", "aeronautica", "aeronáutica", "fronteira", "soberania", "nacional",
+        "estrategico", "estratégico", "inteligencia", "inteligência", "espionagem"
+    ],
+    "Direito e Justiça": [
+        "justica", "justiça", "judiciario", "judiciário", "tribunal", "stf", "stj",
+        "magistrado", "juiz", "promotor", "advogado", "oab", "processo", "recurso",
+        "habeas corpus", "prisao", "prisão", "inquerito", "inquérito", "investigacao", "investigação"
+    ],
+    "Relações Exteriores": [
+        "internacional", "exterior", "diplomacia", "embaixada", "consulado",
+        "mercosul", "brics", "onu", "tratado", "acordo internacional", "exportacao", "exportação",
+        "importacao", "importação", "alfandega", "alfândega", "comercio exterior", "comércio exterior"
+    ],
 }
 
 # ============================================================
@@ -180,17 +244,26 @@ def party_norm(sigla: str) -> str:
 
 
 def categorizar_tema(ementa: str) -> str:
-    """Categoriza uma proposição por tema baseado na ementa."""
+    """Categoriza uma proposição por tema baseado na ementa - REFINADO com scoring."""
     if not ementa:
-        return "Outros"
+        return "Não Classificado"
     ementa_norm = normalize_text(ementa)
+    
+    # Conta matches por tema para pegar o mais relevante
+    scores = {}
     for tema, palavras in TEMAS_CATEGORIAS.items():
-        if tema == "Outros":
-            continue
+        score = 0
         for palavra in palavras:
             if palavra in ementa_norm:
-                return tema
-    return "Outros"
+                score += 1
+        if score > 0:
+            scores[tema] = score
+    
+    if scores:
+        # Retorna o tema com mais matches
+        return max(scores, key=scores.get)
+    
+    return "Não Classificado"
 
 
 # ============================================================
@@ -1300,24 +1373,66 @@ def main():
     st.markdown("""
     <style>
     .map-small iframe { height: 320px !important; }
+    div[data-testid="stDataFrame"] * {
+        white-space: normal !important;
+        word-break: break-word !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    st.title("🏛️ Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v13 – Gráficos, Filtros Multi-nível, Exportação XLSX")
+    # ============================================================
+    # TÍTULO COM FOTO DA DEPUTADA (como na v12)
+    # ============================================================
+    col_foto_titulo, col_titulo = st.columns([1, 9])
+    
+    with col_foto_titulo:
+        foto_deputada_url = f"https://www.camara.leg.br/internet/deputado/bandep/{DEPUTADA_ID_PADRAO}.jpg"
+        try:
+            st.image(foto_deputada_url, width=80)
+        except:
+            st.markdown("👤")
+    
+    with col_titulo:
+        st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
+        st.caption("v14 – Gráficos ordenados, Temas refinados, Abas reorganizadas")
+
+    if "status_click_sel" not in st.session_state:
+        st.session_state["status_click_sel"] = None
 
     with st.sidebar:
         st.header("⚙️ Configurações")
-
+        
+        # Dados abertos da deputada
+        st.subheader("Deputada monitorada")
         nome_deputada = st.text_input("Nome completo", value=DEPUTADA_NOME_PADRAO)
-        partido_deputada = st.text_input("Partido", value=DEPUTADA_PARTIDO_PADRAO)
-        uf_deputada = st.text_input("UF", value=DEPUTADA_UF_PADRAO)
-        id_deputada = st.number_input("ID na API", value=DEPUTADA_ID_PADRAO, step=1)
+        
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            partido_deputada = st.text_input("Partido", value=DEPUTADA_PARTIDO_PADRAO)
+        with c2:
+            uf_deputada = st.text_input("UF", value=DEPUTADA_UF_PADRAO)
+        with c3:
+            id_dep_str = st.text_input("ID (Dados Abertos)", value=str(DEPUTADA_ID_PADRAO))
+        
+        try:
+            id_deputada = int(id_dep_str)
+        except ValueError:
+            st.error("ID da deputada inválido. Use apenas números.")
+            return
 
         st.markdown("---")
         st.subheader("Período de busca (pauta)")
-        dt_inicio = st.date_input("Início", value=datetime.date.today())
-        dt_fim = st.date_input("Fim", value=datetime.date.today() + datetime.timedelta(days=7))
+        hoje = datetime.date.today()
+        date_range = st.date_input(
+            "Intervalo de datas", 
+            value=(hoje, hoje + datetime.timedelta(days=7)),
+            format="DD/MM/YYYY"
+        )
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            dt_inicio, dt_fim = date_range
+        else:
+            dt_inicio = hoje
+            dt_fim = hoje + datetime.timedelta(days=7)
 
         st.markdown("---")
         st.subheader("Palavras-chave")
@@ -1356,15 +1471,39 @@ def main():
         st.session_state["df_scan"] = df
         st.success(f"Monitoramento concluído – {len(df)} registros")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "👩‍⚖️ Autoria & Relatoria",
-        "🔑 Palavras-chave",
-        "🏛️ Comissões estratégicas",
-        "🔎 Rastreador Individual"
+    # ============================================================
+    # ABAS REORGANIZADAS
+    # ============================================================
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "1️⃣ Autoria & Relatoria na pauta",
+        "2️⃣ Palavras-chave na pauta",
+        "3️⃣ Comissões estratégicas",
+        "4️⃣ Buscar Proposição Específica",
+        "5️⃣ Matérias por situação atual"
     ])
 
+    # ============================================================
+    # ABA 1 - AUTORIA & RELATORIA NA PAUTA (com foto e dados)
+    # ============================================================
     with tab1:
-        st.subheader("Proposições de autoria ou relatoria da deputada")
+        st.subheader("Autoria & Relatoria na pauta")
+        
+        # Card com dados da deputada
+        with st.container():
+            col_dep_foto, col_dep_info = st.columns([1, 4])
+            with col_dep_foto:
+                try:
+                    st.image(f"https://www.camara.leg.br/internet/deputado/bandep/{id_deputada}.jpg", width=100)
+                except:
+                    st.markdown("👤")
+            with col_dep_info:
+                st.markdown(f"**{nome_deputada}**")
+                st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
+                st.markdown(f"**ID Dados Abertos:** `{id_deputada}`")
+                st.markdown(f"[🔗 Perfil na Câmara](https://www.camara.leg.br/deputados/{id_deputada})")
+        
+        st.markdown("---")
+        
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
         else:
@@ -1859,6 +1998,263 @@ def main():
             st.info("Clique em uma proposição para carregar status, estratégia e linha do tempo.")
         else:
             exibir_detalhes_proposicao(selected_id, key_prefix="tab4")
+
+    # ============================================================
+    # ABA 5 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
+    # ============================================================
+    with tab5:
+        st.markdown("### 📊 Matérias por situação atual")
+        st.caption("Análise da carteira de proposições por status de tramitação")
+
+        with st.spinner("Carregando proposições de autoria..."):
+            df_aut5 = fetch_lista_proposicoes_autoria(id_deputada)
+
+        if df_aut5.empty:
+            st.info("Nenhuma proposição de autoria encontrada.")
+        else:
+            df_aut5 = df_aut5[df_aut5["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
+
+            st.markdown("#### 🗂️ Filtros de Proposições")
+            
+            col2, col3 = st.columns([1.1, 1.1])
+            with col2:
+                anos5 = sorted([a for a in df_aut5["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
+                anos_sel5 = st.multiselect("Ano (da proposição)", options=anos5, default=anos5[:3] if len(anos5) >= 3 else anos5, key="anos_tab5")
+            with col3:
+                tipos5 = sorted([t for t in df_aut5["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
+                tipos_sel5 = st.multiselect("Tipo", options=tipos5, default=tipos5, key="tipos_tab5")
+
+            df_base5 = df_aut5.copy()
+            if anos_sel5:
+                df_base5 = df_base5[df_base5["ano"].isin(anos_sel5)].copy()
+            if tipos_sel5:
+                df_base5 = df_base5[df_base5["siglaTipo"].isin(tipos_sel5)].copy()
+
+            st.markdown("---")
+
+            cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
+           
+            with cS2:
+                max_status = st.number_input(
+                    "Limite (performance)",
+                    min_value=20,
+                    max_value=600,
+                    value=min(200, len(df_base5)) if len(df_base5) else 20,
+                    step=20,
+                    key="max_status_tab5"
+                )
+            with cS3:
+                st.caption("Aplique filtros acima (Ano/Tipo) e depois carregue o status.")
+            with cS4:
+                if st.button("✖ Limpar filtro por clique", key="limpar_click_tab5"):
+                    st.session_state["status_click_sel"] = None
+
+            df_status_view = st.session_state.get("df_status_last", pd.DataFrame()).copy()
+
+            dynamic_status = []
+            if not df_status_view.empty and "Situação atual" in df_status_view.columns:
+                dynamic_status = [s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()]
+            status_opts = merge_status_options(dynamic_status)
+
+            # Filtros Multi-nível
+            st.markdown("##### 🔍 Filtros Multi-nível")
+            
+            f1, f2, f3, f4 = st.columns([1.6, 1.1, 1.1, 1.1])
+
+            default_status_sel = []
+            if st.session_state.get("status_click_sel"):
+                default_status_sel = [st.session_state["status_click_sel"]]
+
+            org_opts = []
+            ano_status_opts = []
+            mes_status_opts = []
+            tema_opts = []
+            relator_opts = []
+
+            if not df_status_view.empty:
+                org_opts = sorted(
+                    [o for o in df_status_view["Órgão (sigla)"].dropna().unique().tolist() if str(o).strip()]
+                )
+
+                ano_status_opts = sorted(
+                    [int(a) for a in df_status_view["AnoStatus"].dropna().unique().tolist() if pd.notna(a)],
+                    reverse=True
+                )
+
+                mes_status_opts = sorted(
+                    [int(m) for m in df_status_view["MesStatus"].dropna().unique().tolist() if pd.notna(m)]
+                )
+                
+                if "Tema" in df_status_view.columns:
+                    tema_opts = sorted(
+                        [t for t in df_status_view["Tema"].dropna().unique().tolist() if str(t).strip()]
+                    )
+                
+                if "Relator(a)" in df_status_view.columns:
+                    relator_opts = sorted(
+                        [r for r in df_status_view["Relator(a)"].dropna().unique().tolist() 
+                         if str(r).strip() and str(r).strip() != "—"]
+                    )
+
+            with f1:
+                status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel, key="status_sel_tab5")
+
+            with f2:
+                org_sel = st.multiselect("Órgão (sigla)", options=org_opts, default=[], key="org_sel_tab5")
+
+            with f3:
+                ano_status_sel = st.multiselect("Ano (do status)", options=ano_status_opts, default=[], key="ano_status_sel_tab5")
+
+            with f4:
+                mes_labels = [f"{m:02d}-{MESES_PT.get(m, '')}" for m in mes_status_opts]
+                mes_map = {f"{m:02d}-{MESES_PT.get(m, '')}": m for m in mes_status_opts}
+                mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[], key="mes_sel_tab5")
+                mes_status_sel = [mes_map[x] for x in mes_sel_labels if x in mes_map]
+            
+            # Segunda linha de filtros multi-nível
+            f5, f6, f7 = st.columns([1.2, 1.2, 1.6])
+            
+            with f5:
+                tema_sel = st.multiselect("Tema", options=tema_opts, default=[], key="tema_sel_tab5")
+            
+            with f6:
+                relator_sel = st.multiselect("Relator(a)", options=relator_opts, default=[], key="relator_sel_tab5")
+            
+            with f7:
+                palavra_filtro = st.text_input(
+                    "Palavra-chave na ementa",
+                    placeholder="Digite para filtrar...",
+                    help="Filtra proposições que contenham esta palavra na ementa",
+                    key="palavra_filtro_tab5"
+                )
+
+            bt_status = st.button("Carregar/Atualizar status", type="primary", key="carregar_status_tab5")
+
+            if bt_status:
+                with st.spinner("Buscando status..."):
+                    ids_list = df_base5["id"].astype(str).head(int(max_status)).tolist()
+                    status_map = build_status_map(ids_list)
+                    df_status_view = enrich_with_status(df_base5.head(int(max_status)), status_map)
+                    st.session_state["df_status_last"] = df_status_view
+
+            if df_status_view.empty:
+                st.info(
+                    "Clique em **Carregar/Atualizar status** para preencher "
+                    "Situação/Órgão/Data e habilitar filtros por mês/ano."
+                )
+            else:
+                df_fil = df_status_view.copy()
+
+                # Aplicar filtros multi-nível
+                if status_sel:
+                    df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
+
+                if org_sel:
+                    df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
+
+                if ano_status_sel:
+                    df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
+
+                if mes_status_sel:
+                    df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
+                
+                if tema_sel and "Tema" in df_fil.columns:
+                    df_fil = df_fil[df_fil["Tema"].isin(tema_sel)].copy()
+                
+                if relator_sel and "Relator(a)" in df_fil.columns:
+                    df_fil = df_fil[df_fil["Relator(a)"].isin(relator_sel)].copy()
+                
+                if palavra_filtro.strip():
+                    palavra_norm = normalize_text(palavra_filtro)
+                    df_fil = df_fil[df_fil["ementa"].apply(lambda x: palavra_norm in normalize_text(str(x)))].copy()
+
+                st.markdown("---")
+                
+                # ============================================================
+                # GRÁFICOS - ORDENADOS DECRESCENTE
+                # ============================================================
+                st.markdown("#### 📈 Análise Visual")
+                
+                with st.expander("📊 Gráficos e Análises", expanded=True):
+                    g1, g2 = st.columns(2)
+                    
+                    with g1:
+                        render_grafico_barras_situacao(df_fil)
+                    
+                    with g2:
+                        render_grafico_barras_tema(df_fil)
+                    
+                    g3, g4 = st.columns(2)
+                    
+                    with g3:
+                        render_grafico_tipo(df_fil)
+                    
+                    with g4:
+                        render_grafico_orgao(df_fil)
+                    
+                    render_grafico_mensal(df_fil)
+
+                st.markdown("---")
+
+                df_tbl_status = df_fil.copy()
+                df_tbl_status["Parado há"] = df_tbl_status["Parado (dias)"].apply(
+                    lambda x: f"{int(x)} dias" if isinstance(x, (int, float)) and pd.notna(x) else "—"
+                )
+                df_tbl_status["LinkTramitacao"] = df_tbl_status["id"].astype(str).apply(camara_link_tramitacao)
+
+                df_tbl_status = df_tbl_status.rename(columns={
+                    "Proposicao": "Proposição",
+                    "siglaTipo": "Tipo",
+                    "ano": "Ano",
+                    "ementa": "Ementa",
+                })
+
+                show_cols = [
+                    "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Relator(a)",
+                    "Data do status", "Sinal", "Parado há", "Tema", "id", "LinkTramitacao", "Ementa"
+                ]
+                for c in show_cols:
+                    if c not in df_tbl_status.columns:
+                        df_tbl_status[c] = ""
+
+                df_counts = (
+                    df_fil.assign(
+                        _s=df_fil["Situação atual"].fillna("-").replace("", "-")
+                    )
+                    .groupby("_s", as_index=False)
+                    .size()
+                    .rename(columns={"_s": "Situação atual", "size": "Qtde"})
+                    .sort_values("Qtde", ascending=False)
+                )
+
+                cC1, cC2 = st.columns([1.0, 2.0])
+
+                with cC1:
+                    st.markdown("**Contagem por Situação atual**")
+                    st.dataframe(df_counts, hide_index=True, use_container_width=True)
+
+                with cC2:
+                    st.markdown("**Lista filtrada (mais antigo no topo)**")
+                    
+                    st.dataframe(
+                        df_tbl_status[show_cols],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                            "Relator(a)": st.column_config.TextColumn("Relator(a)", width="medium"),
+                        },
+                    )
+
+                bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status[show_cols], "Materias_Situacao")
+                st.download_button(
+                    f"⬇️ Baixar lista ({ext.upper()})",
+                    data=bytes_out,
+                    file_name=f"materias_por_situacao_atual.{ext}",
+                    mime=mime,
+                    key="download_materias_tab5"
+                )
 
     st.markdown("---")
 
