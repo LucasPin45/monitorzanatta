@@ -1472,6 +1472,40 @@ def main():
         st.success(f"Monitoramento concluído – {len(df)} registros")
 
     # ============================================================
+    # CARD FIXO DA DEPUTADA (aparece em todas as abas)
+    # ============================================================
+    with st.container():
+        col_dep_foto, col_dep_info = st.columns([1, 5])
+        with col_dep_foto:
+            try:
+                st.image(f"https://www.camara.leg.br/internet/deputado/bandep/{id_deputada}.jpg", width=100)
+            except:
+                st.markdown("👤")
+        with col_dep_info:
+            st.markdown(f"**{nome_deputada}**")
+            st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
+            st.markdown(f"[🔗 Perfil na Câmara](https://www.camara.leg.br/deputados/{id_deputada})")
+    
+    with st.expander("📋 Minibiografia", expanded=False):
+        st.markdown("""
+**Júlia Pedroso Zanatta** é deputada federal por Santa Catarina, filiada ao Partido Liberal (PL). 
+Natural de Criciúma (SC), nasceu em 20 de março de 1985 e é formada em **Jornalismo** e **Direito**. 
+Antes de ingressar no Congresso Nacional, atuou como jornalista, advogada e assessora política, 
+com forte presença na comunicação e no debate público.
+
+Iniciou sua trajetória eleitoral em 2020, quando concorreu à Prefeitura de Criciúma. Em 2022, 
+foi eleita deputada federal, assumindo o mandato na Câmara dos Deputados em fevereiro de 2023, 
+para a legislatura 2023–2027. No Parlamento, integra a bancada conservadora e liberal, sendo **vice-líder do PL**.
+
+Sua atuação legislativa é marcada pela defesa da **liberdade econômica**, da **redução da carga tributária**, 
+da **segurança jurídica**, da **liberdade de expressão** e de pautas conservadoras nos campos social e institucional. 
+Júlia Zanatta também se destaca pela postura crítica ao aumento de impostos, ao expansionismo do Estado 
+e a políticas que, em sua visão, ampliam a intervenção governamental na economia e na vida dos cidadãos.
+        """)
+    
+    st.markdown("---")
+
+    # ============================================================
     # ABAS REORGANIZADAS
     # ============================================================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -1483,26 +1517,10 @@ def main():
     ])
 
     # ============================================================
-    # ABA 1 - AUTORIA & RELATORIA NA PAUTA (com foto e dados) - OTIMIZADA
+    # ABA 1 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
     # ============================================================
     with tab1:
         st.subheader("Autoria & Relatoria na pauta")
-        
-        # Card com dados da deputada
-        with st.container():
-            col_dep_foto, col_dep_info = st.columns([1, 4])
-            with col_dep_foto:
-                try:
-                    st.image(f"https://www.camara.leg.br/internet/deputado/bandep/{id_deputada}.jpg", width=100)
-                except:
-                    st.markdown("👤")
-            with col_dep_info:
-                st.markdown(f"**{nome_deputada}**")
-                st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
-                st.markdown(f"**ID Dados Abertos:** `{id_deputada}`")
-                st.markdown(f"[🔗 Perfil na Câmara](https://www.camara.leg.br/deputados/{id_deputada})")
-        
-        st.markdown("---")
         
         if df.empty:
             st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
