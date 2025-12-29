@@ -1355,10 +1355,15 @@ def render_grafico_barras_tema(df: pd.DataFrame):
 
 
 def render_grafico_mensal(df: pd.DataFrame):
-    """Renderiza gráfico de tendência mensal com formato MM/YYYY em ordem cronológica.
+    """Renderiza gráfico de tendência mensal.
 
-    OBS: Para impedir ordenação alfabética do Plotly em eixos categóricos,
-    este gráfico usa eixo X como data (datetime) e apenas formata o tick como MM/YYYY.
+    Problema observado: em alguns ambientes o Plotly/Streamlit acaba serializando o eixo X como *categoria*
+    (strings) e a ordenação vira alfabética.
+
+    Solução definitiva (sem mexer na estrutura do app):
+    - ordenar por uma coluna datetime real (DataMes)
+    - exibir no eixo X um *label amigável* (ex.: "Dez/2025")
+    - travar a ordem com categoryorder='array' + categoryarray.
     """
     if df.empty or "AnoStatus" not in df.columns or "MesStatus" not in df.columns:
         st.info("Sem dados para gráfico mensal.")
@@ -1368,10 +1373,13 @@ def render_grafico_mensal(df: pd.DataFrame):
     if df_valid.empty:
         return
 
-    # Criar uma coluna datetime (primeiro dia do mês) para ordenar/plotar corretamente
+    # Coluna datetime (1º dia do mês) para ordenação cronológica real
     df_valid["DataMes"] = pd.to_datetime(
-        df_valid["AnoStatus"].astype(int).astype(str) + "-" + df_valid["MesStatus"].astype(int).astype(str).str.zfill(2) + "-01",
-        errors="coerce"
+        df_valid["AnoStatus"].astype(int).astype(str)
+        + "-"
+        + df_valid["MesStatus"].astype(int).astype(str).str.zfill(2)
+        + "-01",
+        errors="coerce",
     )
     df_valid = df_valid[df_valid["DataMes"].notna()].copy()
     if df_valid.empty:
@@ -1381,12 +1389,24 @@ def render_grafico_mensal(df: pd.DataFrame):
         df_valid.groupby("DataMes", as_index=False)
         .size()
         .rename(columns={"size": "Movimentações"})
-        .sort_values("DataMes")  # Ordem cronológica real
+        .sort_values("DataMes")
         .reset_index(drop=True)
     )
 
     if df_mensal.empty or len(df_mensal) < 2:
         return
+
+    # Label no formato "Dez/2025" (evita mm/yyyy virar alfabético)
+    def _label_mes(dt):
+        try:
+            dt = pd.Timestamp(dt)
+            mes_nome = MESES_PT.get(int(dt.month), str(dt.month).zfill(2))
+            return f"{mes_nome}/{int(dt.year)}"
+        except Exception:
+            return "—"
+
+    df_mensal["LabelMes"] = df_mensal["DataMes"].apply(_label_mes)
+    categorias_ordenadas = df_mensal["LabelMes"].tolist()
 
     try:
         import plotly.graph_objects as go
@@ -1395,44 +1415,45 @@ def render_grafico_mensal(df: pd.DataFrame):
 
         fig = go.Figure()
 
-        fig.add_trace(go.Scatter(
-            x=df_mensal["DataMes"],
-            y=df_mensal["Movimentações"],
-            mode='lines+markers+text',
-            text=df_mensal["Movimentações"],
-            textposition='top center',
-            textfont=dict(size=10),
-            marker=dict(size=8),
-            # (mantém estética padrão do Plotly; não fixa cor aqui para não amarrar tema)
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df_mensal["LabelMes"],
+                y=df_mensal["Movimentações"],
+                mode="lines+markers+text",
+                text=df_mensal["Movimentações"],
+                textposition="top center",
+                textfont=dict(size=10),
+                marker=dict(size=8),
+            )
+        )
 
         fig.update_traces(cliponaxis=False)
 
         fig.update_layout(
             height=380,
-            margin=dict(l=40, r=20, t=30, b=60),
+            margin=dict(l=40, r=20, t=30, b=70),
             xaxis_title="Mês/Ano",
             yaxis_title="Movimentações",
-            showlegend=False
+            showlegend=False,
         )
 
-        # Formatar ticks como MM/YYYY e garantir leitura
+        # TRAVA a ordem cronológica (sem chance de virar alfabético)
         fig.update_xaxes(
-            tickformat="%m/%Y",
+            type="category",
+            categoryorder="array",
+            categoryarray=categorias_ordenadas,
             tickangle=45,
             tickfont=dict(size=10),
-            type="date"
         )
         fig.update_yaxes(tickfont=dict(size=10))
 
         st.plotly_chart(fig, use_container_width=True)
 
     except ImportError:
-        # Fallback: mantém a ordem cronológica com índice datetime e exibe label MM/YYYY
         st.markdown("##### 📈 Tendência de Movimentações por Mês")
-        df_tmp = df_mensal.copy()
-        df_tmp["MesAno"] = df_tmp["DataMes"].dt.strftime("%m/%Y")
-        st.line_chart(df_tmp.set_index("MesAno")["Movimentações"], use_container_width=True)
+        # Fallback simples (já ordenado)
+        st.line_chart(df_mensal.set_index("LabelMes")["Movimentações"], use_container_width=True)
+
 
 
 def render_grafico_tipo(df: pd.DataFrame):
