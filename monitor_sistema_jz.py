@@ -1936,10 +1936,10 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             col_ano, col_tipo = st.columns([1, 1])
             with col_ano:
                 anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
-                anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos, key="anos_tab6")
+                anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos, key="anos_tab5")
             with col_tipo:
                 tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
-                tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos, key="tipos_tab6")
+                tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos, key="tipos_tab5")
 
             df_base = df_aut.copy()
             if anos_sel:
