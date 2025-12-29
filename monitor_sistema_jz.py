@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v14
+# monitor_sistema_jz.py - v15
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 14: Gráficos ordenados, Temas refinados, Abas reorganizadas
+# VERSÃO 15: Abas limpas, Gráficos ordenados, Performance otimizada
 # ============================================================
 
 import datetime
@@ -28,7 +28,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/14.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/15.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -1394,7 +1394,7 @@ def main():
     
     with col_titulo:
         st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-        st.caption("v14 – Gráficos ordenados, Temas refinados, Abas reorganizadas")
+        st.caption("v15 – Abas limpas, Gráficos ordenados, Performance otimizada")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -1483,7 +1483,7 @@ def main():
     ])
 
     # ============================================================
-    # ABA 1 - AUTORIA & RELATORIA NA PAUTA (com foto e dados)
+    # ABA 1 - AUTORIA & RELATORIA NA PAUTA (com foto e dados) - OTIMIZADA
     # ============================================================
     with tab1:
         st.subheader("Autoria & Relatoria na pauta")
@@ -1531,34 +1531,25 @@ def main():
                 st.markdown("---")
                 st.markdown("### 📋 Ver detalhes de proposição de autoria na pauta")
                 
+                # OTIMIZADO: Extrai IDs diretamente da coluna ids_proposicoes_autoria (já tem os IDs)
                 ids_autoria_pauta = set()
                 for _, row in df_a.iterrows():
                     val = row.get("ids_proposicoes_autoria", "")
                     if pd.notna(val):
                         val_str = str(val).strip()
                         if val_str and val_str != "nan":
-                            for prop_texto in val_str.split("; "):
-                                prop_texto = prop_texto.strip()
-                                if not prop_texto:
-                                    continue
-                                prop_id_texto = prop_texto.split(" – ")[0].strip() if " – " in prop_texto else prop_texto
-                                match = re.match(r"([A-Z]+)\s*(\d+)/(\d+)", prop_id_texto)
-                                if match:
-                                    sigla, numero, ano = match.groups()
-                                    url = f"{BASE_URL}/proposicoes"
-                                    params = {"siglaTipo": sigla, "numero": numero, "ano": ano, "itens": 1}
-                                    data = safe_get(url, params=params)
-                                    if data and isinstance(data, dict) and data.get("dados"):
-                                        prop_data = data["dados"][0]
-                                        pid = str(prop_data.get("id", ""))
-                                        if pid:
-                                            ids_autoria_pauta.add(pid)
+                            # IDs já estão separados por ;
+                            for pid in val_str.split(";"):
+                                pid = pid.strip()
+                                if pid and pid.isdigit():
+                                    ids_autoria_pauta.add(pid)
                 
                 if not ids_autoria_pauta:
                     st.info("Nenhuma proposição de autoria identificada na pauta.")
                 else:
                     st.markdown(f"**{len(ids_autoria_pauta)} proposição(ões) de autoria encontrada(s)**")
                     
+                    # Carrega info apenas quando usuário selecionar (lazy loading)
                     opcoes_props = {}
                     for pid in sorted(ids_autoria_pauta):
                         info = fetch_proposicao_info(pid)
@@ -1576,6 +1567,9 @@ def main():
                             selected_id_tab1 = opcoes_props[prop_selecionada]
                             exibir_detalhes_proposicao(selected_id_tab1, key_prefix="tab1")
 
+    # ============================================================
+    # ABA 2 - PALAVRAS-CHAVE
+    # ============================================================
     with tab2:
         st.subheader("Palavras-chave na pauta")
         if df.empty:
@@ -1601,6 +1595,9 @@ def main():
                     mime=mime,
                 )
 
+    # ============================================================
+    # ABA 3 - COMISSÕES ESTRATÉGICAS
+    # ============================================================
     with tab3:
         st.subheader("Comissões estratégicas")
         if df.empty:
@@ -1626,378 +1623,149 @@ def main():
                     mime=mime,
                 )
 
+    # ============================================================
+    # ABA 4 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
+    # ============================================================
     with tab4:
-        st.markdown("### 🔎 Rastreador Individual")
-        st.caption("Busque e acompanhe proposições de autoria da deputada")
+        st.markdown("### 🔍 Buscar Proposição Específica")
+        st.caption("Busque proposições de autoria da deputada e veja detalhes completos")
 
-        colA, colB = st.columns([1.2, 1.8])
-        with colA:
-            bt_refresh = st.button("🧹 Limpar cache (TUDO)")
-        with colB:
-            st.caption("Busca centralizada otimizada")
+        # Botão de limpar cache
+        col_cache, col_info = st.columns([1, 3])
+        with col_cache:
+            if st.button("🧹 Limpar cache", key="limpar_cache_tab4"):
+                fetch_proposicao_completa.clear()
+                fetch_lista_proposicoes_autoria_geral.clear()
+                fetch_rics_por_autor.clear()
+                fetch_lista_proposicoes_autoria.clear()
+                build_status_map.clear()
+                st.session_state.pop("df_status_last", None)
+                st.success("✅ Cache limpo!")
 
-        if bt_refresh:
-            fetch_proposicao_completa.clear()
-            fetch_lista_proposicoes_autoria_geral.clear()
-            fetch_rics_por_autor.clear()
-            fetch_lista_proposicoes_autoria.clear()
-            build_status_map.clear()
-            st.session_state.pop("df_status_last", None)
-            st.session_state["status_click_sel"] = None
-            st.success("✅ Cache limpo!")
-
+        # Carrega proposições
         with st.spinner("Carregando proposições de autoria..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
         if df_aut.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
-            return
-
-        df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
-
-        st.markdown("#### 🗂️ Filtros de Proposições")
-        
-        col2, col3 = st.columns([1.1, 1.1])
-        with col2:
-            anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
-            anos_sel = st.multiselect("Ano (da proposição)", options=anos, default=anos[:3] if len(anos) >= 3 else anos)
-        with col3:
-            tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
-            tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos)
-
-        df_base = df_aut.copy()
-        if anos_sel:
-            df_base = df_base[df_base["ano"].isin(anos_sel)].copy()
-        if tipos_sel:
-            df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
-
-        st.markdown("---")
-        st.markdown("#### 📊 Carteira por Situação Atual")
-
-        cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
-       
-        with cS2:
-            max_status = st.number_input(
-                "Limite (performance)",
-                min_value=20,
-                max_value=600,
-                value=min(200, len(df_base)) if len(df_base) else 20,
-                step=20
-            )
-        with cS3:
-            st.caption("Aplique filtros acima (Ano/Tipo) e depois carregue o status.")
-        with cS4:
-            if st.button("✖ Limpar filtro por clique"):
-                st.session_state["status_click_sel"] = None
-
-        df_status_view = st.session_state.get("df_status_last", pd.DataFrame()).copy()
-
-        dynamic_status = []
-        if not df_status_view.empty and "Situação atual" in df_status_view.columns:
-            dynamic_status = [s for s in df_status_view["Situação atual"].dropna().unique().tolist() if str(s).strip()]
-        status_opts = merge_status_options(dynamic_status)
-
-        # ============================================================
-        # FILTROS MULTI-NÍVEL
-        # ============================================================
-        st.markdown("##### 🔍 Filtros Multi-nível")
-        
-        f1, f2, f3, f4 = st.columns([1.6, 1.1, 1.1, 1.1])
-
-        default_status_sel = []
-        if st.session_state.get("status_click_sel"):
-            default_status_sel = [st.session_state["status_click_sel"]]
-
-        org_opts = []
-        ano_status_opts = []
-        mes_status_opts = []
-        tema_opts = []
-        relator_opts = []
-        palavra_chave_opts = PALAVRAS_CHAVE_PADRAO.copy()
-
-        if not df_status_view.empty:
-            org_opts = sorted(
-                [o for o in df_status_view["Órgão (sigla)"].dropna().unique().tolist() if str(o).strip()]
-            )
-
-            ano_status_opts = sorted(
-                [int(a) for a in df_status_view["AnoStatus"].dropna().unique().tolist() if pd.notna(a)],
-                reverse=True
-            )
-
-            mes_status_opts = sorted(
-                [int(m) for m in df_status_view["MesStatus"].dropna().unique().tolist() if pd.notna(m)]
-            )
-            
-            if "Tema" in df_status_view.columns:
-                tema_opts = sorted(
-                    [t for t in df_status_view["Tema"].dropna().unique().tolist() if str(t).strip()]
-                )
-            
-            if "Relator(a)" in df_status_view.columns:
-                relator_opts = sorted(
-                    [r for r in df_status_view["Relator(a)"].dropna().unique().tolist() 
-                     if str(r).strip() and str(r).strip() != "—"]
-                )
-
-        with f1:
-            status_sel = st.multiselect("Situação Atual", options=status_opts, default=default_status_sel)
-
-        with f2:
-            org_sel = st.multiselect("Órgão (sigla)", options=org_opts, default=[])
-
-        with f3:
-            ano_status_sel = st.multiselect("Ano (do status)", options=ano_status_opts, default=[])
-
-        with f4:
-            mes_labels = [f"{m:02d}-{MESES_PT.get(m, '')}" for m in mes_status_opts]
-            mes_map = {f"{m:02d}-{MESES_PT.get(m, '')}": m for m in mes_status_opts}
-            mes_sel_labels = st.multiselect("Mês (do status)", options=mes_labels, default=[])
-            mes_status_sel = [mes_map[x] for x in mes_sel_labels if x in mes_map]
-        
-        # Segunda linha de filtros multi-nível
-        f5, f6, f7 = st.columns([1.2, 1.2, 1.6])
-        
-        with f5:
-            tema_sel = st.multiselect("Tema", options=tema_opts, default=[])
-        
-        with f6:
-            relator_sel = st.multiselect("Relator(a)", options=relator_opts, default=[])
-        
-        with f7:
-            palavra_filtro = st.text_input(
-                "Palavra-chave na ementa",
-                placeholder="Digite para filtrar...",
-                help="Filtra proposições que contenham esta palavra na ementa"
-            )
-
-        bt_status = st.button("Carregar/Atualizar status", type="primary")
-
-        if bt_status:
-            with st.spinner("Buscando status..."):
-                ids_list = df_base["id"].astype(str).head(int(max_status)).tolist()
-                status_map = build_status_map(ids_list)
-                df_status_view = enrich_with_status(df_base.head(int(max_status)), status_map)
-                st.session_state["df_status_last"] = df_status_view
-
-        if df_status_view.empty:
-            st.info(
-                "Clique em **Carregar/Atualizar status** para preencher "
-                "Situação/Órgão/Data e habilitar filtros por mês/ano."
-            )
         else:
-            df_fil = df_status_view.copy()
+            df_aut = df_aut[df_aut["siglaTipo"].isin(TIPOS_CARTEIRA_PADRAO)].copy()
 
-            # Aplicar filtros multi-nível
-            if status_sel:
-                df_fil = df_fil[df_fil["Situação atual"].isin(status_sel)].copy()
+            # Filtros básicos
+            st.markdown("#### 🗂️ Filtros de Proposições")
+            col_ano, col_tipo = st.columns([1, 1])
+            with col_ano:
+                anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
+                anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos, key="anos_tab4")
+            with col_tipo:
+                tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
+                tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos, key="tipos_tab4")
 
-            if org_sel:
-                df_fil = df_fil[df_fil["Órgão (sigla)"].isin(org_sel)].copy()
-
-            if ano_status_sel:
-                df_fil = df_fil[df_fil["AnoStatus"].isin(ano_status_sel)].copy()
-
-            if mes_status_sel:
-                df_fil = df_fil[df_fil["MesStatus"].isin(mes_status_sel)].copy()
-            
-            if tema_sel and "Tema" in df_fil.columns:
-                df_fil = df_fil[df_fil["Tema"].isin(tema_sel)].copy()
-            
-            if relator_sel and "Relator(a)" in df_fil.columns:
-                df_fil = df_fil[df_fil["Relator(a)"].isin(relator_sel)].copy()
-            
-            if palavra_filtro.strip():
-                palavra_norm = normalize_text(palavra_filtro)
-                df_fil = df_fil[df_fil["ementa"].apply(lambda x: palavra_norm in normalize_text(str(x)))].copy()
-
-            st.markdown("---")
-            
-            # ============================================================
-            # GRÁFICOS
-            # ============================================================
-            st.markdown("#### 📈 Análise Visual")
-            
-            with st.expander("📊 Gráficos e Análises", expanded=True):
-                g1, g2 = st.columns(2)
-                
-                with g1:
-                    render_grafico_barras_situacao(df_fil)
-                
-                with g2:
-                    render_grafico_barras_tema(df_fil)
-                
-                g3, g4 = st.columns(2)
-                
-                with g3:
-                    render_grafico_tipo(df_fil)
-                
-                with g4:
-                    render_grafico_orgao(df_fil)
-                
-                render_grafico_mensal(df_fil)
+            df_base = df_aut.copy()
+            if anos_sel:
+                df_base = df_base[df_base["ano"].isin(anos_sel)].copy()
+            if tipos_sel:
+                df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
             st.markdown("---")
 
-            df_tbl_status = df_fil.copy()
-            df_tbl_status["Parado há"] = df_tbl_status["Parado (dias)"].apply(
-                lambda x: f"{int(x)} dias" if isinstance(x, (int, float)) and pd.notna(x) else "—"
-            )
-            df_tbl_status["LinkTramitacao"] = df_tbl_status["id"].astype(str).apply(camara_link_tramitacao)
-
-            df_tbl_status = df_tbl_status.rename(columns={
-                "Proposicao": "Proposição",
-                "siglaTipo": "Tipo",
-                "ano": "Ano",
-                "ementa": "Ementa",
-            })
-
-            show_cols = [
-                "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Relator(a)",
-                "Data do status", "Sinal", "Parado há", "Tema", "id", "LinkTramitacao", "Ementa"
-            ]
-            for c in show_cols:
-                if c not in df_tbl_status.columns:
-                    df_tbl_status[c] = ""
-
-            df_counts = (
-                df_fil.assign(
-                    _s=df_fil["Situação atual"].fillna("-").replace("", "-")
-                )
-                .groupby("_s", as_index=False)
-                .size()
-                .rename(columns={"_s": "Situação atual", "size": "Qtde"})
-                .sort_values("Qtde", ascending=False)
+            # Campo de busca
+            q = st.text_input(
+                "Filtrar proposições",
+                value="",
+                placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'",
+                help="Busque por sigla/número/ano ou palavras na ementa",
+                key="busca_tab4"
             )
 
-            cC1, cC2 = st.columns([1.0, 2.0])
+            df_rast = df_base.copy()
+            if q.strip():
+                qn = normalize_text(q)
+                df_rast["_search"] = (df_rast["Proposicao"].fillna("").astype(str) + " " + df_rast["ementa"].fillna("").astype(str)).apply(normalize_text)
+                df_rast = df_rast[df_rast["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
 
-            with cC1:
-                st.markdown("**Contagem por Situação atual**")
-                st.dataframe(df_counts, hide_index=True, use_container_width=True)
+            df_rast_lim = df_rast.head(400).copy()
+            
+            with st.spinner("Carregando status das proposições..."):
+                ids_r = df_rast_lim["id"].astype(str).tolist()
+                status_map_r = build_status_map(ids_r)
+                df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
 
-            with cC2:
-                st.markdown("**Lista filtrada (mais antigo no topo)**")
-                
-                st.markdown('<div class="map-small">', unsafe_allow_html=True)
-                st.dataframe(
-                    df_tbl_status[show_cols],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
-                        "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-                        "Relator(a)": st.column_config.TextColumn("Relator(a)", width="medium"),
-                    },
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
+            df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
 
-            bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status[show_cols], "Carteira_Status")
-            st.download_button(
-                f"⬇️ Baixar lista ({ext.upper()})",
-                data=bytes_out,
-                file_name=f"carteira_situacao_atual_filtrada.{ext}",
-                mime=mime,
-            )
+            st.caption(f"Resultados: {len(df_rast_enriched)} proposições")
 
-        st.markdown("---")
-        st.markdown("#### 🔍 Buscar Proposição Específica")
-
-        q = st.text_input(
-            "Filtrar proposições",
-            value="",
-            placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'",
-            help="Busque por sigla/número/ano ou palavras na ementa"
-        )
-
-        df_rast = df_base.copy()
-        if q.strip():
-            qn = normalize_text(q)
-            df_rast["_search"] = (df_rast["Proposicao"].fillna("").astype(str) + " " + df_rast["ementa"].fillna("").astype(str)).apply(normalize_text)
-            df_rast = df_rast[df_rast["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
-
-        df_rast_lim = df_rast.head(400).copy()
-        with st.spinner("Carregando datas de status do rastreador..."):
-            ids_r = df_rast_lim["id"].astype(str).tolist()
-            status_map_r = build_status_map(ids_r)
-            df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
-
-        df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
-
-        st.caption(f"Resultados no rastreador (limitado a 400): {len(df_rast_enriched)} proposições")
-
-        df_tbl = df_rast_enriched.rename(
-            columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
-        ).copy()
-        
-        df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
-        df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
-        
-        def get_alerta_emoji(dias):
-            if pd.isna(dias):
+            df_tbl = df_rast_enriched.rename(
+                columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+            ).copy()
+            
+            df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
+            df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
+            
+            def get_alerta_emoji(dias):
+                if pd.isna(dias):
+                    return ""
+                if dias <= 2:
+                    return "🚨"
+                if dias <= 5:
+                    return "⚠️"
+                if dias <= 15:
+                    return "🔔"
                 return ""
-            if dias <= 2:
-                return "🚨"
-            if dias <= 5:
-                return "⚠️"
-            if dias <= 15:
-                return "🔔"
-            return ""
-        
-        df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
+            
+            df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
 
-        show_cols_r = [
-            "Alerta", "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
-            "Situação atual", "Último andamento", "Data do status", "LinkTramitacao",
-        ]
+            show_cols_r = [
+                "Alerta", "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
+                "Situação atual", "Último andamento", "Data do status", "LinkTramitacao",
+            ]
 
-        for c in show_cols_r:
-            if c not in df_tbl.columns:
-                df_tbl[c] = ""
-        
-        sel = st.dataframe(
-            df_tbl[show_cols_r],
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            column_config={
-                "Alerta": st.column_config.TextColumn("", width="small", help="Urgência da tramitação"),
-                "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
-                "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-            }
-        )
-        
-        # Legenda
-        st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
-        
-        # Botão de exportação XLSX para busca específica
-        col_exp1, col_exp2 = st.columns([1, 3])
-        with col_exp1:
+            for c in show_cols_r:
+                if c not in df_tbl.columns:
+                    df_tbl[c] = ""
+            
+            sel = st.dataframe(
+                df_tbl[show_cols_r],
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={
+                    "Alerta": st.column_config.TextColumn("", width="small", help="Urgência"),
+                    "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                    "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                },
+                key="df_busca_tab4"
+            )
+            
+            st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
+            
+            # Exportação
             bytes_rast, mime_rast, ext_rast = to_xlsx_bytes(df_tbl[show_cols_r], "Busca_Especifica")
             st.download_button(
                 f"⬇️ Exportar resultados ({ext_rast.upper()})",
                 data=bytes_rast,
                 file_name=f"busca_especifica_proposicoes.{ext_rast}",
                 mime=mime_rast,
-                key="export_busca_especifica"
+                key="export_busca_tab4"
             )
 
-        selected_id = None
-        try:
-            if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
-                row_idx = sel["selection"]["rows"][0]
-                selected_id = str(df_tbl.iloc[row_idx]["ID"])
-        except Exception:
+            # Detalhes da proposição selecionada
             selected_id = None
+            try:
+                if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
+                    row_idx = sel["selection"]["rows"][0]
+                    selected_id = str(df_tbl.iloc[row_idx]["ID"])
+            except Exception:
+                selected_id = None
 
-        st.markdown("---")
-        st.markdown("#### 📋 Detalhes da Proposição Selecionada")
+            st.markdown("---")
+            st.markdown("#### 📋 Detalhes da Proposição Selecionada")
 
-        if not selected_id:
-            st.info("Clique em uma proposição para carregar status, estratégia e linha do tempo.")
-        else:
-            exibir_detalhes_proposicao(selected_id, key_prefix="tab4")
+            if not selected_id:
+                st.info("Clique em uma proposição acima para ver detalhes completos.")
+            else:
+                exibir_detalhes_proposicao(selected_id, key_prefix="tab4")
 
     # ============================================================
     # ABA 5 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
