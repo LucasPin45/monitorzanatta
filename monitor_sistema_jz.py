@@ -223,7 +223,6 @@ def sanitize_text_pdf(text: str) -> str:
     """Remove caracteres problemáticos para PDF."""
     if not text:
         return ""
-    # Substitui caracteres especiais comuns
     replacements = {
         'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
         'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
@@ -243,95 +242,201 @@ def sanitize_text_pdf(text: str) -> str:
     result = str(text)
     for old, new in replacements.items():
         result = result.replace(old, new)
-    # Remove caracteres não-ASCII restantes
     result = result.encode('ascii', 'ignore').decode('ascii')
     return result
 
 
-def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, str, str]:
-    """Exporta DataFrame para PDF."""
+def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes, str, str]:
+    """Exporta DataFrame para PDF em formato de relatório profissional."""
+    
+    # Colunas a excluir do relatório
+    colunas_excluir = ['Tipo', 'Ano', 'Alerta', 'ID', 'id', 'LinkTramitacao', 'Link', 
+                       'sinal', 'AnoStatus', 'MesStatus', 'ids_proposicoes_autoria',
+                       'ids_proposicoes_relatoria', 'id_evento']
+    
     try:
         from fpdf import FPDF
         
-        pdf = FPDF(orientation='L', unit='mm', format='A4')
+        class RelatorioPDF(FPDF):
+            def header(self):
+                # Logo/Título
+                self.set_fill_color(0, 51, 102)  # Azul escuro
+                self.rect(0, 0, 297, 25, 'F')
+                self.set_font('Helvetica', 'B', 20)
+                self.set_text_color(255, 255, 255)
+                self.set_y(8)
+                self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+                self.ln(20)
+                
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Helvetica', 'I', 8)
+                self.set_text_color(128, 128, 128)
+                self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+        
+        pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
+        pdf.set_auto_page_break(auto=True, margin=20)
         pdf.add_page()
+        
+        # Subtítulo e data
+        pdf.set_y(30)
         pdf.set_font('Helvetica', 'B', 14)
-        pdf.cell(0, 10, sanitize_text_pdf(titulo), ln=True, align='C')
-        pdf.set_font('Helvetica', '', 8)
-        pdf.cell(0, 5, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 8, sanitize_text_pdf(subtitulo), ln=True, align='C')
+        
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y as %H:%M')}", ln=True, align='C')
+        pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
+        
+        # Linha divisória
+        pdf.ln(5)
+        pdf.set_draw_color(0, 51, 102)
+        pdf.set_line_width(0.5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(8)
+        
+        # Resumo
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 6, f"Total de registros: {len(df)}", ln=True)
         pdf.ln(5)
         
-        # Largura da página disponível
-        page_width = pdf.w - 20
-        cols = df.columns.tolist()
-        col_width = page_width / len(cols) if cols else page_width
+        # Filtrar colunas
+        cols_mostrar = [c for c in df.columns if c not in colunas_excluir]
         
-        # Cabeçalho
-        pdf.set_font('Helvetica', 'B', 7)
-        pdf.set_fill_color(230, 230, 230)
-        for col in cols:
-            pdf.cell(col_width, 6, sanitize_text_pdf(str(col))[:20], border=1, fill=True, align='C')
-        pdf.ln()
+        # Identificar colunas principais para destaque
+        col_proposicao = next((c for c in cols_mostrar if 'Proposi' in c or 'sigla' in c.lower()), None)
+        col_ementa = next((c for c in cols_mostrar if 'Ementa' in c or 'ementa' in c), None)
+        col_situacao = next((c for c in cols_mostrar if 'Situa' in c or 'situa' in c), None)
+        col_orgao = next((c for c in cols_mostrar if 'Org' in c or 'org' in c.lower()), None)
+        col_data = next((c for c in cols_mostrar if 'data' in c.lower() or 'Data' in c), None)
+        col_relator = next((c for c in cols_mostrar if 'Relator' in c or 'relator' in c), None)
+        col_tema = next((c for c in cols_mostrar if 'Tema' in c or 'tema' in c), None)
         
-        # Dados
-        pdf.set_font('Helvetica', '', 6)
-        for _, row in df.head(100).iterrows():  # Limita a 100 linhas
-            for col in cols:
-                valor = sanitize_text_pdf(str(row[col])) if pd.notna(row[col]) else ""
-                pdf.cell(col_width, 5, valor[:25], border=1, align='L')
-            pdf.ln()
-        
-        if len(df) > 100:
+        # Renderizar cada registro como um card
+        for idx, (_, row) in enumerate(df.head(300).iterrows()):
+            # Verificar se precisa de nova página
+            if pdf.get_y() > 250:
+                pdf.add_page()
+                pdf.set_y(30)
+            
+            # Card container
+            y_start = pdf.get_y()
+            pdf.set_fill_color(245, 247, 250)
+            
+            # Número do registro
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_fill_color(0, 51, 102)
+            pdf.cell(8, 6, str(idx + 1), fill=True, align='C')
+            
+            # Proposição (destaque)
+            if col_proposicao and pd.notna(row.get(col_proposicao)):
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_text_color(0, 51, 102)
+                pdf.cell(0, 6, f"  {sanitize_text_pdf(str(row[col_proposicao]))}", ln=True)
+            else:
+                pdf.ln(6)
+            
+            pdf.set_x(20)
+            
+            # Situação com destaque colorido
+            if col_situacao and pd.notna(row.get(col_situacao)):
+                situacao = sanitize_text_pdf(str(row[col_situacao]))
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(20, 5, "Situacao: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                if 'Arquiv' in situacao:
+                    pdf.set_text_color(150, 50, 50)
+                elif 'Pronta' in situacao or 'Sancion' in situacao:
+                    pdf.set_text_color(50, 150, 50)
+                else:
+                    pdf.set_text_color(50, 50, 150)
+                pdf.cell(0, 5, situacao[:60], ln=True)
+            
+            pdf.set_x(20)
+            
+            # Órgão
+            if col_orgao and pd.notna(row.get(col_orgao)):
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(20, 5, "Orgao: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 5, sanitize_text_pdf(str(row[col_orgao]))[:50], ln=True)
+            
+            pdf.set_x(20)
+            
+            # Data
+            if col_data and pd.notna(row.get(col_data)):
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(20, 5, "Data: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 5, sanitize_text_pdf(str(row[col_data]))[:20], ln=True)
+            
+            pdf.set_x(20)
+            
+            # Relator
+            if col_relator and pd.notna(row.get(col_relator)):
+                relator = str(row[col_relator])
+                if relator and relator.strip() and relator.strip() != '-':
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(20, 5, "Relator: ", ln=False)
+                    pdf.set_font('Helvetica', '', 9)
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.cell(0, 5, sanitize_text_pdf(relator)[:40], ln=True)
+                    pdf.set_x(20)
+            
+            # Tema
+            if col_tema and pd.notna(row.get(col_tema)):
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(20, 5, "Tema: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 5, sanitize_text_pdf(str(row[col_tema]))[:40], ln=True)
+                pdf.set_x(20)
+            
+            # Ementa (texto maior)
+            if col_ementa and pd.notna(row.get(col_ementa)):
+                ementa = sanitize_text_pdf(str(row[col_ementa]))
+                if ementa and ementa.strip():
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(0, 5, "Ementa:", ln=True)
+                    pdf.set_x(20)
+                    pdf.set_font('Helvetica', '', 8)
+                    pdf.set_text_color(60, 60, 60)
+                    # Multi-cell para texto longo
+                    pdf.multi_cell(170, 4, ementa[:300] + ('...' if len(ementa) > 300 else ''))
+            
+            # Linha divisória entre cards
+            pdf.ln(3)
+            pdf.set_draw_color(200, 200, 200)
+            pdf.set_line_width(0.2)
+            pdf.line(20, pdf.get_y(), 190, pdf.get_y())
             pdf.ln(5)
-            pdf.set_font('Helvetica', 'I', 8)
-            pdf.cell(0, 5, f"... e mais {len(df) - 100} registros (exportar XLSX para ver todos)", ln=True, align='C')
+        
+        # Nota de rodapé se houver mais registros
+        if len(df) > 300:
+            pdf.ln(5)
+            pdf.set_font('Helvetica', 'I', 9)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 5, f"* Exibindo 300 de {len(df)} registros. Exporte em XLSX para lista completa.", ln=True, align='C')
         
         output = BytesIO()
         pdf.output(output)
         return (output.getvalue(), "application/pdf", "pdf")
         
-    except (ImportError, Exception):
-        # Fallback: gera PDF simples com reportlab
-        try:
-            from reportlab.lib.pagesizes import A4, landscape
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib import colors
-            
-            output = BytesIO()
-            doc = SimpleDocTemplate(output, pagesize=landscape(A4))
-            elements = []
-            styles = getSampleStyleSheet()
-            
-            elements.append(Paragraph(sanitize_text_pdf(titulo), styles['Heading1']))
-            elements.append(Paragraph(f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
-            elements.append(Spacer(1, 12))
-            
-            # Preparar dados da tabela
-            data = [[sanitize_text_pdf(str(c)) for c in df.columns.tolist()]]
-            for _, row in df.head(50).iterrows():
-                data.append([sanitize_text_pdf(str(v))[:30] if pd.notna(v) else "" for v in row])
-            
-            table = Table(data)
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 8),
-                ('FONTSIZE', (0, 1), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ]))
-            elements.append(table)
-            
-            doc.build(elements)
-            return (output.getvalue(), "application/pdf", "pdf")
-            
-        except ImportError:
-            # Último fallback: retorna CSV
-            csv_bytes = df.to_csv(index=False).encode("utf-8")
-            return (csv_bytes, "text/csv", "csv")
+    except (ImportError, Exception) as e:
+        # Fallback para CSV se der erro
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        return (csv_bytes, "text/csv", "csv")
 
 
 def canonical_situacao(situacao: str) -> str:
