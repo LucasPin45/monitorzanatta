@@ -289,26 +289,41 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
     """
     Extrai informações de prazo de resposta de RIC a partir das tramitações.
     
-    Detecta tramitação de remessa quando:
-    - siglaOrgao == "1SECM" (ou contém "1SEC")
-    - Texto contém "Remessa" e/ou "Ofício" e/ou "Prazo para Resposta"
+    REGRA CANÔNICA DE PRAZO (baseada no padrão real da Câmara):
+    ============================================================
     
-    Retorna dict com:
-    - data_remessa: data da tramitação de remessa
-    - inicio_contagem: próximo dia útil após remessa
-    - prazo_inicio: data inicial do prazo (extraída do texto)
-    - prazo_fim: data final do prazo (extraída do texto)
-    - dias_restantes: dias até o prazo final (pode ser negativo se vencido)
-    - status_resposta: "Aguardando resposta" ou "Respondido"
-    - ministerio_destinatario: ministério extraído do texto
+    EXEMPLO REAL DE TRAMITAÇÃO:
+    - Órgão: 1ª Secretaria da Câmara dos Deputados (siglaOrgao = "1SECM")
+    - Texto: "Remessa por meio do Ofício 1ªSec/RI/E nº 459/2025, ao Ministro de Estado...
+              Prazo para Resposta Externas (de 23/12/2025 a 21/01/2026)"
+    
+    LÓGICA:
+    1. Procurar a tramitação MAIS RECENTE do órgão 1SECM com keywords de remessa
+    2. Se houver "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)" no texto:
+       - Usar essas datas como prazo_inicio e prazo_fim (fonte: "explicitado_na_tramitacao")
+    3. Se NÃO houver prazo explícito:
+       - prazo_inicio = próximo dia útil após a data da remessa
+       - prazo_fim = prazo_inicio + 30 dias corridos (fonte: "calculado")
+    4. Detectar resposta em tramitações posteriores
+    5. Determinar status final:
+       - "Fora do prazo" se não respondido e hoje > prazo_fim
+       - "Respondido fora do prazo" se respondido e data_resposta > prazo_fim
+       - "Respondido" se respondido e data_resposta <= prazo_fim
+       - "Aguardando resposta" caso contrário
+    
+    Retorna dict com todas as informações de prazo.
     """
     resultado = {
         "data_remessa": None,
         "inicio_contagem": None,
         "prazo_inicio": None,
         "prazo_fim": None,
+        "prazo_str": "",           # String formatada para exibição: "23/12/2025 a 21/01/2026"
         "dias_restantes": None,
+        "fonte_prazo": "",         # "explicitado_na_tramitacao" ou "calculado"
         "status_resposta": "Aguardando resposta",
+        "data_resposta": None,
+        "respondido": False,
         "ministerio_destinatario": "",
         "tramitacao_remessa_texto": "",
     }
@@ -316,87 +331,181 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
     if not tramitacoes:
         return resultado
     
-    # Ordenar tramitações por data (mais antiga primeiro para encontrar a remessa)
+    # ============================================================
+    # PASSO 1: Ordenar tramitações por data (MAIS RECENTE primeiro)
+    # Queremos a remessa mais recente caso haja mais de uma
+    # ============================================================
     tramitacoes_ordenadas = sorted(
         tramitacoes,
         key=lambda x: x.get("dataHora") or x.get("data") or "",
-        reverse=False
+        reverse=True  # Mais recente primeiro
     )
     
-    # Regex para extrair prazo
-    # Formato: "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)"
-    regex_prazo = r"Prazo\s+para\s+Resposta\s+(?:Externas?)?\s*\(?de\s*(\d{2}/\d{2}/\d{4})\s*a\s*(\d{2}/\d{2}/\d{4})\)?"
+    # ============================================================
+    # PASSO 2: Procurar tramitação de remessa (1SECM)
+    # Critérios: siglaOrgao contém "1SEC" + texto contém keywords
+    # ============================================================
     
-    # Procurar tramitação de remessa (1SECM ou 1SEC)
+    # Regex OBRIGATÓRIA para extrair prazo explícito
+    # Formato: "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)"
+    regex_prazo = r"Prazo\s+para\s+Resposta\s+Externas?\s*\(de\s*(\d{2}/\d{2}/\d{4})\s*a\s*(\d{2}/\d{2}/\d{4})\)"
+    
     tramitacao_remessa = None
+    data_remessa = None
+    
     for t in tramitacoes_ordenadas:
-        sigla_orgao = (t.get("siglaOrgao") or "").upper()
+        sigla_orgao = (t.get("siglaOrgao") or "").upper().strip()
         despacho = t.get("despacho") or ""
         desc = t.get("descricaoTramitacao") or ""
-        texto = f"{despacho} {desc}".lower()
+        texto_completo = f"{despacho} {desc}"
+        texto_lower = texto_completo.lower()
         
-        # Detectar tramitação de remessa
+        # Detectar se é tramitação da 1SECM
         is_1secm = "1SEC" in sigla_orgao or sigla_orgao == "1SECM"
-        has_remessa_keywords = ("remessa" in texto or "ofício" in texto or "oficio" in texto or 
-                               "prazo para resposta" in texto or "1ªsec/ri/e" in texto.lower())
         
-        if is_1secm and has_remessa_keywords:
+        # Detectar keywords de remessa
+        has_remessa = "remessa" in texto_lower
+        has_oficio = "ofício" in texto_lower or "oficio" in texto_lower
+        has_1sec_ri = "1ªsec/ri/e" in texto_lower or "1asec/ri/e" in texto_lower
+        has_prazo = "prazo para resposta" in texto_lower
+        
+        # A tramitação de remessa deve ser da 1SECM e ter keywords relevantes
+        if is_1secm and (has_remessa or has_oficio or has_1sec_ri or has_prazo):
             tramitacao_remessa = t
-            resultado["tramitacao_remessa_texto"] = f"{despacho} {desc}".strip()
+            resultado["tramitacao_remessa_texto"] = texto_completo.strip()
             
-            # Extrair data da tramitação
+            # Extrair data da tramitação de remessa
             data_str = t.get("dataHora") or t.get("data")
             if data_str:
                 try:
                     dt = pd.to_datetime(data_str, errors="coerce")
                     if pd.notna(dt):
-                        resultado["data_remessa"] = dt.date()
-                        resultado["inicio_contagem"] = proximo_dia_util(dt.date())
+                        data_remessa = dt.date()
+                        resultado["data_remessa"] = data_remessa
+                        resultado["inicio_contagem"] = proximo_dia_util(data_remessa)
                 except:
                     pass
             
-            # Extrair prazo do texto
-            texto_completo = f"{despacho} {desc}"
+            # ============================================================
+            # PASSO 3: Extrair prazo do texto (se existir)
+            # ============================================================
             match_prazo = re.search(regex_prazo, texto_completo, re.IGNORECASE)
+            
             if match_prazo:
+                # PRAZO EXPLÍCITO ENCONTRADO - usar as datas do texto
                 try:
                     prazo_inicio_str = match_prazo.group(1)
                     prazo_fim_str = match_prazo.group(2)
                     resultado["prazo_inicio"] = datetime.datetime.strptime(prazo_inicio_str, "%d/%m/%Y").date()
                     resultado["prazo_fim"] = datetime.datetime.strptime(prazo_fim_str, "%d/%m/%Y").date()
-                except:
+                    resultado["prazo_str"] = f"{prazo_inicio_str} a {prazo_fim_str}"
+                    resultado["fonte_prazo"] = "explicitado_na_tramitacao"
+                except Exception as e:
                     pass
             
+            # Encontramos a remessa mais recente, parar de procurar
             break
     
-    # Calcular dias restantes se tiver prazo_fim
+    # ============================================================
+    # PASSO 4: Se não encontrou prazo explícito, calcular
+    # Regra: prazo_inicio = próximo dia útil, prazo_fim = +30 dias
+    # ============================================================
+    if tramitacao_remessa and not resultado["prazo_fim"] and data_remessa:
+        inicio = proximo_dia_util(data_remessa)
+        if inicio:
+            resultado["prazo_inicio"] = inicio
+            resultado["prazo_fim"] = inicio + datetime.timedelta(days=30)
+            resultado["prazo_str"] = f"até {resultado['prazo_fim'].strftime('%d/%m/%Y')}"
+            resultado["fonte_prazo"] = "calculado"
+    
+    # ============================================================
+    # PASSO 5: Calcular dias restantes
+    # ============================================================
     if resultado["prazo_fim"]:
         hoje = datetime.date.today()
         delta = (resultado["prazo_fim"] - hoje).days
         resultado["dias_restantes"] = delta
     
-    # Verificar se foi respondido (procurar tramitação posterior com keywords de resposta)
-    if tramitacao_remessa:
-        data_remessa = resultado["data_remessa"]
-        for t in tramitacoes_ordenadas:
+    # ============================================================
+    # PASSO 6: Verificar se foi respondido
+    # Procurar tramitações POSTERIORES à remessa com keywords de resposta
+    # ============================================================
+    data_resposta = None
+    respondido = False
+    
+    if tramitacao_remessa and data_remessa:
+        # Percorrer tramitações em ordem cronológica para encontrar a primeira resposta
+        for t in sorted(tramitacoes, key=lambda x: x.get("dataHora") or x.get("data") or ""):
             data_str = t.get("dataHora") or t.get("data")
-            if data_str and data_remessa:
-                try:
-                    dt_tram = pd.to_datetime(data_str, errors="coerce")
-                    if pd.notna(dt_tram) and dt_tram.date() > data_remessa:
-                        despacho = (t.get("despacho") or "").lower()
-                        desc = (t.get("descricaoTramitacao") or "").lower()
-                        texto = f"{despacho} {desc}"
-                        
-                        for keyword in RIC_RESPOSTA_KEYWORDS:
-                            if keyword in texto:
-                                resultado["status_resposta"] = "Respondido"
-                                break
-                        
-                        if resultado["status_resposta"] == "Respondido":
-                            break
-                except:
-                    pass
+            if not data_str:
+                continue
+                
+            try:
+                dt_tram = pd.to_datetime(data_str, errors="coerce")
+                if pd.isna(dt_tram):
+                    continue
+                    
+                # Só considerar tramitações POSTERIORES à remessa
+                if dt_tram.date() <= data_remessa:
+                    continue
+                
+                despacho = (t.get("despacho") or "").lower()
+                desc = (t.get("descricaoTramitacao") or "").lower()
+                texto = f"{despacho} {desc}"
+                
+                # Keywords que indicam resposta recebida
+                keywords_resposta = [
+                    "resposta",
+                    "recebimento de resposta",
+                    "encaminha resposta",
+                    "resposta do poder executivo",
+                    "resposta ao requerimento",
+                    "resposta do ministério",
+                    "resposta do ministerio",
+                    "atendimento ao requerimento",
+                    "resposta encaminhada",
+                ]
+                
+                for keyword in keywords_resposta:
+                    if keyword in texto:
+                        respondido = True
+                        data_resposta = dt_tram.date()
+                        break
+                
+                if respondido:
+                    break
+                    
+            except:
+                pass
+    
+    resultado["respondido"] = respondido
+    resultado["data_resposta"] = data_resposta
+    
+    # ============================================================
+    # PASSO 7: Determinar STATUS FINAL
+    # ============================================================
+    # Regras:
+    # - Se não respondido e hoje > prazo_fim → "Fora do prazo"
+    # - Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
+    # - Se respondido e data_resposta <= prazo_fim → "Respondido"
+    # - Caso contrário → "Aguardando resposta"
+    
+    hoje = datetime.date.today()
+    prazo_fim = resultado["prazo_fim"]
+    
+    if respondido:
+        if prazo_fim and data_resposta:
+            if data_resposta > prazo_fim:
+                resultado["status_resposta"] = "Respondido fora do prazo"
+            else:
+                resultado["status_resposta"] = "Respondido"
+        else:
+            resultado["status_resposta"] = "Respondido"
+    else:
+        if prazo_fim and hoje > prazo_fim:
+            resultado["status_resposta"] = "Fora do prazo"
+        else:
+            resultado["status_resposta"] = "Aguardando resposta"
     
     return resultado
 
@@ -2705,8 +2814,12 @@ def build_status_map(ids: list[str]) -> dict:
                 "ric_inicio_contagem": prazo_info.get("inicio_contagem"),
                 "ric_prazo_inicio": prazo_info.get("prazo_inicio"),
                 "ric_prazo_fim": prazo_info.get("prazo_fim"),
+                "ric_prazo_str": prazo_info.get("prazo_str", ""),  # String formatada para exibição
                 "ric_dias_restantes": prazo_info.get("dias_restantes"),
+                "ric_fonte_prazo": prazo_info.get("fonte_prazo", ""),
                 "ric_status_resposta": prazo_info.get("status_resposta"),
+                "ric_data_resposta": prazo_info.get("data_resposta"),
+                "ric_respondido": prazo_info.get("respondido", False),
                 "ric_ministerio": extrair_ministerio_ric(ementa, tramitacoes),
                 "ric_assunto": extrair_assunto_ric(ementa),
             })
@@ -2756,8 +2869,12 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["RIC_InicioContagem"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_inicio_contagem"))
     df["RIC_PrazoInicio"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_prazo_inicio"))
     df["RIC_PrazoFim"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_prazo_fim"))
+    df["RIC_PrazoStr"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_prazo_str", ""))
     df["RIC_DiasRestantes"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_dias_restantes"))
+    df["RIC_FontePrazo"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_fonte_prazo", ""))
     df["RIC_StatusResposta"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_status_resposta", ""))
+    df["RIC_DataResposta"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_data_resposta"))
+    df["RIC_Respondido"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_respondido", False))
     df["RIC_Ministerio"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_ministerio", ""))
     df["RIC_Assunto"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_assunto", ""))
 
@@ -4205,8 +4322,14 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     anos_sel_ric = st.multiselect("Ano", options=anos_ric, default=anos_ric[:2] if len(anos_ric) >= 2 else anos_ric, key="anos_ric")
                 
                 with col_f2:
-                    # Filtro por status de resposta
-                    status_resp_options = ["Todos", "Aguardando resposta", "Respondido"]
+                    # Filtro por status de resposta - incluindo novos status
+                    status_resp_options = [
+                        "Todos", 
+                        "Aguardando resposta", 
+                        "Fora do prazo",
+                        "Respondido", 
+                        "Respondido fora do prazo"
+                    ]
                     status_resp_sel = st.selectbox("Status de Resposta", options=status_resp_options, key="status_resp_ric")
                 
                 with col_f3:
@@ -4233,37 +4356,45 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 df_rics_fil = df_rics_fil[df_rics_fil["RIC_Ministerio"].isin(ministerios_sel)].copy()
             
             if prazo_sel != "Todos":
+                def _check_dias(x, cond):
+                    if x is None or pd.isna(x):
+                        return False
+                    try:
+                        return cond(int(x))
+                    except:
+                        return False
+                
                 if prazo_sel == "Vencidos":
-                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and int(x) < 0)].copy()
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: _check_dias(x, lambda d: d < 0))].copy()
                 elif prazo_sel == "Vencendo em 5 dias":
-                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 5)].copy()
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: _check_dias(x, lambda d: 0 <= d <= 5))].copy()
                 elif prazo_sel == "Vencendo em 15 dias":
-                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 15)].copy()
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: _check_dias(x, lambda d: 0 <= d <= 15))].copy()
                 elif prazo_sel == "No prazo":
-                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and int(x) > 0)].copy()
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: _check_dias(x, lambda d: d > 0))].copy()
             
             # ============================================================
             # RESUMO EXECUTIVO DOS RICs
             # ============================================================
             st.markdown("### 📊 Resumo dos RICs")
             
-            col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+            col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
             
             total_rics = len(df_rics_fil)
             aguardando = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Aguardando resposta"])
+            fora_prazo = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Fora do prazo"])
             respondidos = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido"])
+            respondidos_fora = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido fora do prazo"])
             
-            # Calcular vencidos e urgentes
-            vencidos = 0
+            # Calcular urgentes (vencendo em até 5 dias)
             urgentes = 0
             for _, row in df_rics_fil.iterrows():
                 dias = row.get("RIC_DiasRestantes")
-                if dias is not None and pd.notna(dias):
+                status = row.get("RIC_StatusResposta", "")
+                if dias is not None and pd.notna(dias) and "Respondido" not in str(status):
                     try:
                         dias_int = int(dias)
-                        if dias_int < 0:
-                            vencidos += 1
-                        elif dias_int <= 5:
+                        if 0 <= dias_int <= 5:
                             urgentes += 1
                     except:
                         pass
@@ -4271,34 +4402,41 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             with col_m1:
                 st.metric("Total de RICs", total_rics)
             with col_m2:
-                st.metric("Aguardando Resposta", aguardando)
+                st.metric("Aguardando", aguardando)
             with col_m3:
-                st.metric("Respondidos", respondidos)
+                st.metric("⚠️ Fora do prazo", fora_prazo, delta=f"-{fora_prazo}" if fora_prazo > 0 else None, delta_color="inverse")
             with col_m4:
-                st.metric("⚠️ Vencidos", vencidos, delta=f"-{vencidos}" if vencidos > 0 else None, delta_color="inverse")
+                st.metric("✅ Respondidos", respondidos)
             with col_m5:
-                st.metric("🔔 Urgentes (≤5 dias)", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off")
+                st.metric("⚠️ Resp. fora prazo", respondidos_fora)
+            with col_m6:
+                st.metric("🔔 Urgentes (≤5d)", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off")
             
             st.markdown("---")
             
             # ============================================================
             # ALERTAS DE PRAZO
             # ============================================================
-            df_vencidos = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and int(x) < 0 if x is not None and pd.notna(x) else False)].copy()
-            df_urgentes = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 5 if x is not None and pd.notna(x) else False)].copy()
+            # Filtrar apenas os que estão fora do prazo (não respondidos)
+            df_fora_prazo = df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Fora do prazo"].copy()
+            df_urgentes_alert = df_rics_fil[
+                (df_rics_fil["RIC_StatusResposta"] == "Aguardando resposta") &
+                (df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 5 if x is not None and pd.notna(x) else False))
+            ].copy()
             
-            if not df_vencidos.empty:
-                st.error(f"🚨 **{len(df_vencidos)} RIC(s) COM PRAZO VENCIDO!**")
-                for _, row in df_vencidos.head(5).iterrows():
+            if not df_fora_prazo.empty:
+                st.error(f"🚨 **{len(df_fora_prazo)} RIC(s) FORA DO PRAZO (sem resposta)!**")
+                for _, row in df_fora_prazo.head(5).iterrows():
                     prop = row.get("Proposicao", "")
-                    dias = abs(int(row.get("RIC_DiasRestantes", 0)))
+                    dias = row.get("RIC_DiasRestantes")
+                    dias_str = f"há {abs(int(dias))} dias" if dias is not None and pd.notna(dias) else ""
                     ministerio = row.get("RIC_Ministerio", "Não identificado")
                     link = camara_link_tramitacao(row.get("id", ""))
-                    st.markdown(f"- **[{prop}]({link})** - Vencido há **{dias} dias** - {ministerio}")
+                    st.markdown(f"- **[{prop}]({link})** - Vencido {dias_str} - {ministerio}")
             
-            if not df_urgentes.empty:
-                st.warning(f"⚠️ **{len(df_urgentes)} RIC(s) VENCENDO EM ATÉ 5 DIAS!**")
-                for _, row in df_urgentes.head(5).iterrows():
+            if not df_urgentes_alert.empty:
+                st.warning(f"⚠️ **{len(df_urgentes_alert)} RIC(s) VENCENDO EM ATÉ 5 DIAS!**")
+                for _, row in df_urgentes_alert.head(5).iterrows():
                     prop = row.get("Proposicao", "")
                     dias = int(row.get("RIC_DiasRestantes", 0))
                     ministerio = row.get("RIC_Ministerio", "Não identificado")
@@ -4320,26 +4458,49 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             df_rics_view = df_rics_fil.copy()
             df_rics_view["LinkTramitacao"] = df_rics_view["id"].astype(str).apply(camara_link_tramitacao)
             
-            # Formatar datas de prazo
+            # Formatar datas de prazo usando RIC_PrazoStr ou fallback
             def fmt_prazo(row):
+                """
+                Formata o prazo para exibição.
+                Usa RIC_PrazoStr (já formatado) quando disponível.
+                Adiciona indicador de dias restantes ou vencido.
+                """
+                # Primeiro tenta usar prazo_str já formatado
+                prazo_str = row.get("RIC_PrazoStr", "")
                 prazo_fim = row.get("RIC_PrazoFim")
                 dias = row.get("RIC_DiasRestantes")
-                if prazo_fim and pd.notna(prazo_fim):
+                status = row.get("RIC_StatusResposta", "")
+                
+                # Se tiver prazo_str, usar como base
+                if prazo_str and str(prazo_str).strip():
+                    base = str(prazo_str)
+                elif prazo_fim and pd.notna(prazo_fim):
                     try:
                         if isinstance(prazo_fim, datetime.date):
-                            prazo_str = prazo_fim.strftime("%d/%m/%Y")
+                            base = f"até {prazo_fim.strftime('%d/%m/%Y')}"
                         else:
-                            prazo_str = str(prazo_fim)[:10]
-                        if dias is not None and pd.notna(dias):
-                            dias_int = int(dias)
-                            if dias_int < 0:
-                                return f"{prazo_str} (VENCIDO há {abs(dias_int)}d)"
-                            else:
-                                return f"{prazo_str} ({dias_int}d restantes)"
-                        return prazo_str
+                            base = f"até {str(prazo_fim)[:10]}"
                     except:
                         return "—"
-                return "—"
+                else:
+                    return "—"
+                
+                # Adicionar indicador de status
+                if dias is not None and pd.notna(dias):
+                    try:
+                        dias_int = int(dias)
+                        if "Respondido" in str(status):
+                            return f"{base} ✅"
+                        elif dias_int < 0:
+                            return f"{base} (⚠️ VENCIDO há {abs(dias_int)}d)"
+                        elif dias_int <= 5:
+                            return f"{base} (🔔 {dias_int}d restantes)"
+                        else:
+                            return f"{base} ({dias_int}d restantes)"
+                    except:
+                        return base
+                
+                return base
             
             df_rics_view["Prazo"] = df_rics_view.apply(fmt_prazo, axis=1)
             
