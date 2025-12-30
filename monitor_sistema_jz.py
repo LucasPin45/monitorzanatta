@@ -285,40 +285,41 @@ def contar_dias_uteis(data_inicio: datetime.date, data_fim: datetime.date) -> in
     return dias
 
 
-def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
+def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dict:
     """
     Extrai informações de prazo de resposta de RIC a partir das tramitações.
     
     REGRA CANÔNICA DE PRAZO (baseada no padrão real da Câmara):
     ============================================================
     
-    EXEMPLO REAL DE TRAMITAÇÃO:
-    - Órgão: 1ª Secretaria da Câmara dos Deputados (siglaOrgao = "1SECM")
-    - Texto: "Remessa por meio do Ofício 1ªSec/RI/E nº 459/2025, ao Ministro de Estado...
-              Prazo para Resposta Externas (de 23/12/2025 a 21/01/2026)"
+    EXEMPLO REAL DE TRAMITAÇÃO DE REMESSA:
+    - Data: 06/11/2025
+    - Órgão: 1ª Secretaria da Câmara dos Deputados (1SECM)
+    - Texto: "Remessa por meio do Ofício 1ªSec/RI/E nº 412/2025, ao Ministro de Estado dos Transportes.
+              Prazo para Resposta Externas (de 07/11/2025 a 08/12/2025)"
+    
+    EXEMPLO REAL DE RESPOSTA RECEBIDA:
+    - Data: 02/12/2025
+    - Órgão: 1ª Secretaria da Câmara dos Deputados (1SECM)
+    - Texto: "Recebimento de resposta conforme Ofício nº 2347/2025/ASPAR/GM..."
+    
+    REGRAS DE STATUS BASEADAS NA SITUAÇÃO ATUAL:
+    - "Aguardando Remessa ao Arquivo" → JÁ FOI RESPONDIDO
+    - "Aguardando Providências Internas" → EM TRAMITAÇÃO NA CÂMARA
+    - "Aguardando Despacho do Presidente da Câmara dos Deputados" → EM TRAMITAÇÃO NA CÂMARA
     
     LÓGICA:
-    1. Procurar a tramitação MAIS RECENTE do órgão 1SECM com keywords de remessa
-    2. Se houver "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)" no texto:
-       - Usar essas datas como prazo_inicio e prazo_fim (fonte: "explicitado_na_tramitacao")
-    3. Se NÃO houver prazo explícito:
-       - prazo_inicio = próximo dia útil após a data da remessa
-       - prazo_fim = prazo_inicio + 30 dias corridos (fonte: "calculado")
-    4. Detectar resposta em tramitações posteriores
-    5. Determinar status final:
-       - "Fora do prazo" se não respondido e hoje > prazo_fim
-       - "Respondido fora do prazo" se respondido e data_resposta > prazo_fim
-       - "Respondido" se respondido e data_resposta <= prazo_fim
-       - "Aguardando resposta" caso contrário
-    
-    Retorna dict com todas as informações de prazo.
+    1. Procurar tramitação de REMESSA (1SECM + "Remessa por meio do Ofício")
+    2. Extrair prazo do texto: "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)"
+    3. Procurar tramitação de RESPOSTA (1SECM + "Recebimento de resposta conforme Ofício")
+    4. Determinar status final com base em situação atual + prazos + resposta
     """
     resultado = {
         "data_remessa": None,
         "inicio_contagem": None,
         "prazo_inicio": None,
         "prazo_fim": None,
-        "prazo_str": "",           # String formatada para exibição: "23/12/2025 a 21/01/2026"
+        "prazo_str": "",           # String formatada: "07/11/2025 a 08/12/2025"
         "dias_restantes": None,
         "fonte_prazo": "",         # "explicitado_na_tramitacao" ou "calculado"
         "status_resposta": "Aguardando resposta",
@@ -329,25 +330,25 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
     }
     
     if not tramitacoes:
+        # Verificar status baseado na situação atual mesmo sem tramitações
+        resultado["status_resposta"] = _determinar_status_por_situacao(situacao_atual, False, None, None)
         return resultado
     
     # ============================================================
-    # PASSO 1: Ordenar tramitações por data (MAIS RECENTE primeiro)
-    # Queremos a remessa mais recente caso haja mais de uma
+    # PASSO 1: Ordenar tramitações por data (cronológica)
     # ============================================================
     tramitacoes_ordenadas = sorted(
         tramitacoes,
         key=lambda x: x.get("dataHora") or x.get("data") or "",
-        reverse=True  # Mais recente primeiro
+        reverse=False  # Ordem cronológica
     )
     
     # ============================================================
-    # PASSO 2: Procurar tramitação de remessa (1SECM)
-    # Critérios: siglaOrgao contém "1SEC" + texto contém keywords
+    # PASSO 2: Procurar tramitação de REMESSA (1SECM)
+    # Critério: "Remessa por meio do Ofício 1ªSec/RI/E"
     # ============================================================
     
     # Regex OBRIGATÓRIA para extrair prazo explícito
-    # Formato: "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)"
     regex_prazo = r"Prazo\s+para\s+Resposta\s+Externas?\s*\(de\s*(\d{2}/\d{2}/\d{4})\s*a\s*(\d{2}/\d{2}/\d{4})\)"
     
     tramitacao_remessa = None
@@ -363,14 +364,15 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
         # Detectar se é tramitação da 1SECM
         is_1secm = "1SEC" in sigla_orgao or sigla_orgao == "1SECM"
         
-        # Detectar keywords de remessa
-        has_remessa = "remessa" in texto_lower
-        has_oficio = "ofício" in texto_lower or "oficio" in texto_lower
+        # Detectar keywords de REMESSA (não confundir com recebimento)
+        has_remessa = "remessa por meio do ofício" in texto_lower or "remessa por meio do oficio" in texto_lower
         has_1sec_ri = "1ªsec/ri/e" in texto_lower or "1asec/ri/e" in texto_lower
         has_prazo = "prazo para resposta" in texto_lower
         
-        # A tramitação de remessa deve ser da 1SECM e ter keywords relevantes
-        if is_1secm and (has_remessa or has_oficio or has_1sec_ri or has_prazo):
+        # Não é remessa se for recebimento de resposta
+        is_recebimento = "recebimento de resposta" in texto_lower
+        
+        if is_1secm and (has_remessa or has_1sec_ri) and has_prazo and not is_recebimento:
             tramitacao_remessa = t
             resultado["tramitacao_remessa_texto"] = texto_completo.strip()
             
@@ -382,17 +384,16 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
                     if pd.notna(dt):
                         data_remessa = dt.date()
                         resultado["data_remessa"] = data_remessa
-                        resultado["inicio_contagem"] = proximo_dia_util(data_remessa)
                 except:
                     pass
             
             # ============================================================
-            # PASSO 3: Extrair prazo do texto (se existir)
+            # PASSO 3: Extrair prazo EXPLÍCITO do texto
+            # Formato: "Prazo para Resposta Externas (de 07/11/2025 a 08/12/2025)"
             # ============================================================
             match_prazo = re.search(regex_prazo, texto_completo, re.IGNORECASE)
             
             if match_prazo:
-                # PRAZO EXPLÍCITO ENCONTRADO - usar as datas do texto
                 try:
                     prazo_inicio_str = match_prazo.group(1)
                     prazo_fim_str = match_prazo.group(2)
@@ -400,20 +401,21 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
                     resultado["prazo_fim"] = datetime.datetime.strptime(prazo_fim_str, "%d/%m/%Y").date()
                     resultado["prazo_str"] = f"{prazo_inicio_str} a {prazo_fim_str}"
                     resultado["fonte_prazo"] = "explicitado_na_tramitacao"
-                except Exception as e:
+                    resultado["inicio_contagem"] = resultado["prazo_inicio"]
+                except:
                     pass
             
-            # Encontramos a remessa mais recente, parar de procurar
-            break
+            # Pegar a ÚLTIMA remessa encontrada (mais recente)
+            # Continua procurando para pegar a mais recente
     
     # ============================================================
     # PASSO 4: Se não encontrou prazo explícito, calcular
-    # Regra: prazo_inicio = próximo dia útil, prazo_fim = +30 dias
     # ============================================================
     if tramitacao_remessa and not resultado["prazo_fim"] and data_remessa:
         inicio = proximo_dia_util(data_remessa)
         if inicio:
             resultado["prazo_inicio"] = inicio
+            resultado["inicio_contagem"] = inicio
             resultado["prazo_fim"] = inicio + datetime.timedelta(days=30)
             resultado["prazo_str"] = f"até {resultado['prazo_fim'].strftime('%d/%m/%Y')}"
             resultado["fonte_prazo"] = "calculado"
@@ -427,87 +429,104 @@ def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
         resultado["dias_restantes"] = delta
     
     # ============================================================
-    # PASSO 6: Verificar se foi respondido
-    # Procurar tramitações POSTERIORES à remessa com keywords de resposta
+    # PASSO 6: Verificar se foi RESPONDIDO
+    # Critério: tramitação 1SECM com "Recebimento de resposta conforme Ofício"
     # ============================================================
     data_resposta = None
     respondido = False
     
-    if tramitacao_remessa and data_remessa:
-        # Percorrer tramitações em ordem cronológica para encontrar a primeira resposta
-        for t in sorted(tramitacoes, key=lambda x: x.get("dataHora") or x.get("data") or ""):
+    for t in tramitacoes_ordenadas:
+        sigla_orgao = (t.get("siglaOrgao") or "").upper().strip()
+        despacho = (t.get("despacho") or "").lower()
+        desc = (t.get("descricaoTramitacao") or "").lower()
+        texto = f"{despacho} {desc}"
+        
+        is_1secm = "1SEC" in sigla_orgao or sigla_orgao == "1SECM"
+        
+        # Critério PRINCIPAL de resposta: "Recebimento de resposta conforme Ofício"
+        is_recebimento_resposta = "recebimento de resposta conforme ofício" in texto or \
+                                   "recebimento de resposta conforme oficio" in texto
+        
+        # Critérios secundários
+        has_encaminha_resposta = "encaminhamento de resposta" in texto or "encaminha resposta" in texto
+        has_resposta_ministerio = "resposta do ministério" in texto or "resposta do ministerio" in texto
+        
+        if is_1secm and (is_recebimento_resposta or has_encaminha_resposta):
             data_str = t.get("dataHora") or t.get("data")
-            if not data_str:
-                continue
-                
-            try:
-                dt_tram = pd.to_datetime(data_str, errors="coerce")
-                if pd.isna(dt_tram):
-                    continue
-                    
-                # Só considerar tramitações POSTERIORES à remessa
-                if dt_tram.date() <= data_remessa:
-                    continue
-                
-                despacho = (t.get("despacho") or "").lower()
-                desc = (t.get("descricaoTramitacao") or "").lower()
-                texto = f"{despacho} {desc}"
-                
-                # Keywords que indicam resposta recebida
-                keywords_resposta = [
-                    "resposta",
-                    "recebimento de resposta",
-                    "encaminha resposta",
-                    "resposta do poder executivo",
-                    "resposta ao requerimento",
-                    "resposta do ministério",
-                    "resposta do ministerio",
-                    "atendimento ao requerimento",
-                    "resposta encaminhada",
-                ]
-                
-                for keyword in keywords_resposta:
-                    if keyword in texto:
+            if data_str:
+                try:
+                    dt_resp = pd.to_datetime(data_str, errors="coerce")
+                    if pd.notna(dt_resp):
                         respondido = True
-                        data_resposta = dt_tram.date()
-                        break
-                
-                if respondido:
-                    break
-                    
-            except:
-                pass
+                        data_resposta = dt_resp.date()
+                        # Pegar a resposta mais recente
+                except:
+                    pass
     
     resultado["respondido"] = respondido
     resultado["data_resposta"] = data_resposta
     
     # ============================================================
     # PASSO 7: Determinar STATUS FINAL
+    # Considera situação atual + prazo + resposta
     # ============================================================
-    # Regras:
-    # - Se não respondido e hoje > prazo_fim → "Fora do prazo"
-    # - Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
-    # - Se respondido e data_resposta <= prazo_fim → "Respondido"
-    # - Caso contrário → "Aguardando resposta"
+    resultado["status_resposta"] = _determinar_status_por_situacao(
+        situacao_atual, 
+        respondido, 
+        data_resposta, 
+        resultado["prazo_fim"]
+    )
     
+    return resultado
+
+
+def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_resposta, prazo_fim) -> str:
+    """
+    Determina o status do RIC baseado na situação atual e dados de prazo/resposta.
+    
+    REGRAS:
+    1. "Aguardando Remessa ao Arquivo" → "Respondido" (já foi respondido)
+    2. "Aguardando Providências Internas" → "Em tramitação na Câmara"
+    3. "Aguardando Despacho do Presidente da Câmara dos Deputados" → "Em tramitação na Câmara"
+    4. Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
+    5. Se respondido e data_resposta <= prazo_fim → "Respondido"
+    6. Se não respondido e hoje > prazo_fim → "Fora do prazo"
+    7. Caso contrário → "Aguardando resposta"
+    """
+    situacao_norm = (situacao_atual or "").lower().strip()
     hoje = datetime.date.today()
-    prazo_fim = resultado["prazo_fim"]
     
+    # REGRA 1: Aguardando Remessa ao Arquivo = JÁ FOI RESPONDIDO
+    if "aguardando remessa ao arquivo" in situacao_norm or "remessa ao arquivo" in situacao_norm:
+        return "Respondido"
+    
+    # REGRA 2 e 3: Situações que indicam tramitação interna na Câmara
+    situacoes_tramitacao_camara = [
+        "aguardando providências internas",
+        "aguardando providencias internas",
+        "aguardando despacho do presidente da câmara",
+        "aguardando despacho do presidente da camara",
+    ]
+    for sit in situacoes_tramitacao_camara:
+        if sit in situacao_norm:
+            return "Em tramitação na Câmara"
+    
+    # REGRA 4 e 5: Se foi respondido (detectado nas tramitações)
     if respondido:
         if prazo_fim and data_resposta:
             if data_resposta > prazo_fim:
-                resultado["status_resposta"] = "Respondido fora do prazo"
+                return "Respondido fora do prazo"
             else:
-                resultado["status_resposta"] = "Respondido"
+                return "Respondido"
         else:
-            resultado["status_resposta"] = "Respondido"
-    else:
-        if prazo_fim and hoje > prazo_fim:
-            resultado["status_resposta"] = "Fora do prazo"
-        else:
-            resultado["status_resposta"] = "Aguardando resposta"
+            return "Respondido"
     
-    return resultado
+    # REGRA 6: Se não foi respondido e prazo venceu
+    if prazo_fim and hoje > prazo_fim:
+        return "Fora do prazo"
+    
+    # REGRA 7: Caso padrão
+    return "Aguardando resposta"
 
 
 def extrair_ministerio_ric(ementa: str, tramitacoes: list = None) -> str:
@@ -2808,7 +2827,7 @@ def build_status_map(ids: list[str]) -> dict:
         
         # Se for RIC, extrair informações adicionais de prazo de resposta
         if sigla_tipo == "RIC":
-            prazo_info = parse_prazo_resposta_ric(tramitacoes)
+            prazo_info = parse_prazo_resposta_ric(tramitacoes, situacao)
             resultado.update({
                 "ric_data_remessa": prazo_info.get("data_remessa"),
                 "ric_inicio_contagem": prazo_info.get("inicio_contagem"),
@@ -4325,7 +4344,8 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     # Filtro por status de resposta - incluindo novos status
                     status_resp_options = [
                         "Todos", 
-                        "Aguardando resposta", 
+                        "Aguardando resposta",
+                        "Em tramitação na Câmara",
                         "Fora do prazo",
                         "Respondido", 
                         "Respondido fora do prazo"
@@ -4378,20 +4398,22 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             # ============================================================
             st.markdown("### 📊 Resumo dos RICs")
             
-            col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
+            col_m1, col_m2, col_m3, col_m4, col_m5, col_m6, col_m7 = st.columns(7)
             
             total_rics = len(df_rics_fil)
+            em_tramitacao = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Em tramitação na Câmara"])
             aguardando = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Aguardando resposta"])
             fora_prazo = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Fora do prazo"])
-            respondidos = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido"])
+            # Respondidos inclui "Respondido" e "Respondido fora do prazo"
+            respondidos = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"].isin(["Respondido", "Respondido fora do prazo"])])
             respondidos_fora = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido fora do prazo"])
             
-            # Calcular urgentes (vencendo em até 5 dias)
+            # Calcular urgentes (vencendo em até 5 dias, excluindo respondidos)
             urgentes = 0
             for _, row in df_rics_fil.iterrows():
                 dias = row.get("RIC_DiasRestantes")
                 status = row.get("RIC_StatusResposta", "")
-                if dias is not None and pd.notna(dias) and "Respondido" not in str(status):
+                if dias is not None and pd.notna(dias) and "Respondido" not in str(status) and status != "Em tramitação na Câmara":
                     try:
                         dias_int = int(dias)
                         if 0 <= dias_int <= 5:
@@ -4400,17 +4422,19 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         pass
             
             with col_m1:
-                st.metric("Total de RICs", total_rics)
+                st.metric("Total", total_rics)
             with col_m2:
-                st.metric("Aguardando", aguardando)
+                st.metric("🏛️ Na Câmara", em_tramitacao)
             with col_m3:
-                st.metric("⚠️ Fora do prazo", fora_prazo, delta=f"-{fora_prazo}" if fora_prazo > 0 else None, delta_color="inverse")
+                st.metric("⏳ Aguardando", aguardando)
             with col_m4:
-                st.metric("✅ Respondidos", respondidos)
+                st.metric("⚠️ Fora prazo", fora_prazo, delta=f"-{fora_prazo}" if fora_prazo > 0 else None, delta_color="inverse")
             with col_m5:
-                st.metric("⚠️ Resp. fora prazo", respondidos_fora)
+                st.metric("✅ Respondidos", respondidos)
             with col_m6:
-                st.metric("🔔 Urgentes (≤5d)", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off")
+                st.metric("⚠️ Resp. fora", respondidos_fora)
+            with col_m7:
+                st.metric("🔔 Urgentes", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off")
             
             st.markdown("---")
             
