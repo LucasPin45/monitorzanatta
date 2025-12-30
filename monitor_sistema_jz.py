@@ -1,7 +1,15 @@
-# monitor_sistema_jz.py - v20
+# monitor_sistema_jz.py - v21
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 20: PDF Autoria/Relatoria com dados completos (relator, situação, parecer)
+# VERSÃO 21: PDFs otimizados para decisão política em gabinete
+# - Links clicáveis no PDF
+# - Data da última tramitação (não data de cadastro)
+# - Ordenação por data mais recente primeiro
+# - Campo "Parado há (dias)" calculado
+# - Relator com alerta de adversário (PT, PSOL, PCdoB, PSB, PV, Rede)
+# - Fallback para situação vazia
+# - Agrupamento por situação com cabeçalho
+# - Cabeçalho informativo com fonte e critério
 # ============================================================
 
 import datetime
@@ -39,7 +47,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/20.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/21.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -254,21 +262,282 @@ def sanitize_text_pdf(text: str) -> str:
     return result
 
 
-def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes, str, str]:
-    """Exporta DataFrame para PDF em formato de relatório profissional."""
+
+# ============================================================
+# FUNÇÕES AUXILIARES PARA PDF - VERSÃO 21
+# ============================================================
+
+def _padronizar_colunas_pdf(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Padroniza colunas do DataFrame para geração de PDF.
+    Garante colunas canônicas e evita heurísticas frágeis.
+    """
+    df_out = df.copy()
     
-    # Colunas a excluir do relatório
-    colunas_excluir = ['Tipo', 'Ano', 'Alerta', 'ID', 'id', 'LinkTramitacao', 'Link', 
-                       'sinal', 'AnoStatus', 'MesStatus', 'ids_proposicoes_autoria',
-                       'ids_proposicoes_relatoria', 'id_evento']
+    # Mapeamento de nomes possíveis para nomes canônicos
+    mapeamentos = {
+        'Situação atual': ['Situação atual', 'Situacao atual', 'situacao_atual', 'status_descricaoSituacao', 'situacao'],
+        'Data da última tramitação': ['Data do status', 'Data', 'DataStatus', 'data_status', 'status_dataHora', 'Data do status (raw)'],
+        'Parado há (dias)': ['Parado (dias)', 'Parado há (dias)', 'dias_parado', 'parado_dias'],
+        'Relator(a)': ['Relator(a)', 'Relator', 'relator'],
+        'LinkTramitacao': ['LinkTramitacao', 'Link', 'link', 'url_tramitacao'],
+        'Órgão (sigla)': ['Órgão (sigla)', 'Orgao (sigla)', 'orgao_sigla', 'siglaOrgao'],
+        'Proposição': ['Proposição', 'Proposicao', 'proposicao'],
+        'Ementa': ['Ementa', 'ementa'],
+        'Tema': ['Tema', 'tema'],
+        'Andamento': ['Andamento (status)', 'Último andamento', 'Andamento', 'andamento', 'status_descricaoTramitacao'],
+    }
+    
+    for col_canonica, possiveis in mapeamentos.items():
+        if col_canonica not in df_out.columns:
+            for possivel in possiveis:
+                if possivel in df_out.columns and possivel != col_canonica:
+                    df_out[col_canonica] = df_out[possivel]
+                    break
+    
+    # Garantir que LinkTramitacao existe
+    if 'LinkTramitacao' not in df_out.columns:
+        if 'id' in df_out.columns:
+            df_out['LinkTramitacao'] = df_out['id'].astype(str).apply(camara_link_tramitacao)
+        elif 'ID' in df_out.columns:
+            df_out['LinkTramitacao'] = df_out['ID'].astype(str).apply(camara_link_tramitacao)
+    
+    # Garantir que Parado há (dias) existe
+    if 'Parado há (dias)' not in df_out.columns:
+        if 'DataStatus_dt' in df_out.columns:
+            df_out['Parado há (dias)'] = df_out['DataStatus_dt'].apply(days_since)
+        elif 'Data da última tramitação' in df_out.columns:
+            dt = pd.to_datetime(df_out['Data da última tramitação'], errors='coerce', dayfirst=True)
+            df_out['Parado há (dias)'] = dt.apply(days_since)
+    
+    return df_out
+
+
+def _verificar_relator_adversario(relator_str: str) -> tuple:
+    """
+    Verifica se o relator é de partido adversário.
+    Retorna: (texto_relator_formatado, is_adversario)
+    """
+    if not relator_str or not str(relator_str).strip() or str(relator_str).strip() in ('-', '—', 'nan'):
+        return "Sem relator designado", False
+    
+    relator = str(relator_str).strip()
+    relator_upper = relator.upper()
+    
+    for partido in PARTIDOS_RELATOR_ADVERSARIO:
+        if f"({partido}/" in relator_upper or f"({partido}-" in relator_upper or f"/{partido})" in relator_upper:
+            return relator, True
+        if partido == "PCDOB" and ("(PC DO B" in relator_upper or "/PC DO B" in relator_upper):
+            return relator, True
+    
+    return relator, False
+
+
+def _obter_situacao_com_fallback(row: pd.Series) -> str:
+    """
+    Obtém a situação da proposição com fallback para andamento/tramitação.
+    """
+    situacao = ""
+    for col in ['Situação atual', 'Situacao atual', 'situacao']:
+        if col in row.index and pd.notna(row.get(col)) and str(row.get(col)).strip():
+            situacao = str(row.get(col)).strip()
+            break
+    
+    if not situacao or situacao in ('-', '—'):
+        for col in ['Andamento (status)', 'Último andamento', 'Andamento', 'status_descricaoTramitacao']:
+            if col in row.index and pd.notna(row.get(col)) and str(row.get(col)).strip():
+                situacao = str(row.get(col)).strip()
+                if len(situacao) > 60:
+                    situacao = situacao[:57] + "..."
+                break
+    
+    return situacao if situacao else "Situacao nao informada"
+
+
+def _renderizar_card_proposicao(pdf, row, idx, col_proposicao, col_ementa, col_situacao, col_orgao,
+                                 col_data, col_relator, col_tema, col_parado, col_link, mostrar_situacao=True):
+    """Renderiza um card de proposição no PDF."""
+    pdf.set_fill_color(245, 247, 250)
+    
+    # Número do registro
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_fill_color(0, 51, 102)
+    pdf.cell(8, 6, str(idx), fill=True, align='C')
+    
+    # Proposição (destaque)
+    if col_proposicao and pd.notna(row.get(col_proposicao)):
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 6, f"  {sanitize_text_pdf(str(row[col_proposicao]))}", ln=True)
+    else:
+        pdf.ln(6)
+    
+    pdf.set_x(20)
+    
+    # SITUAÇÃO COM FALLBACK
+    if mostrar_situacao:
+        situacao = _obter_situacao_com_fallback(row)
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(20, 5, "Situacao: ", ln=False)
+        pdf.set_font('Helvetica', '', 9)
+        if 'Arquiv' in situacao:
+            pdf.set_text_color(150, 50, 50)
+        elif 'Pronta' in situacao or 'Sancion' in situacao:
+            pdf.set_text_color(50, 150, 50)
+        else:
+            pdf.set_text_color(50, 50, 150)
+        pdf.cell(0, 5, sanitize_text_pdf(situacao)[:60], ln=True)
+        pdf.set_x(20)
+    
+    # Órgão
+    if col_orgao and pd.notna(row.get(col_orgao)):
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(20, 5, "Orgao: ", ln=False)
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 5, sanitize_text_pdf(str(row[col_orgao]))[:50], ln=True)
+        pdf.set_x(20)
+    
+    # DATA DA ÚLTIMA TRAMITAÇÃO
+    if col_data and pd.notna(row.get(col_data)):
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(35, 5, "Ultima tramitacao: ", ln=False)
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 5, sanitize_text_pdf(str(row[col_data]))[:20], ln=True)
+        pdf.set_x(20)
+    
+    # PARADO HÁ (DIAS)
+    dias_parado = None
+    if col_parado and pd.notna(row.get(col_parado)):
+        try:
+            dias_parado = int(row[col_parado])
+        except (ValueError, TypeError):
+            dias_parado = None
+    
+    if dias_parado is not None:
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(28, 5, "Parado ha (dias): ", ln=False)
+        pdf.set_font('Helvetica', 'B', 9)
+        if dias_parado >= 30:
+            pdf.set_text_color(180, 50, 50)
+        elif dias_parado >= 15:
+            pdf.set_text_color(200, 120, 0)
+        elif dias_parado >= 7:
+            pdf.set_text_color(180, 180, 0)
+        else:
+            pdf.set_text_color(50, 150, 50)
+        pdf.cell(0, 5, str(dias_parado), ln=True)
+        pdf.set_x(20)
+    
+    # RELATOR COM ALERTA DE ADVERSÁRIO
+    relator_txt = row.get(col_relator, "") if col_relator else ""
+    relator_formatado, is_adversario = _verificar_relator_adversario(relator_txt)
+    
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(20, 5, "Relator(a): ", ln=False)
+    pdf.set_font('Helvetica', '', 9)
+    
+    if is_adversario:
+        pdf.set_text_color(180, 50, 50)
+        pdf.cell(0, 5, sanitize_text_pdf(f"{relator_formatado} [!] RELATOR ADVERSARIO")[:70], ln=True)
+    elif relator_formatado == "Sem relator designado":
+        pdf.set_text_color(150, 150, 150)
+        pdf.cell(0, 5, "Sem relator designado", ln=True)
+    else:
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 5, sanitize_text_pdf(relator_formatado)[:50], ln=True)
+    
+    pdf.set_x(20)
+    
+    # Tema
+    if col_tema and pd.notna(row.get(col_tema)):
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(20, 5, "Tema: ", ln=False)
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 5, sanitize_text_pdf(str(row[col_tema]))[:40], ln=True)
+        pdf.set_x(20)
+    
+    # Ementa
+    if col_ementa and pd.notna(row.get(col_ementa)):
+        ementa = sanitize_text_pdf(str(row[col_ementa]))
+        if ementa and ementa.strip():
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 5, "Ementa:", ln=True)
+            pdf.set_x(20)
+            pdf.set_font('Helvetica', '', 8)
+            pdf.set_text_color(60, 60, 60)
+            pdf.multi_cell(170, 4, ementa[:300] + ('...' if len(ementa) > 300 else ''))
+    
+    # LINK CLICÁVEL
+    link_url = None
+    if col_link and pd.notna(row.get(col_link)):
+        link_url = str(row[col_link]).strip()
+    elif 'id' in row.index and pd.notna(row.get('id')):
+        link_url = camara_link_tramitacao(str(row['id']))
+    elif 'ID' in row.index and pd.notna(row.get('ID')):
+        link_url = camara_link_tramitacao(str(row['ID']))
+    
+    if link_url and link_url.startswith('http'):
+        pdf.set_x(20)
+        pdf.set_font('Helvetica', 'I', 7)
+        pdf.set_text_color(0, 0, 200)
+        pdf.cell(10, 4, "Link: ", ln=False)
+        pdf.set_font('Helvetica', 'U', 7)
+        pdf.write(4, "Abrir tramitacao na Camara", link=link_url)
+        pdf.ln(4)
+    
+    # Linha divisória
+    pdf.ln(3)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.set_line_width(0.2)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(5)
+
+
+def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
+    """
+    Exporta DataFrame para PDF em formato de relatório profissional.
+    VERSÃO 21 - PDFs otimizados para decisão política em gabinete.
+    """
+    colunas_excluir = ['Tipo', 'Ano', 'Alerta', 'ID', 'id', 'sinal', 'AnoStatus', 'MesStatus', 
+                       'ids_proposicoes_autoria', 'ids_proposicoes_relatoria', 'id_evento',
+                       'DataStatus_dt', 'Data do status (raw)', '_search']
     
     try:
         from fpdf import FPDF
         
+        df_proc = _padronizar_colunas_pdf(df)
+        is_materias_por_situacao = "Situação" in subtitulo or "Situacao" in subtitulo
+        
+        # Ordenar por data (mais recente primeiro)
+        df_sorted = df_proc.copy()
+        col_data_sort = None
+        for col in ['DataStatus_dt', 'Data da última tramitação', 'Data do status']:
+            if col in df_sorted.columns:
+                col_data_sort = col
+                break
+        
+        if col_data_sort:
+            if col_data_sort == 'DataStatus_dt':
+                df_sorted = df_sorted.sort_values(col_data_sort, ascending=False, na_position='last')
+            else:
+                df_sorted['_dt_sort'] = pd.to_datetime(df_sorted[col_data_sort], errors='coerce', dayfirst=True)
+                df_sorted = df_sorted.sort_values('_dt_sort', ascending=False, na_position='last')
+                df_sorted = df_sorted.drop(columns=['_dt_sort'], errors='ignore')
+        
         class RelatorioPDF(FPDF):
             def header(self):
-                # Logo/Título
-                self.set_fill_color(0, 51, 102)  # Azul escuro
+                self.set_fill_color(0, 51, 102)
                 self.rect(0, 0, 297, 25, 'F')
                 self.set_font('Helvetica', 'B', 20)
                 self.set_text_color(255, 255, 255)
@@ -297,140 +566,89 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes
         pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
         pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
         
-        # Linha divisória
-        pdf.ln(5)
+        # CABEÇALHO INFORMATIVO - FONTE E CRITÉRIO
+        pdf.ln(2)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br | Ordenado por: Ultima tramitacao (mais recente primeiro)", ln=True, align='C')
+        
+        pdf.ln(3)
         pdf.set_draw_color(0, 51, 102)
         pdf.set_line_width(0.5)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-        pdf.ln(8)
+        pdf.ln(6)
         
-        # Resumo
         pdf.set_font('Helvetica', 'B', 11)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Total de registros: {len(df)}", ln=True)
-        pdf.ln(5)
+        pdf.cell(0, 6, f"Total de registros: {len(df_sorted)}", ln=True)
+        pdf.ln(3)
         
-        # Filtrar colunas
-        cols_mostrar = [c for c in df.columns if c not in colunas_excluir]
+        cols_mostrar = [c for c in df_sorted.columns if c not in colunas_excluir]
         
-        # Identificar colunas principais para destaque
-        col_proposicao = next((c for c in cols_mostrar if 'Proposi' in c or 'sigla' in c.lower()), None)
+        col_proposicao = next((c for c in cols_mostrar if 'Proposi' in c or c == 'Proposição'), None)
         col_ementa = next((c for c in cols_mostrar if 'Ementa' in c or 'ementa' in c), None)
-        col_situacao = next((c for c in cols_mostrar if 'Situa' in c or 'situa' in c), None)
-        col_orgao = next((c for c in cols_mostrar if 'Org' in c or 'org' in c.lower()), None)
-        col_data = next((c for c in cols_mostrar if 'data' in c.lower() or 'Data' in c), None)
-        col_relator = next((c for c in cols_mostrar if 'Relator' in c or 'relator' in c), None)
-        col_tema = next((c for c in cols_mostrar if 'Tema' in c or 'tema' in c), None)
+        col_situacao = next((c for c in cols_mostrar if 'Situa' in c), None)
+        col_orgao = next((c for c in cols_mostrar if 'Org' in c and 'sigla' in c.lower()), None)
+        col_data = next((c for c in cols_mostrar if 'Data' in c and 'última' in c.lower()), None)
+        if not col_data:
+            col_data = next((c for c in cols_mostrar if 'Data do status' in c or 'Data' in c), None)
+        col_relator = next((c for c in cols_mostrar if 'Relator' in c), None)
+        col_tema = next((c for c in cols_mostrar if 'Tema' in c), None)
+        col_parado = next((c for c in cols_mostrar if 'Parado' in c and 'dias' in c.lower()), None)
+        col_link = next((c for c in ['LinkTramitacao', 'Link'] if c in df_sorted.columns), None)
         
-        # Renderizar cada registro como um card
-        for idx, (_, row) in enumerate(df.head(300).iterrows()):
-            # Verificar se precisa de nova página
-            if pdf.get_y() > 250:
-                pdf.add_page()
-                pdf.set_y(30)
+        # AGRUPAMENTO POR SITUAÇÃO
+        if is_materias_por_situacao and col_situacao:
+            df_sorted['_situacao_group'] = df_sorted.apply(_obter_situacao_com_fallback, axis=1)
+            situacoes = df_sorted.groupby('_situacao_group').size().sort_values(ascending=False)
             
-            # Card container
-            y_start = pdf.get_y()
-            pdf.set_fill_color(245, 247, 250)
-            
-            # Número do registro
-            pdf.set_font('Helvetica', 'B', 9)
-            pdf.set_text_color(255, 255, 255)
-            pdf.set_fill_color(0, 51, 102)
-            pdf.cell(8, 6, str(idx + 1), fill=True, align='C')
-            
-            # Proposição (destaque)
-            if col_proposicao and pd.notna(row.get(col_proposicao)):
-                pdf.set_font('Helvetica', 'B', 11)
+            registro_num = 0
+            for situacao_atual, qtd in situacoes.items():
+                if pdf.get_y() > 240:
+                    pdf.add_page()
+                    pdf.set_y(30)
+                
+                pdf.ln(3)
+                pdf.set_fill_color(220, 230, 240)
+                pdf.set_font('Helvetica', 'B', 10)
                 pdf.set_text_color(0, 51, 102)
-                pdf.cell(0, 6, f"  {sanitize_text_pdf(str(row[col_proposicao]))}", ln=True)
-            else:
-                pdf.ln(6)
-            
-            pdf.set_x(20)
-            
-            # Situação com destaque colorido
-            if col_situacao and pd.notna(row.get(col_situacao)):
-                situacao = sanitize_text_pdf(str(row[col_situacao]))
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(20, 5, "Situacao: ", ln=False)
-                pdf.set_font('Helvetica', '', 9)
-                if 'Arquiv' in situacao:
-                    pdf.set_text_color(150, 50, 50)
-                elif 'Pronta' in situacao or 'Sancion' in situacao:
-                    pdf.set_text_color(50, 150, 50)
-                else:
-                    pdf.set_text_color(50, 50, 150)
-                pdf.cell(0, 5, situacao[:60], ln=True)
-            
-            pdf.set_x(20)
-            
-            # Órgão
-            if col_orgao and pd.notna(row.get(col_orgao)):
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(20, 5, "Orgao: ", ln=False)
-                pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                pdf.cell(0, 5, sanitize_text_pdf(str(row[col_orgao]))[:50], ln=True)
-            
-            pdf.set_x(20)
-            
-            # Data
-            if col_data and pd.notna(row.get(col_data)):
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(20, 5, "Data: ", ln=False)
-                pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                pdf.cell(0, 5, sanitize_text_pdf(str(row[col_data]))[:20], ln=True)
-            
-            pdf.set_x(20)
-            
-            # Relator
-            if col_relator and pd.notna(row.get(col_relator)):
-                relator = str(row[col_relator])
-                if relator and relator.strip() and relator.strip() != '-':
-                    pdf.set_font('Helvetica', 'B', 9)
-                    pdf.set_text_color(100, 100, 100)
-                    pdf.cell(20, 5, "Relator: ", ln=False)
-                    pdf.set_font('Helvetica', '', 9)
-                    pdf.set_text_color(0, 0, 0)
-                    pdf.cell(0, 5, sanitize_text_pdf(relator)[:40], ln=True)
-                    pdf.set_x(20)
-            
-            # Tema
-            if col_tema and pd.notna(row.get(col_tema)):
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(20, 5, "Tema: ", ln=False)
-                pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                pdf.cell(0, 5, sanitize_text_pdf(str(row[col_tema]))[:40], ln=True)
-                pdf.set_x(20)
-            
-            # Ementa (texto maior)
-            if col_ementa and pd.notna(row.get(col_ementa)):
-                ementa = sanitize_text_pdf(str(row[col_ementa]))
-                if ementa and ementa.strip():
-                    pdf.set_font('Helvetica', 'B', 9)
-                    pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 5, "Ementa:", ln=True)
-                    pdf.set_x(20)
-                    pdf.set_font('Helvetica', '', 8)
-                    pdf.set_text_color(60, 60, 60)
-                    # Multi-cell para texto longo
-                    pdf.multi_cell(170, 4, ementa[:300] + ('...' if len(ementa) > 300 else ''))
-            
-            # Linha divisória entre cards
-            pdf.ln(3)
-            pdf.set_draw_color(200, 200, 200)
-            pdf.set_line_width(0.2)
-            pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-            pdf.ln(5)
+                situacao_txt = sanitize_text_pdf(str(situacao_atual))[:70]
+                pdf.cell(0, 7, f"  {situacao_txt} ({qtd})", ln=True, fill=True)
+                pdf.ln(2)
+                
+                df_grupo = df_sorted[df_sorted['_situacao_group'] == situacao_atual]
+                
+                for _, row in df_grupo.head(100).iterrows():
+                    registro_num += 1
+                    if registro_num > 300:
+                        break
+                    
+                    if pdf.get_y() > 250:
+                        pdf.add_page()
+                        pdf.set_y(30)
+                    
+                    _renderizar_card_proposicao(
+                        pdf, row, registro_num,
+                        col_proposicao, col_ementa, col_situacao, col_orgao,
+                        col_data, col_relator, col_tema, col_parado, col_link,
+                        mostrar_situacao=False
+                    )
+                
+                if registro_num > 300:
+                    break
+        else:
+            for idx, (_, row) in enumerate(df_sorted.head(300).iterrows()):
+                if pdf.get_y() > 250:
+                    pdf.add_page()
+                    pdf.set_y(30)
+                
+                _renderizar_card_proposicao(
+                    pdf, row, idx + 1,
+                    col_proposicao, col_ementa, col_situacao, col_orgao,
+                    col_data, col_relator, col_tema, col_parado, col_link,
+                    mostrar_situacao=True
+                )
         
-        # Nota de rodapé se houver mais registros
         if len(df) > 300:
             pdf.ln(5)
             pdf.set_font('Helvetica', 'I', 9)
@@ -442,9 +660,9 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes
         return (output.getvalue(), "application/pdf", "pdf")
         
     except (ImportError, Exception) as e:
-        # Fallback para CSV se der erro
         csv_bytes = df.to_csv(index=False).encode("utf-8")
         return (csv_bytes, "text/csv", "csv")
+
 
 
 def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
@@ -483,7 +701,13 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
         pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
         pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
         
-        pdf.ln(5)
+        # Cabeçalho informativo - fonte e critério
+        pdf.ln(2)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br | Ordenado por: Data do evento (mais recente primeiro)", ln=True, align='C')
+        
+        pdf.ln(3)
         pdf.set_draw_color(0, 51, 102)
         pdf.set_line_width(0.5)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -547,12 +771,16 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                     relator_str = f"{relator_nome} ({relator_partido}/{relator_uf})" if relator_nome else "Sem relator designado"
                     link_materia = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}"
                     
+                    # Verificar se relator é adversário
+                    _, is_adversario = _verificar_relator_adversario(relator_str)
+                    
                     materias_autoria.append({
                         'sigla': sigla.strip(),
                         'ementa': ementa,
-                        'situacao': situacao,
+                        'situacao': situacao if situacao else "Situacao nao informada",
                         'relator': relator_str,
-                        'link': link_materia
+                        'link': link_materia,
+                        'is_adversario': is_adversario
                     })
                 
                 registros_autoria.append({
@@ -654,14 +882,21 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                         pdf.set_text_color(50, 50, 150)
                     pdf.cell(0, 4, sanitize_text_pdf(sit)[:55], ln=True)
                     
-                    # Relator
+                    # Relator com alerta de adversário
                     pdf.set_x(25)
                     pdf.set_font('Helvetica', 'B', 8)
                     pdf.set_text_color(100, 100, 100)
                     pdf.cell(18, 4, "Relator: ", ln=False)
                     pdf.set_font('Helvetica', '', 8)
-                    pdf.set_text_color(0, 0, 0)
-                    pdf.cell(0, 4, sanitize_text_pdf(mat['relator'])[:50], ln=True)
+                    if mat.get('is_adversario'):
+                        pdf.set_text_color(180, 50, 50)
+                        pdf.cell(0, 4, sanitize_text_pdf(mat['relator'] + " [!] ADVERSARIO")[:60], ln=True)
+                    elif mat['relator'] == "Sem relator designado":
+                        pdf.set_text_color(150, 150, 150)
+                        pdf.cell(0, 4, "Sem relator designado", ln=True)
+                    else:
+                        pdf.set_text_color(0, 0, 0)
+                        pdf.cell(0, 4, sanitize_text_pdf(mat['relator'])[:50], ln=True)
                     
                     # Ementa
                     pdf.set_x(25)
@@ -670,19 +905,20 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                     ementa = mat['ementa'][:250] + ('...' if len(mat['ementa']) > 250 else '')
                     pdf.multi_cell(160, 3.5, sanitize_text_pdf(ementa))
                     
-                    # Link da matéria
+                    # Link da matéria (clicável)
                     pdf.set_x(25)
                     pdf.set_font('Helvetica', 'I', 6)
-                    pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 3, f"Materia: {mat['link']}", ln=True)
-                    pdf.ln(2)
+                    pdf.set_text_color(0, 0, 200)
+                    pdf.write(3, "Abrir tramitacao", link=mat['link'])
+                    pdf.ln(4)
                 
-                # Link do evento
+                # Link do evento (clicável)
                 if reg['link_evento']:
                     pdf.set_x(20)
                     pdf.set_font('Helvetica', 'I', 7)
-                    pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 4, f"Pauta: {reg['link_evento']}", ln=True)
+                    pdf.set_text_color(0, 0, 200)
+                    pdf.write(4, "Ver pauta do evento", link=reg['link_evento'])
+                    pdf.ln(4)
                 
                 pdf.ln(2)
                 pdf.set_draw_color(200, 200, 200)
@@ -765,25 +1001,26 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                     ementa = mat['ementa'][:250] + ('...' if len(mat['ementa']) > 250 else '')
                     pdf.multi_cell(160, 3.5, sanitize_text_pdf(ementa))
                     
-                    # Link da matéria
+                    # Link da matéria (clicável)
                     pdf.set_x(25)
                     pdf.set_font('Helvetica', 'I', 6)
-                    pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 3, f"Materia: {mat['link']}", ln=True)
+                    pdf.set_text_color(0, 0, 200)
+                    pdf.write(3, "Abrir tramitacao", link=mat['link'])
                     
-                    # Link inteiro teor (se houver)
+                    # Link inteiro teor (se houver, clicável)
                     if mat.get('link_teor'):
-                        pdf.set_x(25)
-                        pdf.cell(0, 3, f"Inteiro teor: {mat['link_teor']}", ln=True)
+                        pdf.write(3, " | ")
+                        pdf.write(3, "Inteiro teor", link=mat['link_teor'])
                     
-                    pdf.ln(2)
+                    pdf.ln(4)
                 
-                # Link do evento
+                # Link do evento (clicável)
                 if reg['link_evento']:
                     pdf.set_x(20)
                     pdf.set_font('Helvetica', 'I', 7)
-                    pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 4, f"Pauta: {reg['link_evento']}", ln=True)
+                    pdf.set_text_color(0, 0, 200)
+                    pdf.write(4, "Ver pauta do evento", link=reg['link_evento'])
+                    pdf.ln(4)
                 
                 pdf.ln(2)
                 pdf.set_draw_color(200, 200, 200)
@@ -835,7 +1072,13 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
         pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
         pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
         
-        pdf.ln(5)
+        # Cabeçalho informativo - fonte e critério
+        pdf.ln(2)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br | Ordenado por: Data do evento (mais recente primeiro)", ln=True, align='C')
+        
+        pdf.ln(3)
         pdf.set_draw_color(0, 51, 102)
         pdf.set_line_width(0.5)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -930,12 +1173,13 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 pdf.set_font('Helvetica', '', 8)
                 pdf.cell(0, 4, sanitize_text_pdf(palavras_chave)[:60], ln=True)
             
-            # Link
+            # Link (clicável)
             if link:
                 pdf.set_x(20)
                 pdf.set_font('Helvetica', 'I', 7)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(0, 4, f"Link pauta: {link}", ln=True)
+                pdf.set_text_color(0, 0, 200)
+                pdf.write(4, "Ver pauta do evento", link=link)
+                pdf.ln(4)
             
             pdf.ln(2)
             pdf.set_draw_color(200, 200, 200)
