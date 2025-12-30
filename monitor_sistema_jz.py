@@ -553,6 +553,46 @@ def proximo_dia_util(dt: datetime.date) -> datetime.date:
     return proximo
 
 
+def ajustar_para_dia_util(dt: datetime.date) -> datetime.date:
+    """
+    Se a data cair em fim de semana, retorna o próximo dia útil.
+    Caso contrário, retorna a própria data.
+    """
+    if dt is None:
+        return None
+    while dt.weekday() in (5, 6):
+        dt += datetime.timedelta(days=1)
+    return dt
+
+
+def calcular_prazo_ric(data_remessa: datetime.date) -> tuple:
+    """
+    Calcula o prazo de 30 dias para resposta de RIC conforme regra constitucional.
+    
+    REGRA (baseada no padrão real da Câmara):
+    - Prazo = 30 dias CORRIDOS a partir do dia seguinte à remessa
+    - NÃO há ajuste para dia útil no final (a Câmara conta dias corridos simples)
+    
+    Exemplo real:
+    - Remessa: 27/11/2025
+    - Dia 1: 28/11/2025
+    - Prazo final: 27/12/2025 (30 dias depois do dia 28/11)
+    
+    Retorna: (inicio_contagem, prazo_fim)
+    """
+    if data_remessa is None:
+        return None, None
+    
+    # Dia 1 = dia seguinte à remessa (não necessariamente útil)
+    inicio_contagem = data_remessa + datetime.timedelta(days=1)
+    
+    # Prazo = 30 dias corridos (contando o dia 1)
+    # Dia 1 é o primeiro dia, então +29 para chegar ao dia 30
+    prazo_fim = inicio_contagem + datetime.timedelta(days=29)
+    
+    return inicio_contagem, prazo_fim
+
+
 def contar_dias_uteis(data_inicio: datetime.date, data_fim: datetime.date) -> int:
     """Conta dias úteis entre duas datas (excluindo fins de semana)."""
     if data_inicio is None or data_fim is None:
@@ -685,15 +725,18 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
             # Continua procurando para pegar a ÚLTIMA remessa (mais recente)
     
     # ============================================================
-    # PASSO 2: Se não encontrou prazo explícito, CALCULAR (30 dias)
+    # PASSO 2: Se não encontrou prazo explícito, CALCULAR
+    # Regra: Dia 1 = 1º dia útil após remessa, Dia 30 = 30º dia (ou próximo útil)
     # ============================================================
     if tramitacao_remessa and not resultado["prazo_fim"] and data_remessa:
-        # Prazo constitucional: 30 dias após a remessa
-        resultado["prazo_inicio"] = data_remessa
-        resultado["inicio_contagem"] = data_remessa
-        resultado["prazo_fim"] = data_remessa + datetime.timedelta(days=30)
-        resultado["prazo_str"] = f"até {resultado['prazo_fim'].strftime('%d/%m/%Y')}"
-        resultado["fonte_prazo"] = "calculado_30_dias"
+        # Usar função que calcula corretamente os dias úteis
+        inicio_contagem, prazo_fim = calcular_prazo_ric(data_remessa)
+        if inicio_contagem and prazo_fim:
+            resultado["prazo_inicio"] = inicio_contagem
+            resultado["inicio_contagem"] = inicio_contagem
+            resultado["prazo_fim"] = prazo_fim
+            resultado["prazo_str"] = f"até {prazo_fim.strftime('%d/%m/%Y')}"
+            resultado["fonte_prazo"] = "calculado_30_dias"
     
     # ============================================================
     # PASSO 3: Calcular dias restantes
@@ -758,10 +801,12 @@ def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_
     2. "Aguardando Providências Internas" → "Em tramitação na Câmara"
     3. "Aguardando Despacho do Presidente da Câmara..." → "Em tramitação na Câmara"
     4. "Aguardando Designação de Relator" → "Em tramitação na Câmara"
-    5. Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
-    6. Se respondido e data_resposta <= prazo_fim → "Respondido"
-    7. Se não respondido e hoje > prazo_fim → "Fora do prazo"
-    8. Caso contrário → "Aguardando resposta"
+    5. "Aguardando Resposta" (situação da Câmara) → "Em tramitação na Câmara" SE não houver prazo
+    6. Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
+    7. Se respondido e data_resposta <= prazo_fim → "Respondido"
+    8. Se não respondido e hoje > prazo_fim → "Fora do prazo"
+    9. Se não há prazo_fim (não encontrou remessa) → "Em tramitação na Câmara"
+    10. Caso contrário → "Aguardando resposta"
     """
     situacao_norm = (situacao_atual or "").lower().strip()
     hoje = datetime.date.today()
@@ -772,7 +817,7 @@ def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_
             return "Respondido fora do prazo"
         return "Respondido"
     
-    # REGRA 2, 3 e 4: Situações que indicam tramitação interna na Câmara
+    # REGRA 2, 3, 4 e 5: Situações que indicam tramitação interna na Câmara
     situacoes_tramitacao_camara = [
         "aguardando providências internas",
         "aguardando providencias internas",
@@ -781,12 +826,14 @@ def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_
         "aguardando designação de relator",
         "aguardando designacao de relator",
         "aguardando recebimento",
+        "retirado pelo(a) autor(a)",
+        "retirado pelo autor",
     ]
     for sit in situacoes_tramitacao_camara:
         if sit in situacao_norm:
             return "Em tramitação na Câmara"
     
-    # REGRA 5 e 6: Se foi respondido (detectado nas tramitações)
+    # REGRA 6 e 7: Se foi respondido (detectado nas tramitações)
     if respondido:
         if prazo_fim and data_resposta:
             if data_resposta > prazo_fim:
@@ -796,11 +843,16 @@ def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_
         else:
             return "Respondido"
     
-    # REGRA 7: Se não foi respondido e prazo venceu
+    # REGRA 8: Se não foi respondido e prazo venceu
     if prazo_fim and hoje > prazo_fim:
         return "Fora do prazo"
     
-    # REGRA 8: Caso padrão
+    # REGRA 9: Se não há prazo (não encontrou remessa) → Em tramitação na Câmara
+    # Isso significa que o RIC ainda não foi remetido ao Executivo
+    if not prazo_fim:
+        return "Em tramitação na Câmara"
+    
+    # REGRA 10: Caso padrão - já foi remetido, aguardando resposta
     return "Aguardando resposta"
 
 
@@ -2199,10 +2251,35 @@ def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos
                     pdf.set_text_color(60, 60, 60)
                     pdf.cell(0, 5, f"Ministerio: {ministerio}", ln=True)
                 
-                # Prazo
+                # Prazo - tentar múltiplas fontes
+                prazo_display = "-"
                 if col_prazo:
-                    prazo = sanitize_text_pdf(str(row.get(col_prazo, '') or '-'))
-                    pdf.cell(0, 5, f"Prazo: {prazo}", ln=True)
+                    prazo_val = row.get(col_prazo, '')
+                    if prazo_val and str(prazo_val).strip() and str(prazo_val) != '-':
+                        prazo_display = sanitize_text_pdf(str(prazo_val))
+                    else:
+                        # Fallback para RIC_PrazoFim ou RIC_PrazoStr
+                        prazo_fim = row.get('RIC_PrazoFim') or row.get('RIC_PrazoStr', '')
+                        if prazo_fim and str(prazo_fim).strip():
+                            try:
+                                if hasattr(prazo_fim, 'strftime'):
+                                    prazo_display = f"ate {prazo_fim.strftime('%d/%m/%Y')}"
+                                else:
+                                    prazo_display = sanitize_text_pdf(str(prazo_fim))
+                            except:
+                                pass
+                        # Verificar dias restantes
+                        dias = row.get('RIC_DiasRestantes')
+                        if dias is not None and pd.notna(dias) and prazo_display != "-":
+                            try:
+                                dias_int = int(dias)
+                                if dias_int < 0:
+                                    prazo_display += f" ({abs(dias_int)}d restantes)"
+                                else:
+                                    prazo_display += f" ({dias_int}d restantes)"
+                            except:
+                                pass
+                pdf.cell(0, 5, f"Prazo: {prazo_display}", ln=True)
                 
                 # Situação atual
                 if col_situacao:
@@ -4943,9 +5020,10 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             # Formatar datas de prazo usando RIC_PrazoStr ou fallback
             def fmt_prazo(row):
                 """
-                Formata o prazo para exibição.
-                Usa RIC_PrazoStr (já formatado) quando disponível.
-                Adiciona indicador de dias restantes ou vencido.
+                Formata o prazo para exibição com indicadores de urgência:
+                🚨 ≤2 dias (URGENTÍSSIMO)
+                ⚠️ ≤5 dias (URGENTE)
+                🔔 ≤15 dias (Atenção)
                 """
                 prazo_str = row.get("RIC_PrazoStr", "")
                 prazo_fim = row.get("RIC_PrazoFim")
@@ -4971,8 +5049,12 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         if "Respondido" in str(status):
                             return f"{base} ✅"
                         elif dias_int < 0:
-                            return f"{base} (⚠️ VENCIDO há {abs(dias_int)}d)"
+                            return f"{base} (🚨 VENCIDO há {abs(dias_int)}d)"
+                        elif dias_int <= 2:
+                            return f"{base} (🚨 {dias_int}d - URGENTÍSSIMO)"
                         elif dias_int <= 5:
+                            return f"{base} (⚠️ {dias_int}d - URGENTE)"
+                        elif dias_int <= 15:
                             return f"{base} (🔔 {dias_int}d restantes)"
                         else:
                             return f"{base} ({dias_int}d restantes)"
@@ -5017,7 +5099,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 key="df_rics_selecao"
             )
             
-            st.caption("✅ Respondido | ⚠️ VENCIDO | 🔔 Urgente (≤5 dias)")
+            st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Atenção) | ✅ Respondido")
             
             # ============================================================
             # DOWNLOADS
