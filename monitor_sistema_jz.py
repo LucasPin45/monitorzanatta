@@ -219,6 +219,35 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
     return (csv_bytes, "text/csv", "csv")
 
 
+def sanitize_text_pdf(text: str) -> str:
+    """Remove caracteres problemáticos para PDF."""
+    if not text:
+        return ""
+    # Substitui caracteres especiais comuns
+    replacements = {
+        'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
+        'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+        'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+        'ó': 'o', 'ò': 'o', 'õ': 'o', 'ô': 'o', 'ö': 'o',
+        'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+        'ç': 'c', 'ñ': 'n',
+        'Á': 'A', 'À': 'A', 'Ã': 'A', 'Â': 'A', 'Ä': 'A',
+        'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
+        'Í': 'I', 'Ì': 'I', 'Î': 'I', 'Ï': 'I',
+        'Ó': 'O', 'Ò': 'O', 'Õ': 'O', 'Ô': 'O', 'Ö': 'O',
+        'Ú': 'U', 'Ù': 'U', 'Û': 'U', 'Ü': 'U',
+        'Ç': 'C', 'Ñ': 'N',
+        '–': '-', '—': '-', '"': '"', '"': '"', ''': "'", ''': "'",
+        '…': '...', '•': '*', '°': 'o', '²': '2', '³': '3',
+    }
+    result = str(text)
+    for old, new in replacements.items():
+        result = result.replace(old, new)
+    # Remove caracteres não-ASCII restantes
+    result = result.encode('ascii', 'ignore').decode('ascii')
+    return result
+
+
 def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, str, str]:
     """Exporta DataFrame para PDF."""
     try:
@@ -227,7 +256,7 @@ def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, s
         pdf = FPDF(orientation='L', unit='mm', format='A4')
         pdf.add_page()
         pdf.set_font('Helvetica', 'B', 14)
-        pdf.cell(0, 10, titulo, ln=True, align='C')
+        pdf.cell(0, 10, sanitize_text_pdf(titulo), ln=True, align='C')
         pdf.set_font('Helvetica', '', 8)
         pdf.cell(0, 5, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
         pdf.ln(5)
@@ -241,14 +270,14 @@ def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, s
         pdf.set_font('Helvetica', 'B', 7)
         pdf.set_fill_color(230, 230, 230)
         for col in cols:
-            pdf.cell(col_width, 6, str(col)[:20], border=1, fill=True, align='C')
+            pdf.cell(col_width, 6, sanitize_text_pdf(str(col))[:20], border=1, fill=True, align='C')
         pdf.ln()
         
         # Dados
         pdf.set_font('Helvetica', '', 6)
         for _, row in df.head(100).iterrows():  # Limita a 100 linhas
             for col in cols:
-                valor = str(row[col]) if pd.notna(row[col]) else ""
+                valor = sanitize_text_pdf(str(row[col])) if pd.notna(row[col]) else ""
                 pdf.cell(col_width, 5, valor[:25], border=1, align='L')
             pdf.ln()
         
@@ -261,7 +290,7 @@ def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, s
         pdf.output(output)
         return (output.getvalue(), "application/pdf", "pdf")
         
-    except ImportError:
+    except (ImportError, Exception):
         # Fallback: gera PDF simples com reportlab
         try:
             from reportlab.lib.pagesizes import A4, landscape
@@ -274,14 +303,14 @@ def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, s
             elements = []
             styles = getSampleStyleSheet()
             
-            elements.append(Paragraph(titulo, styles['Heading1']))
+            elements.append(Paragraph(sanitize_text_pdf(titulo), styles['Heading1']))
             elements.append(Paragraph(f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
             elements.append(Spacer(1, 12))
             
             # Preparar dados da tabela
-            data = [df.columns.tolist()]
+            data = [[sanitize_text_pdf(str(c)) for c in df.columns.tolist()]]
             for _, row in df.head(50).iterrows():
-                data.append([str(v)[:30] if pd.notna(v) else "" for v in row])
+                data.append([sanitize_text_pdf(str(v))[:30] if pd.notna(v) else "" for v in row])
             
             table = Table(data)
             table.setStyle(TableStyle([
