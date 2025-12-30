@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v18
+# monitor_sistema_jz.py - v19
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 18: Visão Executiva, Ações Sugeridas, PDF Brasília
+# VERSÃO 19: PDFs profissionais para Autoria/Relatoria e Comissões
 # ============================================================
 
 import datetime
@@ -39,7 +39,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/18.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/19.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -443,6 +443,354 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes
         
     except (ImportError, Exception) as e:
         # Fallback para CSV se der erro
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        return (csv_bytes, "text/csv", "csv")
+
+
+def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
+    """PDF específico para Autoria e Relatoria na Pauta - formato de gabinete."""
+    try:
+        from fpdf import FPDF
+        
+        class RelatorioPDF(FPDF):
+            def header(self):
+                self.set_fill_color(0, 51, 102)
+                self.rect(0, 0, 210, 25, 'F')
+                self.set_font('Helvetica', 'B', 18)
+                self.set_text_color(255, 255, 255)
+                self.set_y(8)
+                self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+                self.ln(20)
+                
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Helvetica', 'I', 8)
+                self.set_text_color(128, 128, 128)
+                self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+        
+        pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.add_page()
+        
+        # Cabeçalho
+        pdf.set_y(30)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 8, "Autoria e Relatoria na Pauta", ln=True, align='C')
+        
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
+        pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
+        
+        pdf.ln(5)
+        pdf.set_draw_color(0, 51, 102)
+        pdf.set_line_width(0.5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(8)
+        
+        # Ordenar por data (mais recente primeiro)
+        df_sorted = df.copy()
+        if 'data' in df_sorted.columns:
+            df_sorted['_data_sort'] = pd.to_datetime(df_sorted['data'], errors='coerce', dayfirst=True)
+            df_sorted = df_sorted.sort_values('_data_sort', ascending=False)
+        
+        # Separar AUTORIA e RELATORIA
+        registros_autoria = []
+        registros_relatoria = []
+        
+        for _, row in df_sorted.iterrows():
+            data = str(row.get('data', '-'))
+            hora = str(row.get('hora', '-')) if pd.notna(row.get('hora')) else '-'
+            orgao_sigla = str(row.get('orgao_sigla', '-'))
+            orgao_nome = str(row.get('orgao_nome', ''))
+            local = f"{orgao_sigla}" + (f" - {orgao_nome}" if orgao_nome and orgao_nome != orgao_sigla else "")
+            id_evento = str(row.get('id_evento', ''))
+            link = f"https://www.camara.leg.br/evento-legislativo/{id_evento}" if id_evento and id_evento != 'nan' else ""
+            
+            props_autoria = str(row.get('proposicoes_autoria', ''))
+            props_relatoria = str(row.get('proposicoes_relatoria', ''))
+            
+            if props_autoria and props_autoria.strip() and props_autoria != 'nan':
+                registros_autoria.append({
+                    'data': data, 'hora': hora, 'local': local,
+                    'proposicoes': props_autoria, 'link': link
+                })
+            
+            if props_relatoria and props_relatoria.strip() and props_relatoria != 'nan':
+                registros_relatoria.append({
+                    'data': data, 'hora': hora, 'local': local,
+                    'proposicoes': props_relatoria, 'link': link
+                })
+        
+        # === SEÇÃO AUTORIA ===
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.set_fill_color(0, 100, 0)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 8, f"  AUTORIA DA DEPUTADA ({len(registros_autoria)} registro(s))", ln=True, fill=True)
+        pdf.ln(3)
+        
+        if not registros_autoria:
+            pdf.set_font('Helvetica', 'I', 10)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 6, "Nenhuma proposicao de autoria na pauta neste periodo.", ln=True)
+        else:
+            for idx, reg in enumerate(registros_autoria, 1):
+                if pdf.get_y() > 250:
+                    pdf.add_page()
+                    pdf.set_y(30)
+                
+                # Card
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_fill_color(0, 100, 0)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(8, 6, str(idx), fill=True, align='C')
+                
+                pdf.set_font('Helvetica', 'B', 10)
+                pdf.set_text_color(0, 100, 0)
+                pdf.cell(0, 6, f"  {reg['data']} as {reg['hora']}", ln=True)
+                
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(15, 5, "Local: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 5, sanitize_text_pdf(reg['local'])[:60], ln=True)
+                
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(0, 5, "Materias:", ln=True)
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(0, 51, 102)
+                pdf.multi_cell(170, 4, sanitize_text_pdf(reg['proposicoes'])[:500])
+                
+                if reg['link']:
+                    pdf.set_x(20)
+                    pdf.set_font('Helvetica', 'I', 7)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(0, 4, f"Link: {reg['link']}", ln=True)
+                
+                pdf.ln(2)
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+                pdf.ln(4)
+        
+        pdf.ln(5)
+        
+        # === SEÇÃO RELATORIA ===
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.set_fill_color(0, 51, 102)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 8, f"  RELATORIA DA DEPUTADA ({len(registros_relatoria)} registro(s))", ln=True, fill=True)
+        pdf.ln(3)
+        
+        if not registros_relatoria:
+            pdf.set_font('Helvetica', 'I', 10)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 6, "Nenhuma proposicao de relatoria na pauta neste periodo.", ln=True)
+        else:
+            for idx, reg in enumerate(registros_relatoria, 1):
+                if pdf.get_y() > 250:
+                    pdf.add_page()
+                    pdf.set_y(30)
+                
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_fill_color(0, 51, 102)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(8, 6, str(idx), fill=True, align='C')
+                
+                pdf.set_font('Helvetica', 'B', 10)
+                pdf.set_text_color(0, 51, 102)
+                pdf.cell(0, 6, f"  {reg['data']} as {reg['hora']}", ln=True)
+                
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(15, 5, "Local: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 5, sanitize_text_pdf(reg['local'])[:60], ln=True)
+                
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(0, 5, "Materias:", ln=True)
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(0, 51, 102)
+                pdf.multi_cell(170, 4, sanitize_text_pdf(reg['proposicoes'])[:500])
+                
+                if reg['link']:
+                    pdf.set_x(20)
+                    pdf.set_font('Helvetica', 'I', 7)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(0, 4, f"Link: {reg['link']}", ln=True)
+                
+                pdf.ln(2)
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+                pdf.ln(4)
+        
+        output = BytesIO()
+        pdf.output(output)
+        return (output.getvalue(), "application/pdf", "pdf")
+        
+    except Exception as e:
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        return (csv_bytes, "text/csv", "csv")
+
+
+def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
+    """PDF específico para Comissões Estratégicas - formato de gabinete."""
+    try:
+        from fpdf import FPDF
+        
+        class RelatorioPDF(FPDF):
+            def header(self):
+                self.set_fill_color(0, 51, 102)
+                self.rect(0, 0, 210, 25, 'F')
+                self.set_font('Helvetica', 'B', 18)
+                self.set_text_color(255, 255, 255)
+                self.set_y(8)
+                self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+                self.ln(20)
+                
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Helvetica', 'I', 8)
+                self.set_text_color(128, 128, 128)
+                self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+        
+        pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.add_page()
+        
+        # Cabeçalho
+        pdf.set_y(30)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 8, "Comissoes Estrategicas - Pautas", ln=True, align='C')
+        
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
+        pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
+        
+        pdf.ln(5)
+        pdf.set_draw_color(0, 51, 102)
+        pdf.set_line_width(0.5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(5)
+        
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 6, f"Total de reunioes: {len(df)}", ln=True)
+        pdf.ln(3)
+        
+        # Ordenar por data (mais recente primeiro)
+        df_sorted = df.copy()
+        if 'data' in df_sorted.columns:
+            df_sorted['_data_sort'] = pd.to_datetime(df_sorted['data'], errors='coerce', dayfirst=True)
+            df_sorted = df_sorted.sort_values('_data_sort', ascending=False)
+        
+        for idx, (_, row) in enumerate(df_sorted.iterrows(), 1):
+            if pdf.get_y() > 250:
+                pdf.add_page()
+                pdf.set_y(30)
+            
+            data = str(row.get('data', '-'))
+            hora = str(row.get('hora', '-')) if pd.notna(row.get('hora')) else '-'
+            orgao_sigla = str(row.get('orgao_sigla', '-'))
+            orgao_nome = str(row.get('orgao_nome', ''))
+            tipo_evento = str(row.get('tipo_evento', ''))
+            id_evento = str(row.get('id_evento', ''))
+            link = f"https://www.camara.leg.br/evento-legislativo/{id_evento}" if id_evento and id_evento != 'nan' else ""
+            
+            props_autoria = str(row.get('proposicoes_autoria', ''))
+            props_relatoria = str(row.get('proposicoes_relatoria', ''))
+            palavras_chave = str(row.get('palavras_chave_encontradas', ''))
+            descricao = str(row.get('descricao_evento', ''))
+            
+            # Determinar cor baseado se tem relatoria/autoria
+            tem_relatoria = props_relatoria and props_relatoria.strip() and props_relatoria != 'nan'
+            tem_autoria = props_autoria and props_autoria.strip() and props_autoria != 'nan'
+            
+            # Card header
+            pdf.set_font('Helvetica', 'B', 9)
+            if tem_relatoria:
+                pdf.set_fill_color(0, 51, 102)
+            elif tem_autoria:
+                pdf.set_fill_color(0, 100, 0)
+            else:
+                pdf.set_fill_color(100, 100, 100)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(8, 6, str(idx), fill=True, align='C')
+            
+            pdf.set_font('Helvetica', 'B', 11)
+            pdf.set_text_color(0, 51, 102)
+            pdf.cell(0, 6, f"  {orgao_sigla} - {data} as {hora}", ln=True)
+            
+            # Tipo e local
+            pdf.set_x(20)
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(100, 100, 100)
+            if tipo_evento and tipo_evento != 'nan':
+                pdf.cell(0, 4, sanitize_text_pdf(tipo_evento)[:80], ln=True)
+            if orgao_nome and orgao_nome != orgao_sigla:
+                pdf.set_x(20)
+                pdf.cell(0, 4, sanitize_text_pdf(orgao_nome)[:80], ln=True)
+            
+            # Relatoria da deputada (destaque)
+            if tem_relatoria:
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(0, 51, 102)
+                pdf.cell(0, 5, ">>> RELATORIA DA DEPUTADA:", ln=True)
+                pdf.set_x(25)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(0, 0, 0)
+                pdf.multi_cell(165, 4, sanitize_text_pdf(props_relatoria)[:400])
+            
+            # Autoria da deputada
+            if tem_autoria:
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(0, 100, 0)
+                pdf.cell(0, 5, ">>> AUTORIA DA DEPUTADA:", ln=True)
+                pdf.set_x(25)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(0, 0, 0)
+                pdf.multi_cell(165, 4, sanitize_text_pdf(props_autoria)[:400])
+            
+            # Palavras-chave encontradas
+            if palavras_chave and palavras_chave.strip() and palavras_chave != 'nan':
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'B', 8)
+                pdf.set_text_color(150, 100, 0)
+                pdf.cell(30, 4, "Palavras-chave: ", ln=False)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.cell(0, 4, sanitize_text_pdf(palavras_chave)[:60], ln=True)
+            
+            # Link
+            if link:
+                pdf.set_x(20)
+                pdf.set_font('Helvetica', 'I', 7)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(0, 4, f"Link pauta: {link}", ln=True)
+            
+            pdf.ln(2)
+            pdf.set_draw_color(200, 200, 200)
+            pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+            pdf.ln(4)
+        
+        output = BytesIO()
+        pdf.output(output)
+        return (output.getvalue(), "application/pdf", "pdf")
+        
+    except Exception as e:
         csv_bytes = df.to_csv(index=False).encode("utf-8")
         return (csv_bytes, "text/csv", "csv")
 
@@ -1925,7 +2273,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v18 – Visão Executiva, Ações Sugeridas, PDF Brasília")
+    st.caption("v19 – PDFs profissionais Autoria/Relatoria e Comissões")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -2215,7 +2563,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         mime=mime,
                     )
                 with col_p1:
-                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(view, "Autoria e Relatoria na Pauta")
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_autoria_relatoria(view)
                     st.download_button(
                         f"⬇️ PDF",
                         data=pdf_bytes,
@@ -2333,7 +2681,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         key="download_com_xlsx"
                     )
                 with col_p3:
-                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(view, "Comissões Estratégicas")
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_comissoes_estrategicas(view)
                     st.download_button(
                         f"⬇️ PDF",
                         data=pdf_bytes,
