@@ -366,6 +366,23 @@ def normalize_ministerio(texto: str) -> str:
     return melhor_match if melhor_match else "Não identificado"
 
 
+def canonical_situacao(situacao: str) -> str:
+    """
+    Normaliza o texto da situação de uma proposição.
+    Retorna o texto limpo e padronizado.
+    """
+    if not situacao:
+        return ""
+    
+    # Limpar e normalizar
+    texto = str(situacao).strip()
+    
+    # Remover múltiplos espaços
+    texto = " ".join(texto.split())
+    
+    return texto
+
+
 # Mapeamento legado (mantido para compatibilidade)
 MINISTERIOS_KEYWORDS = MINISTERIOS_CANONICOS
 
