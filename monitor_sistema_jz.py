@@ -354,6 +354,60 @@ def _obter_situacao_com_fallback(row: pd.Series) -> str:
     return situacao if situacao else "Situacao nao informada"
 
 
+def _categorizar_situacao_para_ordenacao(situacao: str) -> tuple:
+    """
+    Categoriza a situação para ordenação personalizada dos blocos no PDF.
+    Retorna: (ordem_prioridade, categoria_agrupada, situacao_original)
+    
+    Ordem de prioridade:
+    1. Pronta para Pauta
+    2. Aguardando Parecer de Relator(a)
+    3. Aguardando Designação de Relator(a)
+    4. Aguardando Apreciação pelo Senado Federal
+    5. Aguardando Despacho do Presidente da Câmara
+    6. Tramitando em Conjunto
+    7. Aguardando Encaminhamentos/Procedimentos Administrativos
+    8. Arquivadas/Aguardando Remessa ao Arquivo
+    9. Outras situações
+    """
+    s = situacao.lower().strip()
+    
+    # 1. Pronta para Pauta
+    if 'pronta' in s and 'pauta' in s:
+        return (1, "Pronta para Pauta", situacao)
+    
+    # 2. Aguardando Parecer de Relator(a)
+    if 'aguardando parecer' in s and 'relator' in s:
+        return (2, "Aguardando Parecer de Relator(a)", situacao)
+    
+    # 3. Aguardando Designação de Relator(a) (incluindo devolução)
+    if ('aguardando design' in s and 'relator' in s) or ('devolucao de relator' in s) or ('devolução de relator' in s):
+        return (3, "Aguardando Designacao de Relator(a)", situacao)
+    
+    # 4. Aguardando Apreciação pelo Senado Federal
+    if 'senado' in s or 'aguardando aprecia' in s:
+        return (4, "Aguardando Apreciacao pelo Senado Federal", situacao)
+    
+    # 5. Aguardando Despacho do Presidente (todos os tipos)
+    if ('despacho' in s and 'presidente' in s) or ('autorizacao do despacho' in s) or ('autorização do despacho' in s) or ('deliberacao de recurso' in s) or ('deliberação de recurso' in s):
+        return (5, "Aguardando Despacho do Presidente da Camara", situacao)
+    
+    # 6. Tramitando em Conjunto (incluindo Aguardando Apensação)
+    if 'tramitando em conjunto' in s or 'apensacao' in s or 'apensação' in s:
+        return (6, "Tramitando em Conjunto", situacao)
+    
+    # 7. Aguardando Encaminhamentos/Procedimentos Administrativos
+    if 'aguardando encaminhamento' in s or 'aguardando recebimento' in s or 'comissao temporaria' in s or 'comissão temporária' in s or 'criacao de comissao' in s or 'criação de comissão' in s:
+        return (7, "Aguardando Procedimentos Administrativos da Casa", situacao)
+    
+    # 8. Arquivadas/Aguardando Remessa ao Arquivo
+    if 'arquiv' in s or 'remessa ao arquivo' in s:
+        return (8, "Arquivadas / Aguardando Remessa ao Arquivo", situacao)
+    
+    # 9. Outras situações (situacao nao informada, retirado pelo autor, etc.)
+    return (9, "Outras Situacoes", situacao)
+
+
 def _renderizar_card_proposicao(pdf, row, idx, col_proposicao, col_ementa, col_situacao, col_orgao,
                                  col_data, col_relator, col_tema, col_parado, col_link, mostrar_situacao=True):
     """Renderiza um card de proposição no PDF."""
@@ -597,42 +651,85 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         col_parado = next((c for c in cols_mostrar if 'Parado' in c and 'dias' in c.lower()), None)
         col_link = next((c for c in ['LinkTramitacao', 'Link'] if c in df_sorted.columns), None)
         
-        # AGRUPAMENTO POR SITUAÇÃO
+        # AGRUPAMENTO POR SITUAÇÃO COM ORDENAÇÃO PERSONALIZADA
         if is_materias_por_situacao and col_situacao:
             df_sorted['_situacao_group'] = df_sorted.apply(_obter_situacao_com_fallback, axis=1)
-            situacoes = df_sorted.groupby('_situacao_group').size().sort_values(ascending=False)
+            
+            # Aplicar categorização para ordenação
+            df_sorted['_categoria_info'] = df_sorted['_situacao_group'].apply(_categorizar_situacao_para_ordenacao)
+            df_sorted['_ordem_prioridade'] = df_sorted['_categoria_info'].apply(lambda x: x[0])
+            df_sorted['_categoria_agrupada'] = df_sorted['_categoria_info'].apply(lambda x: x[1])
+            
+            # Ordenar por prioridade da categoria e depois por data dentro de cada categoria
+            if '_dt_sort' not in df_sorted.columns and col_data_sort:
+                df_sorted['_dt_sort'] = pd.to_datetime(df_sorted[col_data_sort], errors='coerce', dayfirst=True)
+            
+            df_sorted = df_sorted.sort_values(['_ordem_prioridade', '_dt_sort'], ascending=[True, False], na_position='last')
+            
+            # Agrupar por categoria agrupada (não pela situação original)
+            categorias_ordenadas = df_sorted.groupby('_categoria_agrupada', sort=False).agg({
+                '_ordem_prioridade': 'first',
+                '_situacao_group': 'count'
+            }).reset_index()
+            categorias_ordenadas = categorias_ordenadas.sort_values('_ordem_prioridade')
             
             registro_num = 0
-            for situacao_atual, qtd in situacoes.items():
+            for _, cat_row in categorias_ordenadas.iterrows():
+                categoria = cat_row['_categoria_agrupada']
+                qtd_categoria = cat_row['_situacao_group']
+                
                 if pdf.get_y() > 240:
                     pdf.add_page()
                     pdf.set_y(30)
                 
+                # Cabeçalho da categoria principal
                 pdf.ln(3)
-                pdf.set_fill_color(220, 230, 240)
-                pdf.set_font('Helvetica', 'B', 10)
-                pdf.set_text_color(0, 51, 102)
-                situacao_txt = sanitize_text_pdf(str(situacao_atual))[:70]
-                pdf.cell(0, 7, f"  {situacao_txt} ({qtd})", ln=True, fill=True)
+                pdf.set_fill_color(0, 51, 102)
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_text_color(255, 255, 255)
+                categoria_txt = sanitize_text_pdf(str(categoria))
+                pdf.cell(0, 8, f"  {categoria_txt} ({qtd_categoria})", ln=True, fill=True)
                 pdf.ln(2)
                 
-                df_grupo = df_sorted[df_sorted['_situacao_group'] == situacao_atual]
+                df_categoria = df_sorted[df_sorted['_categoria_agrupada'] == categoria]
                 
-                for _, row in df_grupo.head(100).iterrows():
-                    registro_num += 1
+                # Subcategorias (situações originais dentro da categoria)
+                situacoes_na_categoria = df_categoria.groupby('_situacao_group', sort=False).size()
+                
+                for situacao_original, qtd_sit in situacoes_na_categoria.items():
+                    # Se a categoria tem múltiplas situações originais, mostrar subcabeçalho
+                    if len(situacoes_na_categoria) > 1:
+                        if pdf.get_y() > 245:
+                            pdf.add_page()
+                            pdf.set_y(30)
+                        
+                        pdf.set_fill_color(220, 230, 240)
+                        pdf.set_font('Helvetica', 'B', 9)
+                        pdf.set_text_color(0, 51, 102)
+                        sit_txt = sanitize_text_pdf(str(situacao_original))[:65]
+                        pdf.cell(0, 6, f"    {sit_txt} ({qtd_sit})", ln=True, fill=True)
+                        pdf.ln(1)
+                    
+                    df_grupo = df_categoria[df_categoria['_situacao_group'] == situacao_original]
+                    
+                    for _, row in df_grupo.head(100).iterrows():
+                        registro_num += 1
+                        if registro_num > 300:
+                            break
+                        
+                        if pdf.get_y() > 250:
+                            pdf.add_page()
+                            pdf.set_y(30)
+                        
+                        _renderizar_card_proposicao(
+                            pdf, row, registro_num,
+                            col_proposicao, col_ementa, col_situacao, col_orgao,
+                            col_data, col_relator, col_tema, col_parado, col_link,
+                            mostrar_situacao=False
+                        )
+                    
                     if registro_num > 300:
                         break
-                    
-                    if pdf.get_y() > 250:
-                        pdf.add_page()
-                        pdf.set_y(30)
-                    
-                    _renderizar_card_proposicao(
-                        pdf, row, registro_num,
-                        col_proposicao, col_ementa, col_situacao, col_orgao,
-                        col_data, col_relator, col_tema, col_parado, col_link,
-                        mostrar_situacao=False
-                    )
                 
                 if registro_num > 300:
                     break
