@@ -80,28 +80,294 @@ MESES_PT = {
 
 PARTIDOS_RELATOR_ADVERSARIO = {"PT", "PV", "PSB", "PCDOB", "PSOL", "REDE"}
 
-# Mapeamento de palavras-chave para Ministérios (para RICs)
-MINISTERIOS_KEYWORDS = {
-    "Saúde": ["saude", "saúde", "anvisa", "sus", "vacina", "medicamento", "hospital", "nisia", "nísia"],
-    "Educação": ["educacao", "educação", "mec", "escola", "universidade", "camilo santana", "ensino"],
-    "Justiça e Segurança Pública": ["justica", "justiça", "policia", "polícia", "lewandowski", "seguranca publica", "segurança pública", "pf", "policia federal", "polícia federal"],
-    "Fazenda": ["fazenda", "haddad", "receita", "imposto", "tributo", "economia", "banco central", "caixa economica", "caixa econômica"],
-    "Defesa": ["defesa", "militar", "forcas armadas", "forças armadas", "exercito", "exército", "marinha", "aeronautica", "aeronáutica", "mucio", "múcio"],
-    "Relações Exteriores": ["itamaraty", "relacoes exteriores", "relações exteriores", "embaixada", "exterior", "mauro vieira"],
-    "Meio Ambiente": ["ambiente", "ambiental", "ibama", "marina silva", "clima", "floresta"],
-    "Agricultura": ["agricultura", "agro", "rural", "pecuaria", "pecuária", "favaro", "mapa"],
-    "Desenvolvimento Social": ["bolsa familia", "bolsa família", "assistencia social", "assistência social", "wellington dias", "combate a fome", "combate à fome"],
-    "Trabalho e Emprego": ["trabalho", "emprego", "marinho", "clt", "trabalhista"],
-    "Comunicações": ["comunicacoes", "comunicações", "correios", "ect", "anatel", "juscelino"],
-    "Casa Civil": ["casa civil", "rui costa", "presidencia", "presidência", "janja", "rosangela"],
-    "Direitos Humanos": ["direitos humanos", "silvio almeida", "sílvio almeida", "macae", "macaé", "conanda", "lgbtq"],
-    "Povos Indígenas": ["indigena", "indígena", "funai", "demarcacao", "demarcação", "sonia guajajara", "sônia guajajara"],
-    "Mulheres": ["mulheres", "aparecida goncalves", "aparecida gonçalves", "ministerio das mulheres", "ministério das mulheres"],
-    "Transportes": ["transportes", "renan filho", "rodovia", "ferrovia", "antt", "infraestrutura"],
-    "Minas e Energia": ["minas e energia", "energia", "petroleo", "petróleo", "petrobras", "alexandre silveira"],
-    "Ciência e Tecnologia": ["ciencia", "ciência", "tecnologia", "mcti", "luciana santos"],
-    "Pesca": ["pesca", "aquicultura", "pescador", "tainha"],
+# ============================================================
+# NORMALIZAÇÃO DE MINISTÉRIOS (nomes canônicos)
+# ============================================================
+# Mapeamento de variações textuais para nomes canônicos únicos
+
+MINISTERIOS_CANONICOS = {
+    # Ministério da Agricultura e Pecuária
+    "Ministério da Agricultura e Pecuária": [
+        "agricultura", "pecuária", "pecuaria", "agro", "agropecuária", "agropecuaria",
+        "agricultura e pecuária", "agricultura e pecuaria", "mapa", "favaro",
+        "ministro de estado da agricultura", "ministério da agricultura"
+    ],
+    
+    # Ministério das Cidades
+    "Ministério das Cidades": [
+        "cidades", "ministério das cidades", "ministerio das cidades", "jader filho"
+    ],
+    
+    # Ministério da Ciência, Tecnologia e Inovação
+    "Ministério da Ciência, Tecnologia e Inovação": [
+        "ciência", "ciencia", "tecnologia", "inovação", "inovacao", "mcti",
+        "ciência e tecnologia", "ciencia e tecnologia", "luciana santos"
+    ],
+    
+    # Ministério das Comunicações
+    "Ministério das Comunicações": [
+        "comunicações", "comunicacoes", "correios", "ect", "anatel", "juscelino",
+        "ministério das comunicações", "ministerio das comunicacoes", "telecomunicações"
+    ],
+    
+    # Ministério da Cultura
+    "Ministério da Cultura": [
+        "cultura", "ministério da cultura", "ministerio da cultura", "minc", "margareth menezes"
+    ],
+    
+    # Ministério da Defesa
+    "Ministério da Defesa": [
+        "defesa", "forças armadas", "forcas armadas", "exército", "exercito",
+        "marinha", "aeronáutica", "aeronautica", "múcio", "mucio", "militar",
+        "ministério da defesa", "ministerio da defesa"
+    ],
+    
+    # Ministério do Desenvolvimento Agrário
+    "Ministério do Desenvolvimento Agrário": [
+        "desenvolvimento agrário", "desenvolvimento agrario", "reforma agrária",
+        "reforma agraria", "mda", "agricultura familiar", "assentamento"
+    ],
+    
+    # Ministério do Desenvolvimento e Assistência Social
+    "Ministério do Desenvolvimento e Assistência Social": [
+        "desenvolvimento social", "assistência social", "assistencia social",
+        "bolsa família", "bolsa familia", "wellington dias", "combate à fome",
+        "combate a fome", "mds", "desenvolvimento e assistência"
+    ],
+    
+    # Ministério do Desenvolvimento, Indústria, Comércio e Serviços
+    "Ministério do Desenvolvimento, Indústria, Comércio e Serviços": [
+        "desenvolvimento", "indústria", "industria", "comércio", "comercio",
+        "mdic", "desenvolvimento industrial", "geraldo alckmin"
+    ],
+    
+    # Ministério da Educação
+    "Ministério da Educação": [
+        "educação", "educacao", "mec", "escola", "universidade", "ensino",
+        "camilo santana", "ministério da educação", "ministerio da educacao",
+        "enem", "fies", "prouni"
+    ],
+    
+    # Ministério do Esporte
+    "Ministério do Esporte": [
+        "esporte", "esportes", "ministério do esporte", "ministerio do esporte", "andré fufuca"
+    ],
+    
+    # Ministério da Fazenda
+    "Ministério da Fazenda": [
+        "fazenda", "haddad", "receita federal", "imposto", "tributo",
+        "economia", "ministério da fazenda", "ministerio da fazenda",
+        "tesouro", "fiscal"
+    ],
+    
+    # Ministério da Gestão e da Inovação em Serviços Públicos
+    "Ministério da Gestão e da Inovação em Serviços Públicos": [
+        "gestão", "gestao", "inovação em serviços", "inovacao em servicos",
+        "gestão e inovação", "gestao e inovacao", "serviços públicos",
+        "servicos publicos", "esther dweck", "mgi"
+    ],
+    
+    # Ministério da Igualdade Racial
+    "Ministério da Igualdade Racial": [
+        "igualdade racial", "racial", "ministério da igualdade racial",
+        "ministerio da igualdade racial", "anielle franco"
+    ],
+    
+    # Ministério da Integração e do Desenvolvimento Regional
+    "Ministério da Integração e do Desenvolvimento Regional": [
+        "integração", "integracao", "desenvolvimento regional", "midr",
+        "ministério da integração", "ministerio da integracao", "waldez góes"
+    ],
+    
+    # Ministério da Justiça e Segurança Pública
+    "Ministério da Justiça e Segurança Pública": [
+        "justiça", "justica", "segurança pública", "seguranca publica",
+        "polícia federal", "policia federal", "pf", "lewandowski",
+        "ministério da justiça", "ministerio da justica", "mjsp",
+        "de justiça e segurança pública", "justiça e segurança"
+    ],
+    
+    # Ministério do Meio Ambiente e Mudança do Clima
+    "Ministério do Meio Ambiente e Mudança do Clima": [
+        "meio ambiente", "ambiente", "ambiental", "ibama", "clima",
+        "mudança do clima", "mudanca do clima", "floresta", "marina silva",
+        "mma", "ministério do meio ambiente", "ministerio do meio ambiente"
+    ],
+    
+    # Ministério de Minas e Energia
+    "Ministério de Minas e Energia": [
+        "minas e energia", "energia", "petróleo", "petroleo", "petrobras",
+        "alexandre silveira", "mme", "elétrica", "eletrica", "aneel"
+    ],
+    
+    # Ministério das Mulheres
+    "Ministério das Mulheres": [
+        "mulheres", "ministério das mulheres", "ministerio das mulheres",
+        "aparecida gonçalves", "aparecida goncalves", "cida gonçalves"
+    ],
+    
+    # Ministério da Pesca e Aquicultura
+    "Ministério da Pesca e Aquicultura": [
+        "pesca", "aquicultura", "pescador", "ministério da pesca",
+        "ministerio da pesca", "andré de paula"
+    ],
+    
+    # Ministério do Planejamento e Orçamento
+    "Ministério do Planejamento e Orçamento": [
+        "planejamento", "orçamento", "orcamento", "ministério do planejamento",
+        "ministerio do planejamento", "simone tebet", "mpo"
+    ],
+    
+    # Ministério dos Povos Indígenas
+    "Ministério dos Povos Indígenas": [
+        "povos indígenas", "povos indigenas", "indígena", "indigena",
+        "funai", "demarcação", "demarcacao", "sonia guajajara", "sônia guajajara"
+    ],
+    
+    # Ministério da Previdência Social
+    "Ministério da Previdência Social": [
+        "previdência", "previdencia", "inss", "aposentadoria",
+        "ministério da previdência", "ministerio da previdencia", "carlos lupi"
+    ],
+    
+    # Ministério das Relações Exteriores
+    "Ministério das Relações Exteriores": [
+        "relações exteriores", "relacoes exteriores", "itamaraty", "embaixada",
+        "exterior", "mauro vieira", "mre", "chanceler", "diplomacia"
+    ],
+    
+    # Ministério da Saúde
+    "Ministério da Saúde": [
+        "saúde", "saude", "anvisa", "sus", "vacina", "medicamento",
+        "hospital", "nísia trindade", "nisia trindade", "ministério da saúde",
+        "ministerio da saude", "ms"
+    ],
+    
+    # Ministério do Trabalho e Emprego
+    "Ministério do Trabalho e Emprego": [
+        "trabalho", "emprego", "trabalhista", "clt", "luiz marinho",
+        "ministério do trabalho", "ministerio do trabalho", "mte"
+    ],
+    
+    # Ministério dos Transportes
+    "Ministério dos Transportes": [
+        "transportes", "transporte", "rodovia", "ferrovia", "antt",
+        "renan filho", "ministério dos transportes", "ministerio dos transportes",
+        "estado dos transportes"
+    ],
+    
+    # Ministério do Turismo
+    "Ministério do Turismo": [
+        "turismo", "ministério do turismo", "ministerio do turismo", "celso sabino"
+    ],
+    
+    # Ministério dos Direitos Humanos e da Cidadania
+    "Ministério dos Direitos Humanos e da Cidadania": [
+        "direitos humanos", "cidadania", "conanda", "lgbtq", "macaé evaristo",
+        "macae evaristo", "ministério dos direitos humanos",
+        "ministerio dos direitos humanos", "mdhc"
+    ],
+    
+    # Ministério dos Portos e Aeroportos
+    "Ministério dos Portos e Aeroportos": [
+        "portos", "aeroportos", "porto", "aeroporto", "ministério dos portos",
+        "ministerio dos portos", "silvio costa filho"
+    ],
+    
+    # Ministério do Empreendedorismo, da Microempresa e da Empresa de Pequeno Porte
+    "Ministério do Empreendedorismo": [
+        "empreendedorismo", "microempresa", "pequeno porte", "márcio frança",
+        "marcio franca", "mei", "ministério do empreendedorismo"
+    ],
+    
+    # Casa Civil
+    "Casa Civil": [
+        "casa civil", "rui costa", "planalto"
+    ],
+    
+    # Secretaria-Geral da Presidência
+    "Secretaria-Geral da Presidência": [
+        "secretaria-geral", "secretaria geral", "presidência da república",
+        "presidencia da republica"
+    ],
+    
+    # Gabinete de Segurança Institucional
+    "Gabinete de Segurança Institucional": [
+        "gsi", "segurança institucional", "seguranca institucional",
+        "gabinete de segurança", "marcos antonio amaro"
+    ],
+    
+    # Advocacia-Geral da União
+    "Advocacia-Geral da União": [
+        "agu", "advocacia-geral", "advocacia geral", "jorge messias"
+    ],
+    
+    # Controladoria-Geral da União
+    "Controladoria-Geral da União": [
+        "cgu", "controladoria", "vinícius de carvalho", "vinicius de carvalho"
+    ],
+    
+    # Banco Central
+    "Banco Central do Brasil": [
+        "banco central", "bacen", "bcb", "galípolo", "galipolo", "campos neto"
+    ],
 }
+
+
+def normalize_ministerio(texto: str) -> str:
+    """
+    Normaliza o nome do ministério para uma nomenclatura canônica única.
+    
+    Regras:
+    - Remove acentos e converte para minúsculas
+    - Ignora nomes de ministros, cargos, artigos
+    - Retorna o nome canônico ou "Não identificado"
+    """
+    if not texto:
+        return "Não identificado"
+    
+    # Normalizar texto: remover acentos, lowercase
+    texto_norm = texto.lower().strip()
+    
+    # Remover acentos
+    texto_norm = unicodedata.normalize('NFD', texto_norm)
+    texto_norm = ''.join(c for c in texto_norm if unicodedata.category(c) != 'Mn')
+    
+    # Remover termos genéricos
+    termos_remover = [
+        "ministro de estado", "ministra de estado", "ministro", "ministra",
+        "sr.", "sra.", "senhor", "senhora", "exmo.", "exma.",
+        "chefe da", "chefe do", "chefe", "ao ", "a ", "do ", "da ", "de ", "dos ", "das "
+    ]
+    
+    for termo in termos_remover:
+        texto_norm = texto_norm.replace(termo, " ")
+    
+    # Limpar espaços extras
+    texto_norm = " ".join(texto_norm.split())
+    
+    # Procurar correspondência nos ministérios canônicos
+    melhor_match = None
+    melhor_score = 0
+    
+    for nome_canonico, keywords in MINISTERIOS_CANONICOS.items():
+        for kw in keywords:
+            # Normalizar keyword também
+            kw_norm = unicodedata.normalize('NFD', kw.lower())
+            kw_norm = ''.join(c for c in kw_norm if unicodedata.category(c) != 'Mn')
+            
+            if kw_norm in texto_norm:
+                # Priorizar matches mais longos (mais específicos)
+                score = len(kw_norm)
+                if score > melhor_score:
+                    melhor_score = score
+                    melhor_match = nome_canonico
+    
+    return melhor_match if melhor_match else "Não identificado"
+
+
+# Mapeamento legado (mantido para compatibilidade)
+MINISTERIOS_KEYWORDS = MINISTERIOS_CANONICOS
 
 # Palavras-chave para detectar resposta em RICs
 RIC_RESPOSTA_KEYWORDS = [
@@ -289,39 +555,30 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
     """
     Extrai informações de prazo de resposta de RIC a partir das tramitações.
     
-    REGRA CANÔNICA DE PRAZO (baseada no padrão real da Câmara):
-    ============================================================
+    REGRA CONSTITUCIONAL DE PRAZO:
+    ==============================
+    O Poder Executivo tem 30 DIAS para responder, contados a partir da REMESSA.
     
-    EXEMPLO REAL DE TRAMITAÇÃO DE REMESSA:
-    - Data: 06/11/2025
-    - Órgão: 1ª Secretaria da Câmara dos Deputados (1SECM)
-    - Texto: "Remessa por meio do Ofício 1ªSec/RI/E nº 412/2025, ao Ministro de Estado dos Transportes.
-              Prazo para Resposta Externas (de 07/11/2025 a 08/12/2025)"
+    DETECÇÃO DE REMESSA:
+    - Órgão: 1SECM (1ª Secretaria da Câmara dos Deputados)
+    - Texto contém: "Remessa por meio do Ofício" (qualquer variação)
     
-    EXEMPLO REAL DE RESPOSTA RECEBIDA:
-    - Data: 02/12/2025
-    - Órgão: 1ª Secretaria da Câmara dos Deputados (1SECM)
-    - Texto: "Recebimento de resposta conforme Ofício nº 2347/2025/ASPAR/GM..."
+    DETECÇÃO DE RESPOSTA:
+    - Órgão: 1SECM (1ª Secretaria da Câmara dos Deputados)
+    - Texto contém: "Recebimento de resposta conforme Ofício"
     
-    REGRAS DE STATUS BASEADAS NA SITUAÇÃO ATUAL:
-    - "Aguardando Remessa ao Arquivo" → JÁ FOI RESPONDIDO
-    - "Aguardando Providências Internas" → EM TRAMITAÇÃO NA CÂMARA
-    - "Aguardando Despacho do Presidente da Câmara dos Deputados" → EM TRAMITAÇÃO NA CÂMARA
-    
-    LÓGICA:
-    1. Procurar tramitação de REMESSA (1SECM + "Remessa por meio do Ofício")
-    2. Extrair prazo do texto: "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)"
-    3. Procurar tramitação de RESPOSTA (1SECM + "Recebimento de resposta conforme Ofício")
-    4. Determinar status final com base em situação atual + prazos + resposta
+    CÁLCULO DO PRAZO:
+    - Se houver texto "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)": usar datas explícitas
+    - Senão: prazo_fim = data_remessa + 30 dias
     """
     resultado = {
         "data_remessa": None,
         "inicio_contagem": None,
         "prazo_inicio": None,
         "prazo_fim": None,
-        "prazo_str": "",           # String formatada: "07/11/2025 a 08/12/2025"
+        "prazo_str": "",
         "dias_restantes": None,
-        "fonte_prazo": "",         # "explicitado_na_tramitacao" ou "calculado"
+        "fonte_prazo": "",
         "status_resposta": "Aguardando resposta",
         "data_resposta": None,
         "respondido": False,
@@ -330,27 +587,33 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
     }
     
     if not tramitacoes:
-        # Verificar status baseado na situação atual mesmo sem tramitações
         resultado["status_resposta"] = _determinar_status_por_situacao(situacao_atual, False, None, None)
         return resultado
     
-    # ============================================================
-    # PASSO 1: Ordenar tramitações por data (cronológica)
-    # ============================================================
+    # Ordenar tramitações por data (cronológica)
     tramitacoes_ordenadas = sorted(
         tramitacoes,
         key=lambda x: x.get("dataHora") or x.get("data") or "",
-        reverse=False  # Ordem cronológica
+        reverse=False
     )
     
-    # ============================================================
-    # PASSO 2: Procurar tramitação de REMESSA (1SECM)
-    # Critério: "Remessa por meio do Ofício 1ªSec/RI/E"
-    # ============================================================
-    
-    # Regex OBRIGATÓRIA para extrair prazo explícito
+    # Regex para prazo explícito (se existir no texto)
     regex_prazo = r"Prazo\s+para\s+Resposta\s+Externas?\s*\(de\s*(\d{2}/\d{2}/\d{4})\s*a\s*(\d{2}/\d{2}/\d{4})\)"
     
+    def normalizar_texto_busca(texto):
+        """Normaliza texto removendo acentos e convertendo para minúsculas"""
+        texto = texto.lower()
+        # Substituir caracteres especiais
+        texto = texto.replace('ª', 'a').replace('º', 'o')
+        # Remover acentos usando unicodedata
+        texto = unicodedata.normalize('NFD', texto)
+        texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+        return texto
+    
+    # ============================================================
+    # PASSO 1: Procurar tramitação de REMESSA
+    # Critério: 1SECM + "Remessa por meio do Ofício 1ªSec/RI/E"
+    # ============================================================
     tramitacao_remessa = None
     data_remessa = None
     
@@ -359,20 +622,21 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
         despacho = t.get("despacho") or ""
         desc = t.get("descricaoTramitacao") or ""
         texto_completo = f"{despacho} {desc}"
-        texto_lower = texto_completo.lower()
         
-        # Detectar se é tramitação da 1SECM
+        # Normalizar texto para busca
+        texto_busca = normalizar_texto_busca(texto_completo)
+        
         is_1secm = "1SEC" in sigla_orgao or sigla_orgao == "1SECM"
         
-        # Detectar keywords de REMESSA (não confundir com recebimento)
-        has_remessa = "remessa por meio do ofício" in texto_lower or "remessa por meio do oficio" in texto_lower
-        has_1sec_ri = "1ªsec/ri/e" in texto_lower or "1asec/ri/e" in texto_lower
-        has_prazo = "prazo para resposta" in texto_lower
+        # Critério de REMESSA: "Remessa por meio do Ofício 1ªSec/RI/E" ou variações
+        # Aceita: "remessa por meio do oficio", "1asec/ri/e", "1sec/ri/e"
+        has_remessa = "remessa por meio do oficio" in texto_busca
+        has_1sec_ri = "1asec/ri/e" in texto_busca or "1sec/ri/e" in texto_busca
         
-        # Não é remessa se for recebimento de resposta
-        is_recebimento = "recebimento de resposta" in texto_lower
+        # NÃO é remessa se for recebimento de resposta
+        is_recebimento = "recebimento de resposta" in texto_busca
         
-        if is_1secm and (has_remessa or has_1sec_ri) and has_prazo and not is_recebimento:
+        if is_1secm and (has_remessa or has_1sec_ri) and not is_recebimento:
             tramitacao_remessa = t
             resultado["tramitacao_remessa_texto"] = texto_completo.strip()
             
@@ -387,12 +651,8 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
                 except:
                     pass
             
-            # ============================================================
-            # PASSO 3: Extrair prazo EXPLÍCITO do texto
-            # Formato: "Prazo para Resposta Externas (de 07/11/2025 a 08/12/2025)"
-            # ============================================================
+            # Verificar se tem prazo EXPLÍCITO no texto
             match_prazo = re.search(regex_prazo, texto_completo, re.IGNORECASE)
-            
             if match_prazo:
                 try:
                     prazo_inicio_str = match_prazo.group(1)
@@ -405,23 +665,21 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
                 except:
                     pass
             
-            # Pegar a ÚLTIMA remessa encontrada (mais recente)
-            # Continua procurando para pegar a mais recente
+            # Continua procurando para pegar a ÚLTIMA remessa (mais recente)
     
     # ============================================================
-    # PASSO 4: Se não encontrou prazo explícito, calcular
+    # PASSO 2: Se não encontrou prazo explícito, CALCULAR (30 dias)
     # ============================================================
     if tramitacao_remessa and not resultado["prazo_fim"] and data_remessa:
-        inicio = proximo_dia_util(data_remessa)
-        if inicio:
-            resultado["prazo_inicio"] = inicio
-            resultado["inicio_contagem"] = inicio
-            resultado["prazo_fim"] = inicio + datetime.timedelta(days=30)
-            resultado["prazo_str"] = f"até {resultado['prazo_fim'].strftime('%d/%m/%Y')}"
-            resultado["fonte_prazo"] = "calculado"
+        # Prazo constitucional: 30 dias após a remessa
+        resultado["prazo_inicio"] = data_remessa
+        resultado["inicio_contagem"] = data_remessa
+        resultado["prazo_fim"] = data_remessa + datetime.timedelta(days=30)
+        resultado["prazo_str"] = f"até {resultado['prazo_fim'].strftime('%d/%m/%Y')}"
+        resultado["fonte_prazo"] = "calculado_30_dias"
     
     # ============================================================
-    # PASSO 5: Calcular dias restantes
+    # PASSO 3: Calcular dias restantes
     # ============================================================
     if resultado["prazo_fim"]:
         hoje = datetime.date.today()
@@ -429,29 +687,25 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
         resultado["dias_restantes"] = delta
     
     # ============================================================
-    # PASSO 6: Verificar se foi RESPONDIDO
-    # Critério: tramitação 1SECM com "Recebimento de resposta conforme Ofício"
+    # PASSO 4: Verificar se foi RESPONDIDO
+    # Critério: 1SECM + "Recebimento de resposta conforme Ofício"
     # ============================================================
     data_resposta = None
     respondido = False
     
     for t in tramitacoes_ordenadas:
         sigla_orgao = (t.get("siglaOrgao") or "").upper().strip()
-        despacho = (t.get("despacho") or "").lower()
-        desc = (t.get("descricaoTramitacao") or "").lower()
+        despacho = (t.get("despacho") or "")
+        desc = (t.get("descricaoTramitacao") or "")
         texto = f"{despacho} {desc}"
+        texto_busca = normalizar_texto_busca(texto)
         
         is_1secm = "1SEC" in sigla_orgao or sigla_orgao == "1SECM"
         
-        # Critério PRINCIPAL de resposta: "Recebimento de resposta conforme Ofício"
-        is_recebimento_resposta = "recebimento de resposta conforme ofício" in texto or \
-                                   "recebimento de resposta conforme oficio" in texto
+        # Critério PRINCIPAL: "Recebimento de resposta conforme Ofício"
+        is_recebimento_resposta = "recebimento de resposta conforme of" in texto_busca
         
-        # Critérios secundários
-        has_encaminha_resposta = "encaminhamento de resposta" in texto or "encaminha resposta" in texto
-        has_resposta_ministerio = "resposta do ministério" in texto or "resposta do ministerio" in texto
-        
-        if is_1secm and (is_recebimento_resposta or has_encaminha_resposta):
+        if is_1secm and is_recebimento_resposta:
             data_str = t.get("dataHora") or t.get("data")
             if data_str:
                 try:
@@ -459,7 +713,6 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
                     if pd.notna(dt_resp):
                         respondido = True
                         data_resposta = dt_resp.date()
-                        # Pegar a resposta mais recente
                 except:
                     pass
     
@@ -467,8 +720,7 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
     resultado["data_resposta"] = data_resposta
     
     # ============================================================
-    # PASSO 7: Determinar STATUS FINAL
-    # Considera situação atual + prazo + resposta
+    # PASSO 5: Determinar STATUS FINAL
     # ============================================================
     resultado["status_resposta"] = _determinar_status_por_situacao(
         situacao_atual, 
@@ -485,33 +737,39 @@ def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_
     Determina o status do RIC baseado na situação atual e dados de prazo/resposta.
     
     REGRAS:
-    1. "Aguardando Remessa ao Arquivo" → "Respondido" (já foi respondido)
+    1. "Aguardando Remessa ao Arquivo" → "Respondido"
     2. "Aguardando Providências Internas" → "Em tramitação na Câmara"
-    3. "Aguardando Despacho do Presidente da Câmara dos Deputados" → "Em tramitação na Câmara"
-    4. Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
-    5. Se respondido e data_resposta <= prazo_fim → "Respondido"
-    6. Se não respondido e hoje > prazo_fim → "Fora do prazo"
-    7. Caso contrário → "Aguardando resposta"
+    3. "Aguardando Despacho do Presidente da Câmara..." → "Em tramitação na Câmara"
+    4. "Aguardando Designação de Relator" → "Em tramitação na Câmara"
+    5. Se respondido e data_resposta > prazo_fim → "Respondido fora do prazo"
+    6. Se respondido e data_resposta <= prazo_fim → "Respondido"
+    7. Se não respondido e hoje > prazo_fim → "Fora do prazo"
+    8. Caso contrário → "Aguardando resposta"
     """
     situacao_norm = (situacao_atual or "").lower().strip()
     hoje = datetime.date.today()
     
     # REGRA 1: Aguardando Remessa ao Arquivo = JÁ FOI RESPONDIDO
     if "aguardando remessa ao arquivo" in situacao_norm or "remessa ao arquivo" in situacao_norm:
+        if prazo_fim and data_resposta and data_resposta > prazo_fim:
+            return "Respondido fora do prazo"
         return "Respondido"
     
-    # REGRA 2 e 3: Situações que indicam tramitação interna na Câmara
+    # REGRA 2, 3 e 4: Situações que indicam tramitação interna na Câmara
     situacoes_tramitacao_camara = [
         "aguardando providências internas",
         "aguardando providencias internas",
         "aguardando despacho do presidente da câmara",
         "aguardando despacho do presidente da camara",
+        "aguardando designação de relator",
+        "aguardando designacao de relator",
+        "aguardando recebimento",
     ]
     for sit in situacoes_tramitacao_camara:
         if sit in situacao_norm:
             return "Em tramitação na Câmara"
     
-    # REGRA 4 e 5: Se foi respondido (detectado nas tramitações)
+    # REGRA 5 e 6: Se foi respondido (detectado nas tramitações)
     if respondido:
         if prazo_fim and data_resposta:
             if data_resposta > prazo_fim:
@@ -521,11 +779,11 @@ def _determinar_status_por_situacao(situacao_atual: str, respondido: bool, data_
         else:
             return "Respondido"
     
-    # REGRA 6: Se não foi respondido e prazo venceu
+    # REGRA 7: Se não foi respondido e prazo venceu
     if prazo_fim and hoje > prazo_fim:
         return "Fora do prazo"
     
-    # REGRA 7: Caso padrão
+    # REGRA 8: Caso padrão
     return "Aguardando resposta"
 
 
@@ -533,6 +791,7 @@ def extrair_ministerio_ric(ementa: str, tramitacoes: list = None) -> str:
     """
     Extrai o ministério destinatário de um RIC.
     Primeiro tenta extrair da ementa, depois das tramitações.
+    Sempre retorna o nome CANÔNICO normalizado.
     """
     if not ementa:
         ementa = ""
@@ -551,33 +810,31 @@ def extrair_ministerio_ric(ementa: str, tramitacoes: list = None) -> str:
     for pattern in patterns_ministerio:
         match = re.search(pattern, ementa_lower)
         if match:
-            ministerio = match.group(1).strip()
-            # Limpar e capitalizar
-            ministerio = re.sub(r'\s+', ' ', ministerio)
-            if len(ministerio) > 3 and len(ministerio) < 80:
-                return ministerio.title()
+            ministerio_extraido = match.group(1).strip()
+            # Normalizar para nome canônico
+            ministerio_normalizado = normalize_ministerio(ministerio_extraido)
+            if ministerio_normalizado and ministerio_normalizado != "Não identificado":
+                return ministerio_normalizado
     
-    # Tentar identificar por palavras-chave conhecidas
-    for ministerio, keywords in MINISTERIOS_KEYWORDS.items():
-        for kw in keywords:
-            if kw in ementa_lower:
-                return ministerio
+    # Tentar identificar diretamente na ementa usando normalize_ministerio
+    ministerio_direto = normalize_ministerio(ementa)
+    if ministerio_direto and ministerio_direto != "Não identificado":
+        return ministerio_direto
     
-    # Se não encontrou na ementa, tentar nas tramitações
+    # Se não encontrou na ementa, tentar nas tramitações (texto da remessa)
     if tramitacoes:
         for t in tramitacoes:
             sigla_orgao = (t.get("siglaOrgao") or "").upper()
             if "1SEC" in sigla_orgao:
                 despacho = t.get("despacho") or ""
                 desc = t.get("descricaoTramitacao") or ""
-                texto = f"{despacho} {desc}".lower()
+                texto = f"{despacho} {desc}"
                 
-                for ministerio, keywords in MINISTERIOS_KEYWORDS.items():
-                    for kw in keywords:
-                        if kw in texto:
-                            return ministerio
+                ministerio_tram = normalize_ministerio(texto)
+                if ministerio_tram and ministerio_tram != "Não identificado":
+                    return ministerio_tram
     
-    return ""
+    return "Não identificado"
 
 
 def extrair_assunto_ric(ementa: str) -> str:
@@ -1780,7 +2037,188 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
         return (csv_bytes, "text/csv", "csv")
 
 
-def canonical_situacao(situacao: str) -> str:
+def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos de Informação") -> tuple[bytes, str, str]:
+    """
+    Gera PDF de RICs organizado por blocos de status.
+    
+    Blocos na ordem:
+    1. Aguardando resposta (No prazo)
+    2. Aguardando resposta (Fora do prazo) / Fora do prazo
+    3. Em tramitação na Câmara
+    4. Respondido / Respondido fora do prazo
+    """
+    try:
+        from fpdf import FPDF
+        
+        class RelatorioPDF(FPDF):
+            def header(self):
+                self.set_fill_color(0, 51, 102)
+                self.rect(0, 0, 210, 22, 'F')
+                self.set_font('Helvetica', 'B', 16)
+                self.set_text_color(255, 255, 255)
+                self.set_y(6)
+                self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+                self.ln(18)
+                
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Helvetica', 'I', 8)
+                self.set_text_color(128, 128, 128)
+                self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+        
+        pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.add_page()
+        
+        # Título
+        pdf.set_y(28)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 8, sanitize_text_pdf(titulo), ln=True, align='C')
+        
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
+        pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
+        
+        pdf.ln(2)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br | Prazo constitucional: 30 dias apos remessa", ln=True, align='C')
+        
+        pdf.ln(3)
+        pdf.set_draw_color(0, 51, 102)
+        pdf.set_line_width(0.5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(6)
+        
+        # Total geral
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 6, f"Total de RICs: {len(df)}", ln=True)
+        pdf.ln(3)
+        
+        # Determinar coluna de status
+        col_status = None
+        for c in ['Status', 'RIC_StatusResposta']:
+            if c in df.columns:
+                col_status = c
+                break
+        
+        if not col_status:
+            col_status = 'Status'
+            df[col_status] = 'Aguardando resposta'
+        
+        # Definir os blocos
+        blocos = [
+            {
+                'titulo': '⏳ AGUARDANDO RESPOSTA (No Prazo)',
+                'filtro': lambda x: x == 'Aguardando resposta',
+                'cor': (255, 193, 7),  # Amarelo
+            },
+            {
+                'titulo': '⚠️ FORA DO PRAZO (Sem Resposta)',
+                'filtro': lambda x: x == 'Fora do prazo',
+                'cor': (220, 53, 69),  # Vermelho
+            },
+            {
+                'titulo': '🏛️ EM TRAMITAÇÃO NA CÂMARA',
+                'filtro': lambda x: x == 'Em tramitação na Câmara',
+                'cor': (108, 117, 125),  # Cinza
+            },
+            {
+                'titulo': '✅ RESPONDIDOS',
+                'filtro': lambda x: x in ['Respondido', 'Respondido fora do prazo'],
+                'cor': (40, 167, 69),  # Verde
+            },
+        ]
+        
+        # Colunas para exibir nos cards
+        col_ric = next((c for c in ['RIC', 'Proposicao'] if c in df.columns), None)
+        col_ministerio = next((c for c in ['Ministério', 'RIC_Ministerio'] if c in df.columns), None)
+        col_prazo = next((c for c in ['Prazo', 'RIC_PrazoStr'] if c in df.columns), None)
+        col_ementa = next((c for c in ['ementa', 'Ementa'] if c in df.columns), None)
+        col_situacao = next((c for c in ['Situação atual', 'Situacao atual'] if c in df.columns), None)
+        col_data = next((c for c in ['Última tramitação', 'Data do status'] if c in df.columns), None)
+        
+        for bloco in blocos:
+            df_bloco = df[df[col_status].apply(bloco['filtro'])].copy()
+            
+            if df_bloco.empty:
+                continue
+            
+            # Cabeçalho do bloco
+            pdf.ln(4)
+            pdf.set_fill_color(*bloco['cor'])
+            pdf.set_font('Helvetica', 'B', 11)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(0, 8, f"  {sanitize_text_pdf(bloco['titulo'])} ({len(df_bloco)})", ln=True, fill=True)
+            pdf.ln(3)
+            
+            # Ordenar por data mais recente
+            if col_data and col_data in df_bloco.columns:
+                df_bloco['_sort_dt'] = pd.to_datetime(df_bloco[col_data], errors='coerce', dayfirst=True)
+                df_bloco = df_bloco.sort_values('_sort_dt', ascending=False)
+            
+            # Renderizar cada RIC
+            for idx, (_, row) in enumerate(df_bloco.iterrows()):
+                # Verificar se precisa nova página
+                if pdf.get_y() > 250:
+                    pdf.add_page()
+                
+                # Nome do RIC
+                ric_nome = sanitize_text_pdf(str(row.get(col_ric, ''))) if col_ric else "RIC"
+                
+                # Card do RIC
+                pdf.set_fill_color(245, 245, 245)
+                pdf.set_font('Helvetica', 'B', 10)
+                pdf.set_text_color(0, 51, 102)
+                pdf.cell(0, 6, f"{idx+1}. {ric_nome}", ln=True)
+                
+                # Ministério
+                if col_ministerio:
+                    ministerio = sanitize_text_pdf(str(row.get(col_ministerio, '') or 'Não identificado'))
+                    pdf.set_font('Helvetica', '', 9)
+                    pdf.set_text_color(60, 60, 60)
+                    pdf.cell(0, 5, f"Ministerio: {ministerio}", ln=True)
+                
+                # Prazo
+                if col_prazo:
+                    prazo = sanitize_text_pdf(str(row.get(col_prazo, '') or '-'))
+                    pdf.cell(0, 5, f"Prazo: {prazo}", ln=True)
+                
+                # Situação atual
+                if col_situacao:
+                    sit = sanitize_text_pdf(str(row.get(col_situacao, '') or '-'))
+                    pdf.cell(0, 5, f"Situacao: {sit}", ln=True)
+                
+                # Data última tramitação
+                if col_data:
+                    data = sanitize_text_pdf(str(row.get(col_data, '') or '-'))
+                    pdf.cell(0, 5, f"Ultima tramitacao: {data}", ln=True)
+                
+                # Ementa
+                if col_ementa:
+                    ementa = str(row.get(col_ementa, '') or '')
+                    if ementa:
+                        ementa_trunc = sanitize_text_pdf(ementa[:200] + "..." if len(ementa) > 200 else ementa)
+                        pdf.set_font('Helvetica', 'I', 8)
+                        pdf.set_text_color(80, 80, 80)
+                        pdf.multi_cell(0, 4, f"Ementa: {ementa_trunc}")
+                
+                # Linha separadora
+                pdf.ln(2)
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+                pdf.ln(3)
+        
+        output = BytesIO()
+        pdf.output(output)
+        return (output.getvalue(), "application/pdf", "pdf")
+        
+    except Exception as e:
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        return (csv_bytes, "text/csv", "csv")
     s_raw = (situacao or "").strip()
     s = normalize_text(s_raw)
     if "parecer" in s:
@@ -4470,7 +4908,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.markdown("---")
             
             # ============================================================
-            # TABELA DE RICs
+            # TABELA DE RICs COM SELEÇÃO
             # ============================================================
             st.markdown("### 📋 Lista de RICs")
             
@@ -4482,6 +4920,9 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             df_rics_view = df_rics_fil.copy()
             df_rics_view["LinkTramitacao"] = df_rics_view["id"].astype(str).apply(camara_link_tramitacao)
             
+            # Normalizar ministério para nome canônico
+            df_rics_view["Ministério"] = df_rics_view["RIC_Ministerio"].apply(normalize_ministerio)
+            
             # Formatar datas de prazo usando RIC_PrazoStr ou fallback
             def fmt_prazo(row):
                 """
@@ -4489,13 +4930,11 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 Usa RIC_PrazoStr (já formatado) quando disponível.
                 Adiciona indicador de dias restantes ou vencido.
                 """
-                # Primeiro tenta usar prazo_str já formatado
                 prazo_str = row.get("RIC_PrazoStr", "")
                 prazo_fim = row.get("RIC_PrazoFim")
                 dias = row.get("RIC_DiasRestantes")
                 status = row.get("RIC_StatusResposta", "")
                 
-                # Se tiver prazo_str, usar como base
                 if prazo_str and str(prazo_str).strip():
                     base = str(prazo_str)
                 elif prazo_fim and pd.notna(prazo_fim):
@@ -4509,7 +4948,6 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 else:
                     return "—"
                 
-                # Adicionar indicador de status
                 if dias is not None and pd.notna(dias):
                     try:
                         dias_int = int(dias)
@@ -4535,7 +4973,6 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             # Renomear colunas para exibição
             df_rics_view = df_rics_view.rename(columns={
                 "Proposicao": "RIC",
-                "RIC_Ministerio": "Ministério",
                 "RIC_StatusResposta": "Status",
                 "RIC_Assunto": "Assunto",
                 "Parado (dias)": "Parado há",
@@ -4543,20 +4980,27 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             
             # Colunas para exibir
             show_cols_ric = ["RIC", "ano", "Ministério", "Status", "Prazo", "Última tramitação", 
-                            "Parado há", "Situação atual", "LinkTramitacao", "ementa"]
+                            "Parado há", "Situação atual", "LinkTramitacao", "ementa", "id"]
             show_cols_ric = [c for c in show_cols_ric if c in df_rics_view.columns]
             
-            st.dataframe(
+            # TABELA COM SELEÇÃO
+            sel_ric = st.dataframe(
                 df_rics_view[show_cols_ric],
                 use_container_width=True,
                 hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
                 column_config={
                     "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
                     "ementa": st.column_config.TextColumn("Ementa", width="large"),
                     "Ministério": st.column_config.TextColumn("Ministério", width="medium"),
                     "Prazo": st.column_config.TextColumn("Prazo", width="medium"),
+                    "id": None,  # Ocultar coluna id
                 },
+                key="df_rics_selecao"
             )
+            
+            st.caption("✅ Respondido | ⚠️ VENCIDO | 🔔 Urgente (≤5 dias)")
             
             # ============================================================
             # DOWNLOADS
@@ -4575,7 +5019,8 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 )
             
             with col_dp:
-                pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_rics_view, "RICs - Requerimentos de Informação")
+                # PDF com blocos por status
+                pdf_bytes, pdf_mime, pdf_ext = to_pdf_rics_por_status(df_rics_view, "RICs - Requerimentos de Informação")
                 st.download_button(
                     "⬇️ Baixar PDF",
                     data=pdf_bytes,
@@ -4585,21 +5030,24 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 )
             
             # ============================================================
-            # DETALHES DE UM RIC ESPECÍFICO
+            # DETALHES DO RIC SELECIONADO NA TABELA
             # ============================================================
             st.markdown("---")
-            st.markdown("### 🔍 Ver detalhes de um RIC")
+            st.markdown("### 🔍 Detalhes do RIC Selecionado")
             
-            rics_opcoes = df_rics_fil["Proposicao"].dropna().unique().tolist()
-            if rics_opcoes:
-                ric_selecionado = st.selectbox("Selecione um RIC:", options=[""] + rics_opcoes, key="select_ric_detalhe")
-                
-                if ric_selecionado:
-                    row_ric = df_rics_fil[df_rics_fil["Proposicao"] == ric_selecionado].iloc[0]
-                    id_ric = str(row_ric.get("id", ""))
-                    
-                    if id_ric:
-                        exibir_detalhes_proposicao(id_ric, key_prefix="ric_detalhe")
+            # Obter seleção da tabela
+            selected_ric_id = None
+            try:
+                if sel_ric and isinstance(sel_ric, dict) and sel_ric.get("selection") and sel_ric["selection"].get("rows"):
+                    row_idx = sel_ric["selection"]["rows"][0]
+                    selected_ric_id = str(df_rics_view.iloc[row_idx]["id"])
+            except Exception:
+                selected_ric_id = None
+            
+            if not selected_ric_id:
+                st.info("👆 Clique em um RIC na tabela acima para ver detalhes completos.")
+            else:
+                exibir_detalhes_proposicao(selected_ric_id, key_prefix="ric_detalhe")
         
         else:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
