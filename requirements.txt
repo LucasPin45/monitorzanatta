@@ -6,3 +6,4 @@ openpyxl
 fpdf2
 xlsxwriter
 reportlab
+matplotlib
