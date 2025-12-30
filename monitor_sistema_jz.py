@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v16
+# monitor_sistema_jz.py - v17
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 16: Aba de apresentação, Gráficos Plotly com rótulos
+# VERSÃO 17: Gráficos estáticos Matplotlib, Exportação PDF
 # ============================================================
 
 import datetime
@@ -16,6 +16,9 @@ import re
 import pandas as pd
 import requests
 import streamlit as st
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Backend não-interativo
 
 # ============================================================
 # CONFIGURAÇÕES
@@ -28,7 +31,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/16.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/17.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -214,6 +217,92 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
 
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     return (csv_bytes, "text/csv", "csv")
+
+
+def to_pdf_bytes(df: pd.DataFrame, titulo: str = "Relatório") -> tuple[bytes, str, str]:
+    """Exporta DataFrame para PDF."""
+    try:
+        from fpdf import FPDF
+        
+        pdf = FPDF(orientation='L', unit='mm', format='A4')
+        pdf.add_page()
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.cell(0, 10, titulo, ln=True, align='C')
+        pdf.set_font('Helvetica', '', 8)
+        pdf.cell(0, 5, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
+        pdf.ln(5)
+        
+        # Largura da página disponível
+        page_width = pdf.w - 20
+        cols = df.columns.tolist()
+        col_width = page_width / len(cols) if cols else page_width
+        
+        # Cabeçalho
+        pdf.set_font('Helvetica', 'B', 7)
+        pdf.set_fill_color(230, 230, 230)
+        for col in cols:
+            pdf.cell(col_width, 6, str(col)[:20], border=1, fill=True, align='C')
+        pdf.ln()
+        
+        # Dados
+        pdf.set_font('Helvetica', '', 6)
+        for _, row in df.head(100).iterrows():  # Limita a 100 linhas
+            for col in cols:
+                valor = str(row[col]) if pd.notna(row[col]) else ""
+                pdf.cell(col_width, 5, valor[:25], border=1, align='L')
+            pdf.ln()
+        
+        if len(df) > 100:
+            pdf.ln(5)
+            pdf.set_font('Helvetica', 'I', 8)
+            pdf.cell(0, 5, f"... e mais {len(df) - 100} registros (exportar XLSX para ver todos)", ln=True, align='C')
+        
+        output = BytesIO()
+        pdf.output(output)
+        return (output.getvalue(), "application/pdf", "pdf")
+        
+    except ImportError:
+        # Fallback: gera PDF simples com reportlab
+        try:
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib import colors
+            
+            output = BytesIO()
+            doc = SimpleDocTemplate(output, pagesize=landscape(A4))
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            elements.append(Paragraph(titulo, styles['Heading1']))
+            elements.append(Paragraph(f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
+            elements.append(Spacer(1, 12))
+            
+            # Preparar dados da tabela
+            data = [df.columns.tolist()]
+            for _, row in df.head(50).iterrows():
+                data.append([str(v)[:30] if pd.notna(v) else "" for v in row])
+            
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('FONTSIZE', (0, 1), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ]))
+            elements.append(table)
+            
+            doc.build(elements)
+            return (output.getvalue(), "application/pdf", "pdf")
+            
+        except ImportError:
+            # Último fallback: retorna CSV
+            csv_bytes = df.to_csv(index=False).encode("utf-8")
+            return (csv_bytes, "text/csv", "csv")
 
 
 def canonical_situacao(situacao: str) -> str:
@@ -1220,14 +1309,25 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     else:
         st.dataframe(df_tram10, use_container_width=True, hide_index=True)
 
-        bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
-        st.download_button(
-            f"⬇️ Baixar linha do tempo ({ext.upper()})",
-            data=bytes_out,
-            file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
-            mime=mime,
-            key=f"{key_prefix}_download_timeline_{selected_id}"
-        )
+        col_xlsx, col_pdf = st.columns(2)
+        with col_xlsx:
+            bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
+            st.download_button(
+                f"⬇️ Baixar XLSX",
+                data=bytes_out,
+                file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
+                mime=mime,
+                key=f"{key_prefix}_download_timeline_xlsx_{selected_id}"
+            )
+        with col_pdf:
+            pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tram10, f"Linha do Tempo - ID {selected_id}")
+            st.download_button(
+                f"⬇️ Baixar PDF",
+                data=pdf_bytes,
+                file_name=f"linha_do_tempo_10_{selected_id}.{pdf_ext}",
+                mime=pdf_mime,
+                key=f"{key_prefix}_download_timeline_pdf_{selected_id}"
+            )
 
 
 def montar_estrategia_tabela(situacao: str, relator_alerta: str = "") -> pd.DataFrame:
@@ -1246,128 +1346,67 @@ def montar_estrategia_tabela(situacao: str, relator_alerta: str = "") -> pd.Data
 # ============================================================
 
 def render_grafico_barras_situacao(df: pd.DataFrame):
-    """Renderiza gráfico de barras horizontal por situação com Plotly."""
+    """Renderiza gráfico de barras horizontal por situação - MATPLOTLIB ESTÁTICO."""
     if df.empty or "Situação atual" not in df.columns:
         st.info("Sem dados para gráfico de situação.")
         return
     
-    try:
-        import plotly.express as px
-        
-        df_counts = (
-            df.assign(_s=df["Situação atual"].fillna("-").replace("", "-"))
-            .groupby("_s", as_index=False)
-            .size()
-            .rename(columns={"_s": "Situação", "size": "Quantidade"})
-            .sort_values("Quantidade", ascending=True)  # Ascendente para horizontal (maiores no topo)
-        )
-        
-        if df_counts.empty:
-            st.info("Sem dados para gráfico.")
-            return
-        
-        st.markdown("##### 📊 Distribuição por Situação Atual")
-        
-        fig = px.bar(
-            df_counts, 
-            x="Quantidade", 
-            y="Situação", 
-            orientation='h',
-            text="Quantidade",
-            color_discrete_sequence=["#1f77b4"]
-        )
-        fig.update_traces(textposition='outside', textfont_size=10)
-        fig.update_layout(
-            height=max(300, len(df_counts) * 25),
-            margin=dict(l=10, r=10, t=10, b=10),
-            yaxis=dict(tickfont=dict(size=10)),
-            showlegend=False
-        )
-        config = {
-            "scrollZoom": False,
-            "displayModeBar": False
-        }
-        st.plotly_chart(fig, use_container_width=True, config=config)
-        
-    except ImportError:
-        # Fallback para Streamlit nativo
-        df_counts = (
-            df.assign(_s=df["Situação atual"].fillna("-").replace("", "-"))
-            .groupby("_s", as_index=False)
-            .size()
-            .rename(columns={"_s": "Situação", "size": "Quantidade"})
-            .sort_values("Quantidade", ascending=True)
-        )
-        st.markdown("##### 📊 Distribuição por Situação Atual")
-        st.bar_chart(df_counts.set_index("Situação")["Quantidade"], horizontal=True, use_container_width=True)
+    df_counts = (
+        df.assign(_s=df["Situação atual"].fillna("-").replace("", "-"))
+        .groupby("_s", as_index=False)
+        .size()
+        .rename(columns={"_s": "Situação", "size": "Quantidade"})
+        .sort_values("Quantidade", ascending=True)
+    )
+    
+    if df_counts.empty:
+        st.info("Sem dados para gráfico.")
+        return
+    
+    st.markdown("##### 📊 Distribuição por Situação Atual")
+    
+    fig, ax = plt.subplots(figsize=(10, max(4, len(df_counts) * 0.4)))
+    bars = ax.barh(df_counts["Situação"], df_counts["Quantidade"], color='#1f77b4')
+    ax.bar_label(bars, padding=3, fontsize=9)
+    ax.set_xlabel("Quantidade")
+    ax.set_ylabel("")
+    ax.tick_params(axis='y', labelsize=9)
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
 
 
 def render_grafico_barras_tema(df: pd.DataFrame):
-    """Renderiza gráfico de barras por tema com Plotly - ordem decrescente."""
+    """Renderiza gráfico de barras por tema - MATPLOTLIB ESTÁTICO."""
     if df.empty or "Tema" not in df.columns:
         st.info("Sem dados para gráfico de tema.")
         return
     
-    try:
-        import plotly.express as px
-        
-        df_counts = (
-            df.groupby("Tema", as_index=False)
-            .size()
-            .rename(columns={"size": "Quantidade"})
-            .sort_values("Quantidade", ascending=False)
-        )
-        
-        if df_counts.empty:
-            return
-        
-        # Lista ordenada por quantidade decrescente
-        ordem_temas = df_counts["Tema"].tolist()
-        
-        st.markdown("##### 📊 Distribuição por Tema")
-        
-        fig = px.bar(
-            df_counts, 
-            x="Tema", 
-            y="Quantidade",
-            text="Quantidade",
-            color_discrete_sequence=["#2ca02c"]
-        )
-        fig.update_traces(textposition='outside', textfont_size=10)
-        fig.update_layout(
-            height=400,
-            margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(
-                tickangle=45, 
-                tickfont=dict(size=9),
-                categoryorder='array',
-                categoryarray=ordem_temas
-            ),
-            showlegend=False
-        )
-        config = {
-            "scrollZoom": False,
-            "displayModeBar": False
-        }
-        st.plotly_chart(fig, use_container_width=True, config=config)
-        
-    except ImportError:
-        df_counts = (
-            df.groupby("Tema", as_index=False)
-            .size()
-            .rename(columns={"size": "Quantidade"})
-            .sort_values("Quantidade", ascending=False)
-        )
-        st.markdown("##### 📊 Distribuição por Tema")
-        st.bar_chart(df_counts.set_index("Tema")["Quantidade"], use_container_width=True)
+    df_counts = (
+        df.groupby("Tema", as_index=False)
+        .size()
+        .rename(columns={"size": "Quantidade"})
+        .sort_values("Quantidade", ascending=False)
+    )
+    
+    if df_counts.empty:
+        return
+    
+    st.markdown("##### 📊 Distribuição por Tema")
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bars = ax.bar(range(len(df_counts)), df_counts["Quantidade"], color='#2ca02c')
+    ax.bar_label(bars, padding=3, fontsize=9)
+    ax.set_xticks(range(len(df_counts)))
+    ax.set_xticklabels(df_counts["Tema"], rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel("Quantidade")
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
 
 
 def render_grafico_mensal(df: pd.DataFrame):
-    """Renderiza gráfico de tendência mensal em ordem cronológica garantida.
-
-    Estratégia: usa eixo X numérico (YYYYMM) e define ticktext (YYYY/MM).
-    Isso evita qualquer ordenação alfabética do Plotly.
-    """
+    """Renderiza gráfico de tendência mensal - MATPLOTLIB ESTÁTICO."""
     if df.empty or "AnoStatus" not in df.columns or "MesStatus" not in df.columns:
         st.info("Sem dados para gráfico mensal.")
         return
@@ -1376,7 +1415,6 @@ def render_grafico_mensal(df: pd.DataFrame):
     if df_valid.empty:
         return
 
-    # Chave numérica (YYYYMM) para garantir ordem cronológica
     df_valid["AnoMes_sort"] = df_valid.apply(
         lambda r: int(r["AnoStatus"]) * 100 + int(r["MesStatus"]), axis=1
     )
@@ -1392,65 +1430,30 @@ def render_grafico_mensal(df: pd.DataFrame):
     if df_mensal.empty or len(df_mensal) < 2:
         return
 
-    # Rótulo no formato YYYY/MM (ex.: 2023/01)
     df_mensal["Label"] = df_mensal["AnoMes_sort"].apply(
-        lambda ym: f"{int(ym)//100:04d}/{int(ym)%100:02d}"
+        lambda ym: f"{int(ym)%100:02d}/{int(ym)//100}"
     )
 
-    x_vals = df_mensal["AnoMes_sort"].tolist()
-    y_vals = df_mensal["Movimentações"].tolist()
-    tick_text = df_mensal["Label"].tolist()
-
-    try:
-        import plotly.graph_objects as go
-
-        st.markdown("##### 📈 Tendência de Movimentações por Mês")
-
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=x_vals,
-                y=y_vals,
-                mode="lines+markers+text",
-                text=y_vals,
-                textposition="top center",
-                textfont=dict(size=10),
-                line=dict(color="#ff7f0e", width=2),
-                marker=dict(size=8),
-            )
-        )
-
-        fig.update_layout(
-            height=380,
-            margin=dict(l=40, r=20, t=30, b=80),
-            xaxis_title="Ano/Mês",
-            yaxis_title="Movimentações",
-            xaxis=dict(
-                tickmode="array",
-                tickvals=x_vals,
-                ticktext=tick_text,
-                tickangle=45,
-                tickfont=dict(size=10),
-            ),
-            showlegend=False,
-        )
-        config = {
-            "scrollZoom": False,
-            "displayModeBar": False
-        }
-        st.plotly_chart(fig, use_container_width=True, config=config)
-
-    except ImportError:
-        # Fallback (Streamlit) — mantém rótulo ordenado
-        st.markdown("##### 📈 Tendência de Movimentações por Mês")
-        st.line_chart(
-            df_mensal.set_index("Label")["Movimentações"],
-            use_container_width=True
-        )
+    st.markdown("##### 📈 Tendência de Movimentações por Mês")
+    
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.plot(range(len(df_mensal)), df_mensal["Movimentações"], marker='o', color='#ff7f0e', linewidth=2, markersize=6)
+    
+    for i, (x, y) in enumerate(zip(range(len(df_mensal)), df_mensal["Movimentações"])):
+        ax.annotate(str(y), (x, y), textcoords="offset points", xytext=(0, 8), ha='center', fontsize=8)
+    
+    ax.set_xticks(range(len(df_mensal)))
+    ax.set_xticklabels(df_mensal["Label"], rotation=45, ha='right', fontsize=8)
+    ax.set_xlabel("Mês/Ano")
+    ax.set_ylabel("Movimentações")
+    ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
 
 
 def render_grafico_tipo(df: pd.DataFrame):
-    """Renderiza gráfico por tipo de proposição com Plotly - ordem decrescente."""
+    """Renderiza gráfico por tipo de proposição - MATPLOTLIB ESTÁTICO."""
     if df.empty or "siglaTipo" not in df.columns:
         return
     
@@ -1464,45 +1467,21 @@ def render_grafico_tipo(df: pd.DataFrame):
     if df_counts.empty:
         return
     
-    # Lista ordenada por quantidade decrescente
-    ordem_tipos = df_counts["Tipo"].tolist()
+    st.markdown("##### 📊 Distribuição por Tipo de Proposição")
     
-    try:
-        import plotly.express as px
-        
-        st.markdown("##### 📊 Distribuição por Tipo de Proposição")
-        
-        fig = px.bar(
-            df_counts, 
-            x="Tipo", 
-            y="Quantidade",
-            text="Quantidade",
-            color_discrete_sequence=["#1f77b4"]
-        )
-        fig.update_traces(textposition='outside', textfont_size=11)
-        fig.update_layout(
-            height=350,
-            margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(
-                tickfont=dict(size=11),
-                categoryorder='array',
-                categoryarray=ordem_tipos
-            ),
-            showlegend=False
-        )
-        config = {
-            "scrollZoom": False,
-            "displayModeBar": False
-        }
-        st.plotly_chart(fig, use_container_width=True, config=config)
-        
-    except ImportError:
-        st.markdown("##### 📊 Distribuição por Tipo de Proposição")
-        st.bar_chart(df_counts.set_index("Tipo")["Quantidade"], use_container_width=True)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    bars = ax.bar(range(len(df_counts)), df_counts["Quantidade"], color='#1f77b4')
+    ax.bar_label(bars, padding=3, fontsize=10)
+    ax.set_xticks(range(len(df_counts)))
+    ax.set_xticklabels(df_counts["Tipo"], fontsize=10)
+    ax.set_ylabel("Quantidade")
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
 
 
 def render_grafico_orgao(df: pd.DataFrame):
-    """Renderiza gráfico por órgão atual com Plotly - ordem decrescente."""
+    """Renderiza gráfico por órgão atual - MATPLOTLIB ESTÁTICO."""
     if df.empty or "Órgão (sigla)" not in df.columns:
         return
     
@@ -1521,42 +1500,17 @@ def render_grafico_orgao(df: pd.DataFrame):
     if df_counts.empty:
         return
     
-    # Lista ordenada por quantidade decrescente
-    ordem_orgaos = df_counts["Órgão"].tolist()
+    st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
     
-    try:
-        import plotly.express as px
-        
-        st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
-        
-        fig = px.bar(
-            df_counts, 
-            x="Órgão", 
-            y="Quantidade",
-            text="Quantidade",
-            color_discrete_sequence=["#1f77b4"]
-        )
-        fig.update_traces(textposition='outside', textfont_size=10)
-        fig.update_layout(
-            height=350,
-            margin=dict(l=10, r=10, t=10, b=10),
-            xaxis=dict(
-                tickangle=45, 
-                tickfont=dict(size=9),
-                categoryorder='array',
-                categoryarray=ordem_orgaos
-            ),
-            showlegend=False
-        )
-        config = {
-            "scrollZoom": False,
-            "displayModeBar": False
-        }
-        st.plotly_chart(fig, use_container_width=True, config=config)
-        
-    except ImportError:
-        st.markdown("##### 📊 Distribuição por Órgão (Top 15)")
-        st.bar_chart(df_counts.set_index("Órgão")["Quantidade"], use_container_width=True)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    bars = ax.bar(range(len(df_counts)), df_counts["Quantidade"], color='#d62728')
+    ax.bar_label(bars, padding=3, fontsize=8)
+    ax.set_xticks(range(len(df_counts)))
+    ax.set_xticklabels(df_counts["Órgão"], rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel("Quantidade")
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
 
 
 # ============================================================
@@ -1585,7 +1539,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v16 – Aba de apresentação, Gráficos aprimorados")
+    st.caption("v17 – Gráficos Matplotlib estáticos, Exportação PDF")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -1865,13 +1819,23 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
 
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
-                data_bytes, mime, ext = to_xlsx_bytes(view, "Autoria_Relatoria")
-                st.download_button(
-                    f"⬇️ Baixar ({ext.upper()})",
-                    data=data_bytes,
-                    file_name=f"autoria_relatoria_pauta_{dt_inicio}_{dt_fim}.{ext}",
-                    mime=mime,
-                )
+                col_x1, col_p1 = st.columns(2)
+                with col_x1:
+                    data_bytes, mime, ext = to_xlsx_bytes(view, "Autoria_Relatoria")
+                    st.download_button(
+                        f"⬇️ XLSX",
+                        data=data_bytes,
+                        file_name=f"autoria_relatoria_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                        mime=mime,
+                    )
+                with col_p1:
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(view, "Autoria e Relatoria na Pauta")
+                    st.download_button(
+                        f"⬇️ PDF",
+                        data=pdf_bytes,
+                        file_name=f"autoria_relatoria_pauta_{dt_inicio}_{dt_fim}.{pdf_ext}",
+                        mime=pdf_mime,
+                    )
                 
                 st.markdown("---")
                 st.markdown("### 📋 Ver detalhes de proposição de autoria na pauta")
@@ -1932,13 +1896,25 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
 
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
-                data_bytes, mime, ext = to_xlsx_bytes(view, "PalavrasChave_Pauta")
-                st.download_button(
-                    f"⬇️ Baixar ({ext.upper()})",
-                    data=data_bytes,
-                    file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{ext}",
-                    mime=mime,
-                )
+                col_x2, col_p2 = st.columns(2)
+                with col_x2:
+                    data_bytes, mime, ext = to_xlsx_bytes(view, "PalavrasChave_Pauta")
+                    st.download_button(
+                        f"⬇️ XLSX",
+                        data=data_bytes,
+                        file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                        mime=mime,
+                        key="download_kw_xlsx"
+                    )
+                with col_p2:
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(view, "Palavras-chave na Pauta")
+                    st.download_button(
+                        f"⬇️ PDF",
+                        data=pdf_bytes,
+                        file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{pdf_ext}",
+                        mime=pdf_mime,
+                        key="download_kw_pdf"
+                    )
 
     # ============================================================
     # ABA 4 - COMISSÕES ESTRATÉGICAS
@@ -1960,13 +1936,25 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
 
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
-                data_bytes, mime, ext = to_xlsx_bytes(view, "ComissoesEstrategicas_Pauta")
-                st.download_button(
-                    f"⬇️ Baixar ({ext.upper()})",
-                    data=data_bytes,
-                    file_name=f"comissoes_estrategicas_pauta_{dt_inicio}_{dt_fim}.{ext}",
-                    mime=mime,
-                )
+                col_x3, col_p3 = st.columns(2)
+                with col_x3:
+                    data_bytes, mime, ext = to_xlsx_bytes(view, "ComissoesEstrategicas_Pauta")
+                    st.download_button(
+                        f"⬇️ XLSX",
+                        data=data_bytes,
+                        file_name=f"comissoes_estrategicas_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                        mime=mime,
+                        key="download_com_xlsx"
+                    )
+                with col_p3:
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(view, "Comissões Estratégicas")
+                    st.download_button(
+                        f"⬇️ PDF",
+                        data=pdf_bytes,
+                        file_name=f"comissoes_estrategicas_pauta_{dt_inicio}_{dt_fim}.{pdf_ext}",
+                        mime=pdf_mime,
+                        key="download_com_pdf"
+                    )
 
     # ============================================================
     # ABA 5 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
@@ -2086,14 +2074,25 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
             
             # Exportação
-            bytes_rast, mime_rast, ext_rast = to_xlsx_bytes(df_tbl[show_cols_r], "Busca_Especifica")
-            st.download_button(
-                f"⬇️ Exportar resultados ({ext_rast.upper()})",
-                data=bytes_rast,
-                file_name=f"busca_especifica_proposicoes.{ext_rast}",
-                mime=mime_rast,
-                key="export_busca_tab5"
-            )
+            col_x4, col_p4 = st.columns(2)
+            with col_x4:
+                bytes_rast, mime_rast, ext_rast = to_xlsx_bytes(df_tbl[show_cols_r], "Busca_Especifica")
+                st.download_button(
+                    f"⬇️ XLSX",
+                    data=bytes_rast,
+                    file_name=f"busca_especifica_proposicoes.{ext_rast}",
+                    mime=mime_rast,
+                    key="export_busca_xlsx_tab5"
+                )
+            with col_p4:
+                pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tbl[show_cols_r], "Busca Específica")
+                st.download_button(
+                    f"⬇️ PDF",
+                    data=pdf_bytes,
+                    file_name=f"busca_especifica_proposicoes.{pdf_ext}",
+                    mime=pdf_mime,
+                    key="export_busca_pdf_tab5"
+                )
 
             # Detalhes da proposição selecionada
             selected_id = None
@@ -2360,14 +2359,25 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         },
                     )
 
-                bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status[show_cols], "Materias_Situacao")
-                st.download_button(
-                    f"⬇️ Baixar lista ({ext.upper()})",
-                    data=bytes_out,
-                    file_name=f"materias_por_situacao_atual.{ext}",
-                    mime=mime,
-                    key="download_materias_tab5"
-                )
+                col_x5, col_p5 = st.columns(2)
+                with col_x5:
+                    bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status[show_cols], "Materias_Situacao")
+                    st.download_button(
+                        f"⬇️ XLSX",
+                        data=bytes_out,
+                        file_name=f"materias_por_situacao_atual.{ext}",
+                        mime=mime,
+                        key="download_materias_xlsx_tab6"
+                    )
+                with col_p5:
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tbl_status[show_cols], "Matérias por Situação")
+                    st.download_button(
+                        f"⬇️ PDF",
+                        data=pdf_bytes,
+                        file_name=f"materias_por_situacao_atual.{pdf_ext}",
+                        mime=pdf_mime,
+                        key="download_materias_pdf_tab6"
+                    )
 
     st.markdown("---")
 
