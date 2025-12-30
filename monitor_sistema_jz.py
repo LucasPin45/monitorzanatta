@@ -1,15 +1,17 @@
-# monitor_sistema_jz.py - v21
+# monitor_sistema_jz.py - v22
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 21: PDFs otimizados para decisão política em gabinete
+# VERSÃO 22: RIC com prazo de resposta, links de relator, ministérios
 # - Links clicáveis no PDF
 # - Data da última tramitação (não data de cadastro)
 # - Ordenação por data mais recente primeiro
 # - Campo "Parado há (dias)" calculado
 # - Relator com alerta de adversário (PT, PSOL, PCdoB, PSB, PV, Rede)
+# - Link clicável para página do relator
 # - Fallback para situação vazia
 # - Agrupamento por situação com cabeçalho
 # - Cabeçalho informativo com fonte e critério
+# - RIC: extração de prazo de resposta, ministério, status respondido
 # ============================================================
 
 import datetime
@@ -47,7 +49,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/21.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/22.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -77,6 +79,36 @@ MESES_PT = {
 }
 
 PARTIDOS_RELATOR_ADVERSARIO = {"PT", "PV", "PSB", "PCDOB", "PSOL", "REDE"}
+
+# Mapeamento de palavras-chave para Ministérios (para RICs)
+MINISTERIOS_KEYWORDS = {
+    "Saúde": ["saude", "saúde", "anvisa", "sus", "vacina", "medicamento", "hospital", "nisia", "nísia"],
+    "Educação": ["educacao", "educação", "mec", "escola", "universidade", "camilo santana", "ensino"],
+    "Justiça e Segurança Pública": ["justica", "justiça", "policia", "polícia", "lewandowski", "seguranca publica", "segurança pública", "pf", "policia federal", "polícia federal"],
+    "Fazenda": ["fazenda", "haddad", "receita", "imposto", "tributo", "economia", "banco central", "caixa economica", "caixa econômica"],
+    "Defesa": ["defesa", "militar", "forcas armadas", "forças armadas", "exercito", "exército", "marinha", "aeronautica", "aeronáutica", "mucio", "múcio"],
+    "Relações Exteriores": ["itamaraty", "relacoes exteriores", "relações exteriores", "embaixada", "exterior", "mauro vieira"],
+    "Meio Ambiente": ["ambiente", "ambiental", "ibama", "marina silva", "clima", "floresta"],
+    "Agricultura": ["agricultura", "agro", "rural", "pecuaria", "pecuária", "favaro", "mapa"],
+    "Desenvolvimento Social": ["bolsa familia", "bolsa família", "assistencia social", "assistência social", "wellington dias", "combate a fome", "combate à fome"],
+    "Trabalho e Emprego": ["trabalho", "emprego", "marinho", "clt", "trabalhista"],
+    "Comunicações": ["comunicacoes", "comunicações", "correios", "ect", "anatel", "juscelino"],
+    "Casa Civil": ["casa civil", "rui costa", "presidencia", "presidência", "janja", "rosangela"],
+    "Direitos Humanos": ["direitos humanos", "silvio almeida", "sílvio almeida", "macae", "macaé", "conanda", "lgbtq"],
+    "Povos Indígenas": ["indigena", "indígena", "funai", "demarcacao", "demarcação", "sonia guajajara", "sônia guajajara"],
+    "Mulheres": ["mulheres", "aparecida goncalves", "aparecida gonçalves", "ministerio das mulheres", "ministério das mulheres"],
+    "Transportes": ["transportes", "renan filho", "rodovia", "ferrovia", "antt", "infraestrutura"],
+    "Minas e Energia": ["minas e energia", "energia", "petroleo", "petróleo", "petrobras", "alexandre silveira"],
+    "Ciência e Tecnologia": ["ciencia", "ciência", "tecnologia", "mcti", "luciana santos"],
+    "Pesca": ["pesca", "aquicultura", "pescador", "tainha"],
+}
+
+# Palavras-chave para detectar resposta em RICs
+RIC_RESPOSTA_KEYWORDS = [
+    "resposta", "encaminha resposta", "recebimento de resposta", 
+    "resposta do poder executivo", "resposta ao requerimento",
+    "resposta do ministério", "resposta do ministerio", "atendimento ao requerimento"
+]
 
 # Temas para categorização (palavras-chave por tema)
 TEMAS_CATEGORIAS = {
@@ -214,6 +246,246 @@ def camara_link_tramitacao(id_proposicao: str) -> str:
     return f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}"
 
 
+def camara_link_deputado(id_deputado: str) -> str:
+    """Gera link para a página do deputado na Câmara."""
+    if not id_deputado or str(id_deputado).strip() in ('', 'nan', 'None'):
+        return ""
+    return f"https://www.camara.leg.br/deputados/{str(id_deputado).strip()}"
+
+
+# ============================================================
+# FUNÇÕES AUXILIARES PARA RIC (Prazo de Resposta)
+# ============================================================
+
+def proximo_dia_util(dt: datetime.date) -> datetime.date:
+    """
+    Retorna o próximo dia útil após a data informada.
+    Pula sábados (5) e domingos (6).
+    """
+    if dt is None:
+        return None
+    proximo = dt + datetime.timedelta(days=1)
+    while proximo.weekday() in (5, 6):  # Sábado=5, Domingo=6
+        proximo += datetime.timedelta(days=1)
+    return proximo
+
+
+def contar_dias_uteis(data_inicio: datetime.date, data_fim: datetime.date) -> int:
+    """Conta dias úteis entre duas datas (excluindo fins de semana)."""
+    if data_inicio is None or data_fim is None:
+        return 0
+    if data_fim < data_inicio:
+        return 0
+    dias = 0
+    atual = data_inicio
+    while atual <= data_fim:
+        if atual.weekday() < 5:  # Segunda a sexta
+            dias += 1
+        atual += datetime.timedelta(days=1)
+    return dias
+
+
+def parse_prazo_resposta_ric(tramitacoes: list) -> dict:
+    """
+    Extrai informações de prazo de resposta de RIC a partir das tramitações.
+    
+    Detecta tramitação de remessa quando:
+    - siglaOrgao == "1SECM" (ou contém "1SEC")
+    - Texto contém "Remessa" e/ou "Ofício" e/ou "Prazo para Resposta"
+    
+    Retorna dict com:
+    - data_remessa: data da tramitação de remessa
+    - inicio_contagem: próximo dia útil após remessa
+    - prazo_inicio: data inicial do prazo (extraída do texto)
+    - prazo_fim: data final do prazo (extraída do texto)
+    - dias_restantes: dias até o prazo final (pode ser negativo se vencido)
+    - status_resposta: "Aguardando resposta" ou "Respondido"
+    - ministerio_destinatario: ministério extraído do texto
+    """
+    resultado = {
+        "data_remessa": None,
+        "inicio_contagem": None,
+        "prazo_inicio": None,
+        "prazo_fim": None,
+        "dias_restantes": None,
+        "status_resposta": "Aguardando resposta",
+        "ministerio_destinatario": "",
+        "tramitacao_remessa_texto": "",
+    }
+    
+    if not tramitacoes:
+        return resultado
+    
+    # Ordenar tramitações por data (mais antiga primeiro para encontrar a remessa)
+    tramitacoes_ordenadas = sorted(
+        tramitacoes,
+        key=lambda x: x.get("dataHora") or x.get("data") or "",
+        reverse=False
+    )
+    
+    # Regex para extrair prazo
+    # Formato: "Prazo para Resposta Externas (de DD/MM/AAAA a DD/MM/AAAA)"
+    regex_prazo = r"Prazo\s+para\s+Resposta\s+(?:Externas?)?\s*\(?de\s*(\d{2}/\d{2}/\d{4})\s*a\s*(\d{2}/\d{2}/\d{4})\)?"
+    
+    # Procurar tramitação de remessa (1SECM ou 1SEC)
+    tramitacao_remessa = None
+    for t in tramitacoes_ordenadas:
+        sigla_orgao = (t.get("siglaOrgao") or "").upper()
+        despacho = t.get("despacho") or ""
+        desc = t.get("descricaoTramitacao") or ""
+        texto = f"{despacho} {desc}".lower()
+        
+        # Detectar tramitação de remessa
+        is_1secm = "1SEC" in sigla_orgao or sigla_orgao == "1SECM"
+        has_remessa_keywords = ("remessa" in texto or "ofício" in texto or "oficio" in texto or 
+                               "prazo para resposta" in texto or "1ªsec/ri/e" in texto.lower())
+        
+        if is_1secm and has_remessa_keywords:
+            tramitacao_remessa = t
+            resultado["tramitacao_remessa_texto"] = f"{despacho} {desc}".strip()
+            
+            # Extrair data da tramitação
+            data_str = t.get("dataHora") or t.get("data")
+            if data_str:
+                try:
+                    dt = pd.to_datetime(data_str, errors="coerce")
+                    if pd.notna(dt):
+                        resultado["data_remessa"] = dt.date()
+                        resultado["inicio_contagem"] = proximo_dia_util(dt.date())
+                except:
+                    pass
+            
+            # Extrair prazo do texto
+            texto_completo = f"{despacho} {desc}"
+            match_prazo = re.search(regex_prazo, texto_completo, re.IGNORECASE)
+            if match_prazo:
+                try:
+                    prazo_inicio_str = match_prazo.group(1)
+                    prazo_fim_str = match_prazo.group(2)
+                    resultado["prazo_inicio"] = datetime.datetime.strptime(prazo_inicio_str, "%d/%m/%Y").date()
+                    resultado["prazo_fim"] = datetime.datetime.strptime(prazo_fim_str, "%d/%m/%Y").date()
+                except:
+                    pass
+            
+            break
+    
+    # Calcular dias restantes se tiver prazo_fim
+    if resultado["prazo_fim"]:
+        hoje = datetime.date.today()
+        delta = (resultado["prazo_fim"] - hoje).days
+        resultado["dias_restantes"] = delta
+    
+    # Verificar se foi respondido (procurar tramitação posterior com keywords de resposta)
+    if tramitacao_remessa:
+        data_remessa = resultado["data_remessa"]
+        for t in tramitacoes_ordenadas:
+            data_str = t.get("dataHora") or t.get("data")
+            if data_str and data_remessa:
+                try:
+                    dt_tram = pd.to_datetime(data_str, errors="coerce")
+                    if pd.notna(dt_tram) and dt_tram.date() > data_remessa:
+                        despacho = (t.get("despacho") or "").lower()
+                        desc = (t.get("descricaoTramitacao") or "").lower()
+                        texto = f"{despacho} {desc}"
+                        
+                        for keyword in RIC_RESPOSTA_KEYWORDS:
+                            if keyword in texto:
+                                resultado["status_resposta"] = "Respondido"
+                                break
+                        
+                        if resultado["status_resposta"] == "Respondido":
+                            break
+                except:
+                    pass
+    
+    return resultado
+
+
+def extrair_ministerio_ric(ementa: str, tramitacoes: list = None) -> str:
+    """
+    Extrai o ministério destinatário de um RIC.
+    Primeiro tenta extrair da ementa, depois das tramitações.
+    """
+    if not ementa:
+        ementa = ""
+    
+    ementa_lower = ementa.lower()
+    
+    # Padrões para extrair ministério da ementa
+    # "Solicita informações ao Ministro/Ministra/Ministério de/da/do X"
+    patterns_ministerio = [
+        r"ministr[oa]\s+(?:de\s+estado\s+)?(?:d[oa]s?\s+)?([^,\.;]+?)(?:,|\.|;|sobre|acerca|a\s+respeito)",
+        r"ministério\s+(?:d[oa]s?\s+)?([^,\.;]+?)(?:,|\.|;|sobre|acerca|a\s+respeito)",
+        r"sr[ªa]?\.\s+ministr[oa]\s+([^,\.;]+?)(?:,|\.|;|sobre)",
+        r"senhor[a]?\s+ministr[oa]\s+(?:d[oa]s?\s+)?([^,\.;]+?)(?:,|\.|;|sobre)",
+    ]
+    
+    for pattern in patterns_ministerio:
+        match = re.search(pattern, ementa_lower)
+        if match:
+            ministerio = match.group(1).strip()
+            # Limpar e capitalizar
+            ministerio = re.sub(r'\s+', ' ', ministerio)
+            if len(ministerio) > 3 and len(ministerio) < 80:
+                return ministerio.title()
+    
+    # Tentar identificar por palavras-chave conhecidas
+    for ministerio, keywords in MINISTERIOS_KEYWORDS.items():
+        for kw in keywords:
+            if kw in ementa_lower:
+                return ministerio
+    
+    # Se não encontrou na ementa, tentar nas tramitações
+    if tramitacoes:
+        for t in tramitacoes:
+            sigla_orgao = (t.get("siglaOrgao") or "").upper()
+            if "1SEC" in sigla_orgao:
+                despacho = t.get("despacho") or ""
+                desc = t.get("descricaoTramitacao") or ""
+                texto = f"{despacho} {desc}".lower()
+                
+                for ministerio, keywords in MINISTERIOS_KEYWORDS.items():
+                    for kw in keywords:
+                        if kw in texto:
+                            return ministerio
+    
+    return ""
+
+
+def extrair_assunto_ric(ementa: str) -> str:
+    """
+    Extrai o assunto/tema de um RIC baseado em palavras-chave.
+    """
+    if not ementa:
+        return ""
+    
+    ementa_lower = ementa.lower()
+    
+    # Mapeamento de palavras-chave para assuntos
+    assuntos_keywords = {
+        "Correios/ECT": ["correios", "ect", "empresa de correios"],
+        "Agricultura/Agronegócio": ["arroz", "leite", "agro", "agricultura", "pecuária", "soja", "milho", "rural"],
+        "Saúde/Vacinas": ["vacina", "vacinação", "imunizante", "sus", "saúde", "medicamento", "anvisa"],
+        "Segurança Pública": ["polícia", "policia", "arma", "segurança", "crime", "prisão", "presídio"],
+        "Educação": ["escola", "ensino", "educação", "universidade", "mec", "enem"],
+        "Economia/Finanças": ["imposto", "pix", "drex", "banco", "receita", "tributo", "economia"],
+        "Direitos Humanos": ["direitos humanos", "conanda", "criança", "adolescente", "indígena"],
+        "Meio Ambiente": ["ambiente", "clima", "floresta", "ibama", "desmatamento"],
+        "Comunicações/Tecnologia": ["internet", "tecnologia", "telecom", "comunicação", "digital"],
+        "Relações Exteriores": ["exterior", "internacional", "embaixada", "diplomacia"],
+        "Defesa/Militar": ["defesa", "militar", "exército", "forças armadas"],
+        "Transportes": ["transporte", "rodovia", "ferrovia", "estrada", "aeroporto"],
+        "Assistência Social": ["bolsa família", "assistência", "fome", "pobreza"],
+    }
+    
+    for assunto, keywords in assuntos_keywords.items():
+        for kw in keywords:
+            if kw in ementa_lower:
+                return assunto
+    
+    return ""
+
+
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, str, str]:
     """Sempre tenta exportar como XLSX, fallback para CSV apenas se necessário."""
     for engine in ["xlsxwriter", "openpyxl"]:
@@ -281,11 +553,17 @@ def _padronizar_colunas_pdf(df: pd.DataFrame) -> pd.DataFrame:
         'Parado há (dias)': ['Parado (dias)', 'Parado há (dias)', 'dias_parado', 'parado_dias'],
         'Relator(a)': ['Relator(a)', 'Relator', 'relator'],
         'LinkTramitacao': ['LinkTramitacao', 'Link', 'link', 'url_tramitacao'],
+        'LinkRelator': ['LinkRelator', 'link_relator'],
         'Órgão (sigla)': ['Órgão (sigla)', 'Orgao (sigla)', 'orgao_sigla', 'siglaOrgao'],
         'Proposição': ['Proposição', 'Proposicao', 'proposicao'],
         'Ementa': ['Ementa', 'ementa'],
         'Tema': ['Tema', 'tema'],
         'Andamento': ['Andamento (status)', 'Último andamento', 'Andamento', 'andamento', 'status_descricaoTramitacao'],
+        # Colunas RIC
+        'RIC_Ministerio': ['RIC_Ministerio', 'ric_ministerio', 'Ministerio'],
+        'RIC_StatusResposta': ['RIC_StatusResposta', 'ric_status_resposta', 'StatusResposta'],
+        'RIC_PrazoFim': ['RIC_PrazoFim', 'ric_prazo_fim', 'PrazoFim'],
+        'RIC_DiasRestantes': ['RIC_DiasRestantes', 'ric_dias_restantes', 'DiasRestantes'],
     }
     
     for col_canonica, possiveis in mapeamentos.items():
@@ -498,17 +776,99 @@ def _renderizar_card_proposicao(pdf, row, idx, col_proposicao, col_ementa, col_s
     pdf.cell(20, 5, "Relator(a): ", ln=False)
     pdf.set_font('Helvetica', '', 9)
     
+    # Obter link do relator se existir
+    link_relator = None
+    if 'LinkRelator' in row.index and pd.notna(row.get('LinkRelator')):
+        link_relator = str(row.get('LinkRelator')).strip()
+        if not link_relator.startswith('http'):
+            link_relator = None
+    
     if is_adversario:
         pdf.set_text_color(180, 50, 50)
-        pdf.cell(0, 5, sanitize_text_pdf(f"{relator_formatado} [!] RELATOR ADVERSARIO")[:70], ln=True)
+        if link_relator:
+            pdf.set_font('Helvetica', 'U', 9)
+            pdf.write(5, sanitize_text_pdf(relator_formatado)[:50], link=link_relator)
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.cell(0, 5, " [!] ADVERSARIO", ln=True)
+        else:
+            pdf.cell(0, 5, sanitize_text_pdf(f"{relator_formatado} [!] RELATOR ADVERSARIO")[:70], ln=True)
     elif relator_formatado == "Sem relator designado":
         pdf.set_text_color(150, 150, 150)
         pdf.cell(0, 5, "Sem relator designado", ln=True)
     else:
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 5, sanitize_text_pdf(relator_formatado)[:50], ln=True)
+        if link_relator:
+            pdf.set_font('Helvetica', 'U', 9)
+            pdf.write(5, sanitize_text_pdf(relator_formatado)[:50], link=link_relator)
+            pdf.ln(5)
+        else:
+            pdf.cell(0, 5, sanitize_text_pdf(relator_formatado)[:50], ln=True)
     
     pdf.set_x(20)
+    
+    # INFORMAÇÕES DE RIC (se for RIC)
+    sigla_tipo = row.get('siglaTipo', '') or row.get('sigla_tipo', '')
+    if sigla_tipo == 'RIC':
+        # Ministério
+        ministerio = row.get('RIC_Ministerio', '') or ''
+        if ministerio and str(ministerio).strip() and str(ministerio).strip() != 'nan':
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(20, 4, "Ministerio: ", ln=False)
+            pdf.set_font('Helvetica', '', 8)
+            pdf.set_text_color(0, 51, 102)
+            pdf.cell(0, 4, sanitize_text_pdf(str(ministerio))[:50], ln=True)
+            pdf.set_x(20)
+        
+        # Status de resposta
+        status_resp = row.get('RIC_StatusResposta', '') or ''
+        if status_resp and str(status_resp).strip() and str(status_resp).strip() != 'nan':
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(20, 4, "Status: ", ln=False)
+            pdf.set_font('Helvetica', '', 8)
+            if 'Respondido' in str(status_resp):
+                pdf.set_text_color(50, 150, 50)
+            else:
+                pdf.set_text_color(200, 120, 0)
+            pdf.cell(0, 4, sanitize_text_pdf(str(status_resp))[:30], ln=True)
+            pdf.set_x(20)
+        
+        # Prazo e dias restantes
+        dias_rest = row.get('RIC_DiasRestantes', None)
+        prazo_fim = row.get('RIC_PrazoFim', None)
+        if prazo_fim and pd.notna(prazo_fim):
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(20, 4, "Prazo: ", ln=False)
+            pdf.set_font('Helvetica', '', 8)
+            try:
+                if isinstance(prazo_fim, datetime.date):
+                    prazo_str = prazo_fim.strftime("%d/%m/%Y")
+                else:
+                    prazo_str = str(prazo_fim)[:10]
+            except:
+                prazo_str = str(prazo_fim)[:10]
+            
+            if dias_rest is not None and pd.notna(dias_rest):
+                try:
+                    dias_int = int(dias_rest)
+                    if dias_int < 0:
+                        pdf.set_text_color(180, 50, 50)
+                        pdf.cell(0, 4, f"{prazo_str} (VENCIDO ha {abs(dias_int)} dias)", ln=True)
+                    elif dias_int <= 5:
+                        pdf.set_text_color(200, 120, 0)
+                        pdf.cell(0, 4, f"{prazo_str} ({dias_int} dias restantes - URGENTE)", ln=True)
+                    else:
+                        pdf.set_text_color(0, 0, 0)
+                        pdf.cell(0, 4, f"{prazo_str} ({dias_int} dias restantes)", ln=True)
+                except:
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.cell(0, 4, prazo_str, ln=True)
+            else:
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 4, prazo_str, ln=True)
+            pdf.set_x(20)
     
     # Tema
     if col_tema and pd.notna(row.get(col_tema)):
@@ -2308,24 +2668,50 @@ def build_status_map(ids: list[str]) -> dict:
         situacao = canonical_situacao(dados_completos.get("status_descricaoSituacao", ""))
         andamento = dados_completos.get("status_descricaoTramitacao", "")
         relator_info = dados_completos.get("relator", {})
+        tramitacoes = dados_completos.get("tramitacoes", [])
+        sigla_tipo = dados_completos.get("sigla", "")
+        ementa = dados_completos.get("ementa", "")
         
+        # Formatar relator
         relator_txt = ""
+        relator_id = ""
         if relator_info and relator_info.get("nome"):
             nome = relator_info.get("nome", "")
             partido = relator_info.get("partido", "")
             uf = relator_info.get("uf", "")
+            relator_id = str(relator_info.get("id_deputado", ""))
             if partido or uf:
                 relator_txt = f"{nome} ({partido}/{uf})".replace("//", "/").replace("(/", "(").replace("/)", ")")
             else:
                 relator_txt = nome
         
-        return pid, {
+        # Resultado base
+        resultado = {
             "situacao": situacao,
             "andamento": andamento,
             "status_dataHora": dados_completos.get("status_dataHora", ""),
             "siglaOrgao": dados_completos.get("status_siglaOrgao", ""),
             "relator": relator_txt,
+            "relator_id": relator_id,
+            "sigla_tipo": sigla_tipo,
+            "ementa": ementa,
         }
+        
+        # Se for RIC, extrair informações adicionais de prazo de resposta
+        if sigla_tipo == "RIC":
+            prazo_info = parse_prazo_resposta_ric(tramitacoes)
+            resultado.update({
+                "ric_data_remessa": prazo_info.get("data_remessa"),
+                "ric_inicio_contagem": prazo_info.get("inicio_contagem"),
+                "ric_prazo_inicio": prazo_info.get("prazo_inicio"),
+                "ric_prazo_fim": prazo_info.get("prazo_fim"),
+                "ric_dias_restantes": prazo_info.get("dias_restantes"),
+                "ric_status_resposta": prazo_info.get("status_resposta"),
+                "ric_ministerio": extrair_ministerio_ric(ementa, tramitacoes),
+                "ric_assunto": extrair_assunto_ric(ementa),
+            })
+        
+        return pid, resultado
 
     max_workers = 10 if len(ids) >= 40 else 6
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -2342,6 +2728,15 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["Data do status (raw)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("status_dataHora", ""))
     df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
     df["Relator(a)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator", "—"))
+    df["Relator_ID"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_id", ""))
+    
+    # Link do relator (se tiver id)
+    def _link_relator(row):
+        relator_id = row.get("Relator_ID", "")
+        if relator_id and str(relator_id).strip() not in ('', 'nan', 'None'):
+            return camara_link_deputado(relator_id)
+        return ""
+    df["LinkRelator"] = df.apply(_link_relator, axis=1)
 
     dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
     df["DataStatus_dt"] = dt
@@ -2350,8 +2745,21 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["MesStatus"] = dt.dt.month
     df["Parado (dias)"] = df["DataStatus_dt"].apply(days_since)
     
+    # Link da tramitação
+    df["LinkTramitacao"] = df["id"].astype(str).apply(camara_link_tramitacao)
+    
     # Adiciona tema
     df["Tema"] = df["ementa"].apply(categorizar_tema)
+    
+    # Dados específicos de RIC
+    df["RIC_DataRemessa"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_data_remessa"))
+    df["RIC_InicioContagem"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_inicio_contagem"))
+    df["RIC_PrazoInicio"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_prazo_inicio"))
+    df["RIC_PrazoFim"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_prazo_fim"))
+    df["RIC_DiasRestantes"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_dias_restantes"))
+    df["RIC_StatusResposta"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_status_resposta", ""))
+    df["RIC_Ministerio"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_ministerio", ""))
+    df["RIC_Assunto"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("ric_assunto", ""))
 
     def _sinal(d):
         try:
@@ -2369,7 +2777,9 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
             return "—"
 
     df["Sinal"] = df["Parado (dias)"].apply(_sinal)
-    df = df.sort_values("DataStatus_dt", ascending=True)
+    
+    # Ordenar por data mais recente primeiro
+    df = df.sort_values("DataStatus_dt", ascending=False)
     
     return df
 
@@ -2497,7 +2907,11 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
         
         with col_info:
             st.markdown(f"**Relator(a):**")
-            st.markdown(f"**{rel_txt}**")
+            if rel_id:
+                link_relator = camara_link_deputado(rel_id)
+                st.markdown(f"**[{rel_txt}]({link_relator})**")
+            else:
+                st.markdown(f"**{rel_txt}**")
             
             if alerta_relator:
                 st.warning(alerta_relator)
@@ -2509,6 +2923,64 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     c1.metric("Data do Status", fmt_dt_br(status_dt))
     c2.metric("Última mov.", fmt_dt_br(ultima_dt))
     c3.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
+    
+    # SEÇÃO ESPECIAL PARA RICs - PRAZO DE RESPOSTA
+    sigla_tipo = status.get("sigla", "")
+    if sigla_tipo == "RIC":
+        tramitacoes = dados_completos.get("tramitacoes", [])
+        prazo_info = parse_prazo_resposta_ric(tramitacoes)
+        ministerio = extrair_ministerio_ric(ementa, tramitacoes)
+        assunto = extrair_assunto_ric(ementa)
+        
+        st.markdown("---")
+        st.markdown("### 📋 Informações do RIC (Requerimento de Informação)")
+        
+        col_ric1, col_ric2 = st.columns(2)
+        
+        with col_ric1:
+            if ministerio:
+                st.markdown(f"**Ministério/Órgão:** {ministerio}")
+            if assunto:
+                st.markdown(f"**Assunto/Tema:** {assunto}")
+        
+        with col_ric2:
+            status_resp = prazo_info.get("status_resposta", "Aguardando resposta")
+            if status_resp == "Respondido":
+                st.success(f"✅ **Status:** {status_resp}")
+            else:
+                st.warning(f"⏳ **Status:** {status_resp}")
+        
+        # Dados de prazo de resposta
+        if prazo_info.get("data_remessa"):
+            st.markdown("#### 📅 Prazo de Resposta")
+            
+            col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+            
+            with col_p1:
+                data_remessa = prazo_info.get("data_remessa")
+                st.metric("Remessa (1SECM)", data_remessa.strftime("%d/%m/%Y") if data_remessa else "—")
+            
+            with col_p2:
+                inicio = prazo_info.get("inicio_contagem")
+                st.metric("Início da contagem", inicio.strftime("%d/%m/%Y") if inicio else "—")
+            
+            with col_p3:
+                prazo_fim = prazo_info.get("prazo_fim")
+                st.metric("Prazo final", prazo_fim.strftime("%d/%m/%Y") if prazo_fim else "—")
+            
+            with col_p4:
+                dias_rest = prazo_info.get("dias_restantes")
+                if dias_rest is not None:
+                    if dias_rest < 0:
+                        st.metric("Dias restantes", f"{abs(dias_rest)} dias VENCIDO", delta=f"-{abs(dias_rest)}", delta_color="inverse")
+                    elif dias_rest <= 5:
+                        st.metric("Dias restantes", f"{dias_rest} dias", delta="Urgente!", delta_color="inverse")
+                    else:
+                        st.metric("Dias restantes", f"{dias_rest} dias")
+                else:
+                    st.metric("Dias restantes", "—")
+        
+        st.markdown("---")
 
     st.markdown("**Ementa**")
     st.write(ementa)
@@ -2882,15 +3354,16 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     st.markdown("---")
 
     # ============================================================
-    # ABAS REORGANIZADAS (6 abas)
+    # ABAS REORGANIZADAS (7 abas)
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
         "4️⃣ Comissões estratégicas",
         "5️⃣ Buscar Proposição Específica",
-        "6️⃣ Matérias por situação atual"
+        "6️⃣ Matérias por situação atual",
+        "7️⃣ RICs (Requerimentos de Informação)"
     ])
 
     # ============================================================
@@ -3562,11 +4035,22 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     "siglaTipo": "Tipo",
                     "ano": "Ano",
                     "ementa": "Ementa",
+                    "Data do status": "Última tramitação",
                 })
+                
+                # Criar coluna com link do relator se disponível
+                if "LinkRelator" in df_tbl_status.columns:
+                    def _relator_com_link(row):
+                        relator = row.get("Relator(a)", "—")
+                        link = row.get("LinkRelator", "")
+                        if link and str(link).startswith("http"):
+                            return f"[{relator}]({link})"
+                        return relator
+                    # Mantemos Relator(a) como texto, o link estará em LinkRelator
 
                 show_cols = [
                     "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Relator(a)",
-                    "Data do status", "Sinal", "Parado há", "Tema", "id", "LinkTramitacao", "Ementa"
+                    "Última tramitação", "Sinal", "Parado há", "Tema", "id", "LinkTramitacao", "LinkRelator", "Ementa"
                 ]
                 for c in show_cols:
                     if c not in df_tbl_status.columns:
@@ -3589,18 +4073,51 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     st.dataframe(df_counts, hide_index=True, use_container_width=True)
 
                 with cC2:
-                    st.markdown("**Lista filtrada (mais antigo no topo)**")
+                    st.markdown("**Lista filtrada (mais recente primeiro)**")
+                    
+                    # Ordenar por data mais recente primeiro
+                    if "DataStatus_dt" in df_tbl_status.columns:
+                        df_tbl_status = df_tbl_status.sort_values("DataStatus_dt", ascending=False)
                     
                     st.dataframe(
                         df_tbl_status[show_cols],
                         use_container_width=True,
                         hide_index=True,
                         column_config={
-                            "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                            "LinkTramitacao": st.column_config.LinkColumn("Link Tramitação", display_text="abrir"),
+                            "LinkRelator": st.column_config.LinkColumn("Link Relator", display_text="ver"),
                             "Ementa": st.column_config.TextColumn("Ementa", width="large"),
                             "Relator(a)": st.column_config.TextColumn("Relator(a)", width="medium"),
+                            "Última tramitação": st.column_config.TextColumn("Última tramitação", width="small"),
                         },
                     )
+                
+                # Seção especial para RICs se houver
+                df_rics = df_tbl_status[df_tbl_status["Tipo"] == "RIC"].copy() if "Tipo" in df_tbl_status.columns else pd.DataFrame()
+                if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
+                    with st.expander("📋 Detalhes de RICs (Requerimentos de Informação)", expanded=False):
+                        st.markdown("**Status dos RICs**")
+                        
+                        rics_cols = ["Proposição", "Ementa", "RIC_Ministerio", "RIC_StatusResposta", 
+                                    "RIC_PrazoFim", "RIC_DiasRestantes", "Última tramitação", "LinkTramitacao"]
+                        rics_cols = [c for c in rics_cols if c in df_rics.columns]
+                        
+                        df_rics_view = df_rics[rics_cols].copy()
+                        df_rics_view = df_rics_view.rename(columns={
+                            "RIC_Ministerio": "Ministério",
+                            "RIC_StatusResposta": "Status Resposta",
+                            "RIC_PrazoFim": "Prazo Final",
+                            "RIC_DiasRestantes": "Dias Restantes"
+                        })
+                        
+                        st.dataframe(
+                            df_rics_view,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                            }
+                        )
 
                 col_x5, col_p5 = st.columns(2)
                 with col_x5:
@@ -3621,6 +4138,289 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         mime=pdf_mime,
                         key="download_materias_pdf_tab6"
                     )
+
+    # ============================================================
+    # ABA 7 - RICs (REQUERIMENTOS DE INFORMAÇÃO)
+    # ============================================================
+    with tab7:
+        st.markdown("### 📋 RICs - Requerimentos de Informação")
+        st.markdown("""
+        **Acompanhamento dos Requerimentos de Informação** da Deputada Júlia Zanatta.
+        
+        O RIC é um instrumento de fiscalização que permite ao parlamentar solicitar informações 
+        a Ministros de Estado sobre atos de suas pastas. O Poder Executivo tem **30 dias úteis** 
+        para responder, contados a partir do dia útil seguinte à remessa do ofício.
+        """)
+        
+        st.markdown("---")
+        
+        # Inicializar estado
+        if "df_rics_completo" not in st.session_state:
+            st.session_state["df_rics_completo"] = pd.DataFrame()
+        
+        col_load_ric, col_info_ric = st.columns([1, 2])
+        
+        with col_load_ric:
+            if st.button("🔄 Carregar/Atualizar RICs", key="btn_load_rics", type="primary"):
+                with st.spinner("Buscando RICs da Deputada..."):
+                    # Buscar RICs
+                    df_rics_base = fetch_rics_por_autor(id_deputada)
+                    
+                    if df_rics_base.empty:
+                        st.warning("Nenhum RIC encontrado.")
+                        st.session_state["df_rics_completo"] = pd.DataFrame()
+                    else:
+                        st.info(f"Encontrados {len(df_rics_base)} RICs. Carregando detalhes...")
+                        
+                        # Buscar status completo de cada RIC
+                        ids_rics = df_rics_base["id"].astype(str).tolist()
+                        status_map_rics = build_status_map(ids_rics)
+                        
+                        # Enriquecer com status
+                        df_rics_enriquecido = enrich_with_status(df_rics_base, status_map_rics)
+                        
+                        st.session_state["df_rics_completo"] = df_rics_enriquecido
+                        st.success(f"✅ {len(df_rics_enriquecido)} RICs carregados com sucesso!")
+        
+        with col_info_ric:
+            st.caption("""
+            💡 **Dica:** Clique em "Carregar/Atualizar RICs" para buscar todos os Requerimentos de Informação 
+            da Deputada e extrair automaticamente os prazos de resposta das tramitações.
+            """)
+        
+        df_rics = st.session_state.get("df_rics_completo", pd.DataFrame())
+        
+        if not df_rics.empty:
+            st.markdown("---")
+            
+            # ============================================================
+            # FILTROS PARA RICs
+            # ============================================================
+            with st.expander("🔍 Filtros", expanded=True):
+                col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+                
+                with col_f1:
+                    # Filtro por ano
+                    anos_ric = sorted(df_rics["ano"].dropna().unique().tolist(), reverse=True)
+                    anos_sel_ric = st.multiselect("Ano", options=anos_ric, default=anos_ric[:2] if len(anos_ric) >= 2 else anos_ric, key="anos_ric")
+                
+                with col_f2:
+                    # Filtro por status de resposta
+                    status_resp_options = ["Todos", "Aguardando resposta", "Respondido"]
+                    status_resp_sel = st.selectbox("Status de Resposta", options=status_resp_options, key="status_resp_ric")
+                
+                with col_f3:
+                    # Filtro por ministério
+                    ministerios = df_rics["RIC_Ministerio"].dropna().replace("", pd.NA).dropna().unique().tolist()
+                    ministerios = [m for m in ministerios if m and str(m).strip()]
+                    ministerios_sel = st.multiselect("Ministério", options=sorted(ministerios), key="ministerios_ric")
+                
+                with col_f4:
+                    # Filtro por prazo
+                    prazo_options = ["Todos", "Vencidos", "Vencendo em 5 dias", "Vencendo em 15 dias", "No prazo"]
+                    prazo_sel = st.selectbox("Prazo", options=prazo_options, key="prazo_ric")
+            
+            # Aplicar filtros
+            df_rics_fil = df_rics.copy()
+            
+            if anos_sel_ric:
+                df_rics_fil = df_rics_fil[df_rics_fil["ano"].isin([str(a) for a in anos_sel_ric])].copy()
+            
+            if status_resp_sel != "Todos":
+                df_rics_fil = df_rics_fil[df_rics_fil["RIC_StatusResposta"] == status_resp_sel].copy()
+            
+            if ministerios_sel:
+                df_rics_fil = df_rics_fil[df_rics_fil["RIC_Ministerio"].isin(ministerios_sel)].copy()
+            
+            if prazo_sel != "Todos":
+                if prazo_sel == "Vencidos":
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and int(x) < 0)].copy()
+                elif prazo_sel == "Vencendo em 5 dias":
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 5)].copy()
+                elif prazo_sel == "Vencendo em 15 dias":
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 15)].copy()
+                elif prazo_sel == "No prazo":
+                    df_rics_fil = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and int(x) > 0)].copy()
+            
+            # ============================================================
+            # RESUMO EXECUTIVO DOS RICs
+            # ============================================================
+            st.markdown("### 📊 Resumo dos RICs")
+            
+            col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+            
+            total_rics = len(df_rics_fil)
+            aguardando = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Aguardando resposta"])
+            respondidos = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido"])
+            
+            # Calcular vencidos e urgentes
+            vencidos = 0
+            urgentes = 0
+            for _, row in df_rics_fil.iterrows():
+                dias = row.get("RIC_DiasRestantes")
+                if dias is not None and pd.notna(dias):
+                    try:
+                        dias_int = int(dias)
+                        if dias_int < 0:
+                            vencidos += 1
+                        elif dias_int <= 5:
+                            urgentes += 1
+                    except:
+                        pass
+            
+            with col_m1:
+                st.metric("Total de RICs", total_rics)
+            with col_m2:
+                st.metric("Aguardando Resposta", aguardando)
+            with col_m3:
+                st.metric("Respondidos", respondidos)
+            with col_m4:
+                st.metric("⚠️ Vencidos", vencidos, delta=f"-{vencidos}" if vencidos > 0 else None, delta_color="inverse")
+            with col_m5:
+                st.metric("🔔 Urgentes (≤5 dias)", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off")
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # ALERTAS DE PRAZO
+            # ============================================================
+            df_vencidos = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and int(x) < 0 if x is not None and pd.notna(x) else False)].copy()
+            df_urgentes = df_rics_fil[df_rics_fil["RIC_DiasRestantes"].apply(lambda x: x is not None and pd.notna(x) and 0 <= int(x) <= 5 if x is not None and pd.notna(x) else False)].copy()
+            
+            if not df_vencidos.empty:
+                st.error(f"🚨 **{len(df_vencidos)} RIC(s) COM PRAZO VENCIDO!**")
+                for _, row in df_vencidos.head(5).iterrows():
+                    prop = row.get("Proposicao", "")
+                    dias = abs(int(row.get("RIC_DiasRestantes", 0)))
+                    ministerio = row.get("RIC_Ministerio", "Não identificado")
+                    link = camara_link_tramitacao(row.get("id", ""))
+                    st.markdown(f"- **[{prop}]({link})** - Vencido há **{dias} dias** - {ministerio}")
+            
+            if not df_urgentes.empty:
+                st.warning(f"⚠️ **{len(df_urgentes)} RIC(s) VENCENDO EM ATÉ 5 DIAS!**")
+                for _, row in df_urgentes.head(5).iterrows():
+                    prop = row.get("Proposicao", "")
+                    dias = int(row.get("RIC_DiasRestantes", 0))
+                    ministerio = row.get("RIC_Ministerio", "Não identificado")
+                    link = camara_link_tramitacao(row.get("id", ""))
+                    st.markdown(f"- **[{prop}]({link})** - Vence em **{dias} dias** - {ministerio}")
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # TABELA DE RICs
+            # ============================================================
+            st.markdown("### 📋 Lista de RICs")
+            
+            # Ordenar por data mais recente primeiro
+            if "DataStatus_dt" in df_rics_fil.columns:
+                df_rics_fil = df_rics_fil.sort_values("DataStatus_dt", ascending=False)
+            
+            # Preparar colunas para exibição
+            df_rics_view = df_rics_fil.copy()
+            df_rics_view["LinkTramitacao"] = df_rics_view["id"].astype(str).apply(camara_link_tramitacao)
+            
+            # Formatar datas de prazo
+            def fmt_prazo(row):
+                prazo_fim = row.get("RIC_PrazoFim")
+                dias = row.get("RIC_DiasRestantes")
+                if prazo_fim and pd.notna(prazo_fim):
+                    try:
+                        if isinstance(prazo_fim, datetime.date):
+                            prazo_str = prazo_fim.strftime("%d/%m/%Y")
+                        else:
+                            prazo_str = str(prazo_fim)[:10]
+                        if dias is not None and pd.notna(dias):
+                            dias_int = int(dias)
+                            if dias_int < 0:
+                                return f"{prazo_str} (VENCIDO há {abs(dias_int)}d)"
+                            else:
+                                return f"{prazo_str} ({dias_int}d restantes)"
+                        return prazo_str
+                    except:
+                        return "—"
+                return "—"
+            
+            df_rics_view["Prazo"] = df_rics_view.apply(fmt_prazo, axis=1)
+            
+            # Formatar data da última tramitação
+            if "Data do status" in df_rics_view.columns:
+                df_rics_view = df_rics_view.rename(columns={"Data do status": "Última tramitação"})
+            
+            # Renomear colunas para exibição
+            df_rics_view = df_rics_view.rename(columns={
+                "Proposicao": "RIC",
+                "RIC_Ministerio": "Ministério",
+                "RIC_StatusResposta": "Status",
+                "RIC_Assunto": "Assunto",
+                "Parado (dias)": "Parado há",
+            })
+            
+            # Colunas para exibir
+            show_cols_ric = ["RIC", "ano", "Ministério", "Status", "Prazo", "Última tramitação", 
+                            "Parado há", "Situação atual", "LinkTramitacao", "ementa"]
+            show_cols_ric = [c for c in show_cols_ric if c in df_rics_view.columns]
+            
+            st.dataframe(
+                df_rics_view[show_cols_ric],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                    "ementa": st.column_config.TextColumn("Ementa", width="large"),
+                    "Ministério": st.column_config.TextColumn("Ministério", width="medium"),
+                    "Prazo": st.column_config.TextColumn("Prazo", width="medium"),
+                },
+            )
+            
+            # ============================================================
+            # DOWNLOADS
+            # ============================================================
+            st.markdown("---")
+            col_dx, col_dp = st.columns(2)
+            
+            with col_dx:
+                bytes_out, mime, ext = to_xlsx_bytes(df_rics_view[show_cols_ric], "RICs")
+                st.download_button(
+                    "⬇️ Baixar XLSX",
+                    data=bytes_out,
+                    file_name=f"rics_deputada.{ext}",
+                    mime=mime,
+                    key="download_rics_xlsx"
+                )
+            
+            with col_dp:
+                pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_rics_view, "RICs - Requerimentos de Informação")
+                st.download_button(
+                    "⬇️ Baixar PDF",
+                    data=pdf_bytes,
+                    file_name=f"rics_deputada.{pdf_ext}",
+                    mime=pdf_mime,
+                    key="download_rics_pdf"
+                )
+            
+            # ============================================================
+            # DETALHES DE UM RIC ESPECÍFICO
+            # ============================================================
+            st.markdown("---")
+            st.markdown("### 🔍 Ver detalhes de um RIC")
+            
+            rics_opcoes = df_rics_fil["Proposicao"].dropna().unique().tolist()
+            if rics_opcoes:
+                ric_selecionado = st.selectbox("Selecione um RIC:", options=[""] + rics_opcoes, key="select_ric_detalhe")
+                
+                if ric_selecionado:
+                    row_ric = df_rics_fil[df_rics_fil["Proposicao"] == ric_selecionado].iloc[0]
+                    id_ric = str(row_ric.get("id", ""))
+                    
+                    if id_ric:
+                        exibir_detalhes_proposicao(id_ric, key_prefix="ric_detalhe")
+        
+        else:
+            st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
+        
+        st.markdown("---")
+        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
