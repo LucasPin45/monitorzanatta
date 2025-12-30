@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v17
+# monitor_sistema_jz.py - v18
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 17: Gráficos estáticos Matplotlib, Exportação PDF
+# VERSÃO 18: Visão Executiva, Ações Sugeridas, PDF Brasília
 # ============================================================
 
 import datetime
@@ -12,6 +12,7 @@ from functools import lru_cache
 from io import BytesIO
 from urllib.parse import urlparse
 import re
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -19,6 +20,13 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Backend não-interativo
+
+# Timezone de Brasília
+TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
+def get_brasilia_now():
+    """Retorna datetime atual no fuso de Brasília."""
+    return datetime.datetime.now(TZ_BRASILIA)
 
 # ============================================================
 # CONFIGURAÇÕES
@@ -31,7 +39,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/17.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/18.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -286,7 +294,7 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes
         
         pdf.set_font('Helvetica', '', 10)
         pdf.set_text_color(100, 100, 100)
-        pdf.cell(0, 6, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y as %H:%M')}", ln=True, align='C')
+        pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
         pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
         
         # Linha divisória
@@ -464,6 +472,250 @@ def party_norm(sigla: str) -> str:
     if s in {"PC DO B", "PCDOB", "PCDOB ", "PCD0B"}:
         return "PCDOB"
     return s
+
+
+# Partidos da base/oposição para identificar relator adversário
+PARTIDOS_OPOSICAO = {"PT", "PSOL", "PCDOB", "PC DO B", "REDE", "PV", "PSB", "PDT", "PSDB"}
+
+
+def gerar_acao_sugerida(row: pd.Series) -> str:
+    """Gera ação sugerida baseada na situação e contexto da proposição."""
+    situacao = str(row.get("Situação atual", "") or "").lower()
+    dias_parado = row.get("Parado há (dias)", 0)
+    relator = str(row.get("Relator(a)", "") or "")
+    
+    acoes = []
+    
+    # Verificar relator adversário
+    if relator and relator.strip() and relator != "-":
+        for partido in PARTIDOS_OPOSICAO:
+            if partido in relator.upper():
+                acoes.append("⚠️ Relator adversario: atencao")
+                break
+    
+    # Ações por situação
+    if "aguardando designa" in situacao or "sem relator" in situacao:
+        acoes.append("Cobrar designacao de relator")
+    elif "pronta para pauta" in situacao:
+        acoes.append("Articular inclusao em pauta")
+    elif "aguardando delibera" in situacao:
+        acoes.append("Preparar fala/destaque para votacao")
+    elif "aguardando parecer" in situacao:
+        acoes.append("Acompanhar elaboracao do parecer")
+    elif "tramitando em conjunto" in situacao:
+        acoes.append("Monitorar proposicao principal")
+    
+    # Ação por tempo parado
+    try:
+        dias = int(dias_parado) if pd.notna(dias_parado) else 0
+    except:
+        dias = 0
+    
+    if dias >= 30:
+        acoes.append("DESTRAVAR: contato com comissao/lideranca")
+    elif dias >= 15:
+        acoes.append("Verificar andamento com secretaria")
+    
+    return " | ".join(acoes) if acoes else "Acompanhar tramitacao"
+
+
+def calcular_prioridade(row: pd.Series) -> int:
+    """Calcula score de prioridade (quanto maior, mais urgente)."""
+    score = 0
+    
+    # Por sinal/dias parado
+    dias = row.get("Parado há (dias)", 0)
+    try:
+        dias = int(dias) if pd.notna(dias) else 0
+    except:
+        dias = 0
+    
+    if dias >= 30:
+        score += 100  # Crítico
+    elif dias >= 15:
+        score += 70   # Atenção
+    elif dias >= 7:
+        score += 40   # Monitoramento
+    
+    # Por situação crítica
+    situacao = str(row.get("Situação atual", "") or "").lower()
+    if "pronta para pauta" in situacao:
+        score += 50
+    elif "aguardando delibera" in situacao:
+        score += 45
+    elif "aguardando designa" in situacao:
+        score += 30
+    
+    # Relator adversário
+    relator = str(row.get("Relator(a)", "") or "")
+    for partido in PARTIDOS_OPOSICAO:
+        if partido in relator.upper():
+            score += 20
+            break
+    
+    return score
+
+
+def render_resumo_executivo(df: pd.DataFrame):
+    """Renderiza bloco de resumo executivo no topo."""
+    if df.empty:
+        return
+    
+    st.markdown("### 📊 Resumo Executivo")
+    
+    # Métricas principais
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total = len(df)
+    
+    # Contagem por sinal (baseado em dias parado)
+    def get_sinal_count(df, min_dias, max_dias=None):
+        try:
+            if "Parado há (dias)" in df.columns:
+                if max_dias:
+                    return len(df[(df["Parado há (dias)"] >= min_dias) & (df["Parado há (dias)"] < max_dias)])
+                return len(df[df["Parado há (dias)"] >= min_dias])
+        except:
+            pass
+        return 0
+    
+    criticos = get_sinal_count(df, 30)
+    atencao = get_sinal_count(df, 15, 30)
+    monitoramento = get_sinal_count(df, 7, 15)
+    
+    with col1:
+        st.metric("📋 Total de Matérias", total)
+    with col2:
+        st.metric("🔴 Críticas (≥30 dias)", criticos)
+    with col3:
+        st.metric("🟠 Atenção (15-29 dias)", atencao)
+    with col4:
+        st.metric("🟡 Monitorar (7-14 dias)", monitoramento)
+    
+    # Contagem por situações-chave
+    st.markdown("#### 📌 Por Situação-Chave")
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+    
+    def count_situacao(df, termo):
+        if "Situação atual" not in df.columns:
+            return 0
+        return len(df[df["Situação atual"].fillna("").str.lower().str.contains(termo.lower())])
+    
+    with col_s1:
+        st.metric("🔍 Aguard. Relator", count_situacao(df, "aguardando designa"))
+    with col_s2:
+        st.metric("📝 Aguard. Parecer", count_situacao(df, "aguardando parecer"))
+    with col_s3:
+        st.metric("📅 Pronta p/ Pauta", count_situacao(df, "pronta para pauta"))
+    with col_s4:
+        st.metric("🗳️ Aguard. Deliberação", count_situacao(df, "aguardando delibera"))
+    
+    # Top 3 órgãos e situações
+    st.markdown("#### 🏛️ Top 3 Órgãos e Situações")
+    col_o, col_sit = st.columns(2)
+    
+    with col_o:
+        if "Órgão (sigla)" in df.columns:
+            top_orgaos = df["Órgão (sigla)"].value_counts().head(3)
+            for orgao, qtd in top_orgaos.items():
+                st.write(f"**{orgao}**: {qtd}")
+    
+    with col_sit:
+        if "Situação atual" in df.columns:
+            top_sit = df["Situação atual"].value_counts().head(3)
+            for sit, qtd in top_sit.items():
+                sit_short = sit[:40] + "..." if len(str(sit)) > 40 else sit
+                st.write(f"**{sit_short}**: {qtd}")
+    
+    st.markdown("---")
+
+
+def render_atencao_deputada(df: pd.DataFrame):
+    """Renderiza bloco 'Atenção da Deputada' com Top 5 prioridades."""
+    if df.empty:
+        return
+    
+    st.markdown("### ⚠️ Atenção da Deputada (Top 5)")
+    st.caption("Matérias que exigem decisão ou ação imediata")
+    
+    # Adicionar coluna de prioridade e ação
+    df_pri = df.copy()
+    df_pri["_prioridade"] = df_pri.apply(calcular_prioridade, axis=1)
+    df_pri["Ação Sugerida"] = df_pri.apply(gerar_acao_sugerida, axis=1)
+    
+    # Ordenar por prioridade e pegar top 5
+    df_top5 = df_pri.nlargest(5, "_prioridade")
+    
+    # Mostrar cards
+    for idx, (_, row) in enumerate(df_top5.iterrows(), 1):
+        prop = row.get("Proposição", row.get("siglaTipo", "")) 
+        if "numero" in df.columns:
+            prop = f"{row.get('siglaTipo', '')} {row.get('numero', '')}/{row.get('ano', '')}"
+        
+        orgao = row.get("Órgão (sigla)", "-")
+        situacao = str(row.get("Situação atual", "-"))[:50]
+        acao = row.get("Ação Sugerida", "-")
+        dias = row.get("Parado há (dias)", "-")
+        
+        # Cor do sinal
+        try:
+            d = int(dias)
+            if d >= 30:
+                sinal = "🔴"
+            elif d >= 15:
+                sinal = "🟠"
+            elif d >= 7:
+                sinal = "🟡"
+            else:
+                sinal = "🟢"
+        except:
+            sinal = "⚪"
+        
+        st.markdown(f"""
+        **{idx}. {sinal} {prop}** | {orgao} | {dias} dias  
+        *Situação:* {situacao}  
+        *→ Ação:* **{acao}**
+        """)
+    
+    st.markdown("---")
+
+
+def render_prioridades_gabinete(df: pd.DataFrame):
+    """Renderiza tabela 'Top Prioridades do Gabinete' com Top 20."""
+    if df.empty:
+        return
+    
+    st.markdown("### 📋 Top Prioridades do Gabinete (Top 20)")
+    st.caption("Para distribuição de tarefas e acompanhamento")
+    
+    # Adicionar colunas calculadas
+    df_pri = df.copy()
+    df_pri["_prioridade"] = df_pri.apply(calcular_prioridade, axis=1)
+    df_pri["Ação Sugerida"] = df_pri.apply(gerar_acao_sugerida, axis=1)
+    
+    # Ordenar e pegar top 20
+    df_top20 = df_pri.nlargest(20, "_prioridade")
+    
+    # Selecionar colunas para exibição
+    colunas_exibir = []
+    for col in ["Proposição", "Situação atual", "Órgão (sigla)", "Parado há (dias)", "Relator(a)", "Ação Sugerida"]:
+        if col in df_top20.columns:
+            colunas_exibir.append(col)
+    
+    if "Ação Sugerida" not in colunas_exibir:
+        colunas_exibir.append("Ação Sugerida")
+    
+    if colunas_exibir:
+        st.dataframe(
+            df_top20[colunas_exibir],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Ação Sugerida": st.column_config.TextColumn("Ação Sugerida", width="large"),
+            }
+        )
+    
+    st.markdown("---")
 
 
 def categorizar_tema(ementa: str) -> str:
@@ -1673,7 +1925,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v17 – Gráficos Matplotlib estáticos, Exportação PDF")
+    st.caption("v18 – Visão Executiva, Ações Sugeridas, PDF Brasília")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -2414,7 +2666,19 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     palavra_norm = normalize_text(palavra_filtro)
                     df_fil = df_fil[df_fil["ementa"].apply(lambda x: palavra_norm in normalize_text(str(x)))].copy()
 
+                # Garantir coluna de dias parado para cálculos
+                if "Parado (dias)" in df_fil.columns and "Parado há (dias)" not in df_fil.columns:
+                    df_fil["Parado há (dias)"] = df_fil["Parado (dias)"]
+
                 st.markdown("---")
+                
+                # ============================================================
+                # VISÃO EXECUTIVA - RESUMO, ATENÇÃO, PRIORIDADES
+                # ============================================================
+                with st.expander("🎯 Visão Executiva (Deputada / Chefia / Assessoria)", expanded=True):
+                    render_resumo_executivo(df_fil)
+                    render_atencao_deputada(df_fil)
+                    render_prioridades_gabinete(df_fil)
                 
                 # ============================================================
                 # GRÁFICOS - ORDENADOS DECRESCENTE
