@@ -569,26 +569,29 @@ def calcular_prazo_ric(data_remessa: datetime.date) -> tuple:
     """
     Calcula o prazo de 30 dias para resposta de RIC conforme regra constitucional.
     
-    REGRA (baseada no padrão real da Câmara):
-    - Prazo = 30 dias CORRIDOS a partir do dia seguinte à remessa
-    - NÃO há ajuste para dia útil no final (a Câmara conta dias corridos simples)
+    REGRA:
+    - Dia 1 = 1º dia ÚTIL após a remessa
+    - Dia 30 = 30º dia se for útil, ou próximo dia útil se não for
     
-    Exemplo real:
-    - Remessa: 27/11/2025
-    - Dia 1: 28/11/2025
-    - Prazo final: 27/12/2025 (30 dias depois do dia 28/11)
+    Exemplo:
+    - Remessa: 27/11/2025 (quinta)
+    - Dia 1: 28/11/2025 (sexta) - primeiro dia útil após remessa
+    - Dia 30 seria: 28/11 + 29 dias = 27/12/2025 (sábado)
+    - Como 27/12 é sábado, prazo final = 29/12/2025 (segunda)
     
     Retorna: (inicio_contagem, prazo_fim)
     """
     if data_remessa is None:
         return None, None
     
-    # Dia 1 = dia seguinte à remessa (não necessariamente útil)
-    inicio_contagem = data_remessa + datetime.timedelta(days=1)
+    # Dia 1 = primeiro dia ÚTIL após a remessa
+    inicio_contagem = proximo_dia_util(data_remessa)
     
-    # Prazo = 30 dias corridos (contando o dia 1)
-    # Dia 1 é o primeiro dia, então +29 para chegar ao dia 30
-    prazo_fim = inicio_contagem + datetime.timedelta(days=29)
+    # Dia 30 = 29 dias após o Dia 1 (porque Dia 1 já conta)
+    dia_30_bruto = inicio_contagem + datetime.timedelta(days=29)
+    
+    # Se o Dia 30 cair em fim de semana, estende para o próximo dia útil
+    prazo_fim = ajustar_para_dia_util(dia_30_bruto)
     
     return inicio_contagem, prazo_fim
 
