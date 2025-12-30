@@ -1,7 +1,7 @@
-# monitor_sistema_jz.py - v19
+# monitor_sistema_jz.py - v20
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 19: PDFs profissionais para Autoria/Relatoria e Comissões
+# VERSÃO 20: PDF Autoria/Relatoria com dados completos (relator, situação, parecer)
 # ============================================================
 
 import datetime
@@ -39,7 +39,7 @@ DEPUTADA_PARTIDO_PADRAO = "PL"
 DEPUTADA_UF_PADRAO = "SC"
 DEPUTADA_ID_PADRAO = 220559
 
-HEADERS = {"User-Agent": "MonitorZanatta/19.0 (gabinete-julia-zanatta)"}
+HEADERS = {"User-Agent": "MonitorZanatta/20.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
@@ -448,7 +448,7 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple[bytes
 
 
 def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
-    """PDF específico para Autoria e Relatoria na Pauta - formato de gabinete."""
+    """PDF específico para Autoria e Relatoria na Pauta - formato de gabinete com dados completos."""
     try:
         from fpdf import FPDF
         
@@ -495,7 +495,27 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
             df_sorted['_data_sort'] = pd.to_datetime(df_sorted['data'], errors='coerce', dayfirst=True)
             df_sorted = df_sorted.sort_values('_data_sort', ascending=False)
         
-        # Separar AUTORIA e RELATORIA
+        # Função auxiliar para extrair IDs e buscar info
+        def extrair_ids(texto_ids):
+            """Extrai lista de IDs de uma string separada por ;"""
+            ids = []
+            if pd.isna(texto_ids) or str(texto_ids).strip() in ('', 'nan'):
+                return ids
+            for pid in str(texto_ids).split(';'):
+                pid = pid.strip()
+                if pid and pid.isdigit():
+                    ids.append(pid)
+            return ids
+        
+        def buscar_info_proposicao(pid):
+            """Busca info completa de uma proposição"""
+            try:
+                info = fetch_proposicao_completa(str(pid))
+                return info
+            except:
+                return {}
+        
+        # Separar AUTORIA e RELATORIA com dados enriquecidos
         registros_autoria = []
         registros_relatoria = []
         
@@ -506,28 +526,81 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
             orgao_nome = str(row.get('orgao_nome', ''))
             local = f"{orgao_sigla}" + (f" - {orgao_nome}" if orgao_nome and orgao_nome != orgao_sigla else "")
             id_evento = str(row.get('id_evento', ''))
-            link = f"https://www.camara.leg.br/evento-legislativo/{id_evento}" if id_evento and id_evento != 'nan' else ""
+            link_evento = f"https://www.camara.leg.br/evento-legislativo/{id_evento}" if id_evento and id_evento != 'nan' else ""
             
-            props_autoria = str(row.get('proposicoes_autoria', ''))
-            props_relatoria = str(row.get('proposicoes_relatoria', ''))
+            # IDs das proposições
+            ids_autoria = extrair_ids(row.get('ids_proposicoes_autoria', ''))
+            ids_relatoria = extrair_ids(row.get('ids_proposicoes_relatoria', ''))
             
-            if props_autoria and props_autoria.strip() and props_autoria != 'nan':
+            # Processar AUTORIA
+            if ids_autoria:
+                materias_autoria = []
+                for pid in ids_autoria:
+                    info = buscar_info_proposicao(pid)
+                    sigla = f"{info.get('sigla', '')} {info.get('numero', '')}/{info.get('ano', '')}"
+                    ementa = info.get('ementa', '')
+                    situacao = info.get('status_descricaoSituacao', '')
+                    relator_info = info.get('relator', {}) or {}
+                    relator_nome = relator_info.get('nome', '')
+                    relator_partido = relator_info.get('partido', '')
+                    relator_uf = relator_info.get('uf', '')
+                    relator_str = f"{relator_nome} ({relator_partido}/{relator_uf})" if relator_nome else "Sem relator designado"
+                    link_materia = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}"
+                    
+                    materias_autoria.append({
+                        'sigla': sigla.strip(),
+                        'ementa': ementa,
+                        'situacao': situacao,
+                        'relator': relator_str,
+                        'link': link_materia
+                    })
+                
                 registros_autoria.append({
                     'data': data, 'hora': hora, 'local': local,
-                    'proposicoes': props_autoria, 'link': link
+                    'link_evento': link_evento, 'materias': materias_autoria
                 })
             
-            if props_relatoria and props_relatoria.strip() and props_relatoria != 'nan':
+            # Processar RELATORIA
+            if ids_relatoria:
+                materias_relatoria = []
+                for pid in ids_relatoria:
+                    info = buscar_info_proposicao(pid)
+                    sigla = f"{info.get('sigla', '')} {info.get('numero', '')}/{info.get('ano', '')}"
+                    ementa = info.get('ementa', '')
+                    situacao = info.get('status_descricaoSituacao', '')
+                    despacho = info.get('status_despacho', '')
+                    url_teor = info.get('urlInteiroTeor', '')
+                    link_materia = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}"
+                    
+                    # Buscar info do parecer nas tramitações
+                    parecer_info = ""
+                    tramitacoes = info.get('tramitacoes', [])
+                    for tram in tramitacoes[:10]:  # Últimas 10 tramitações
+                        desc = tram.get('descricaoTramitacao', '') or ''
+                        desp = tram.get('despacho', '') or ''
+                        if 'parecer' in desc.lower() or 'parecer' in desp.lower():
+                            parecer_info = f"{desc} - {desp}".strip(' -')
+                            break
+                    
+                    materias_relatoria.append({
+                        'sigla': sigla.strip(),
+                        'ementa': ementa,
+                        'situacao': situacao,
+                        'parecer': parecer_info,
+                        'link': link_materia,
+                        'link_teor': url_teor
+                    })
+                
                 registros_relatoria.append({
                     'data': data, 'hora': hora, 'local': local,
-                    'proposicoes': props_relatoria, 'link': link
+                    'link_evento': link_evento, 'materias': materias_relatoria
                 })
         
         # === SEÇÃO AUTORIA ===
         pdf.set_font('Helvetica', 'B', 12)
         pdf.set_fill_color(0, 100, 0)
         pdf.set_text_color(255, 255, 255)
-        pdf.cell(0, 8, f"  AUTORIA DA DEPUTADA ({len(registros_autoria)} registro(s))", ln=True, fill=True)
+        pdf.cell(0, 8, f"  AUTORIA DA DEPUTADA ({len(registros_autoria)} reuniao(oes))", ln=True, fill=True)
         pdf.ln(3)
         
         if not registros_autoria:
@@ -536,11 +609,11 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
             pdf.cell(0, 6, "Nenhuma proposicao de autoria na pauta neste periodo.", ln=True)
         else:
             for idx, reg in enumerate(registros_autoria, 1):
-                if pdf.get_y() > 250:
+                if pdf.get_y() > 240:
                     pdf.add_page()
                     pdf.set_y(30)
                 
-                # Card
+                # Cabeçalho da reunião
                 pdf.set_font('Helvetica', 'B', 9)
                 pdf.set_fill_color(0, 100, 0)
                 pdf.set_text_color(255, 255, 255)
@@ -551,27 +624,65 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 pdf.cell(0, 6, f"  {reg['data']} as {reg['hora']}", ln=True)
                 
                 pdf.set_x(20)
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(15, 5, "Local: ", ln=False)
                 pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                pdf.cell(0, 5, sanitize_text_pdf(reg['local'])[:60], ln=True)
+                pdf.set_text_color(80, 80, 80)
+                pdf.cell(0, 5, sanitize_text_pdf(reg['local'])[:70], ln=True)
                 
-                pdf.set_x(20)
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(0, 5, "Materias:", ln=True)
-                pdf.set_x(20)
-                pdf.set_font('Helvetica', '', 8)
-                pdf.set_text_color(0, 51, 102)
-                pdf.multi_cell(170, 4, sanitize_text_pdf(reg['proposicoes'])[:500])
+                # Cada matéria
+                for mat in reg['materias']:
+                    if pdf.get_y() > 250:
+                        pdf.add_page()
+                        pdf.set_y(30)
+                    
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.set_text_color(0, 51, 102)
+                    pdf.cell(0, 5, sanitize_text_pdf(mat['sigla']), ln=True)
+                    
+                    # Situação
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'B', 8)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(18, 4, "Situacao: ", ln=False)
+                    pdf.set_font('Helvetica', '', 8)
+                    sit = mat['situacao'] or '-'
+                    if 'Arquiv' in sit:
+                        pdf.set_text_color(150, 50, 50)
+                    elif 'Pronta' in sit:
+                        pdf.set_text_color(50, 150, 50)
+                    else:
+                        pdf.set_text_color(50, 50, 150)
+                    pdf.cell(0, 4, sanitize_text_pdf(sit)[:55], ln=True)
+                    
+                    # Relator
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'B', 8)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(18, 4, "Relator: ", ln=False)
+                    pdf.set_font('Helvetica', '', 8)
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.cell(0, 4, sanitize_text_pdf(mat['relator'])[:50], ln=True)
+                    
+                    # Ementa
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', '', 7)
+                    pdf.set_text_color(60, 60, 60)
+                    ementa = mat['ementa'][:250] + ('...' if len(mat['ementa']) > 250 else '')
+                    pdf.multi_cell(160, 3.5, sanitize_text_pdf(ementa))
+                    
+                    # Link da matéria
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'I', 6)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(0, 3, f"Materia: {mat['link']}", ln=True)
+                    pdf.ln(2)
                 
-                if reg['link']:
+                # Link do evento
+                if reg['link_evento']:
                     pdf.set_x(20)
                     pdf.set_font('Helvetica', 'I', 7)
                     pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 4, f"Link: {reg['link']}", ln=True)
+                    pdf.cell(0, 4, f"Pauta: {reg['link_evento']}", ln=True)
                 
                 pdf.ln(2)
                 pdf.set_draw_color(200, 200, 200)
@@ -584,7 +695,7 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
         pdf.set_font('Helvetica', 'B', 12)
         pdf.set_fill_color(0, 51, 102)
         pdf.set_text_color(255, 255, 255)
-        pdf.cell(0, 8, f"  RELATORIA DA DEPUTADA ({len(registros_relatoria)} registro(s))", ln=True, fill=True)
+        pdf.cell(0, 8, f"  RELATORIA DA DEPUTADA ({len(registros_relatoria)} reuniao(oes))", ln=True, fill=True)
         pdf.ln(3)
         
         if not registros_relatoria:
@@ -593,7 +704,7 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
             pdf.cell(0, 6, "Nenhuma proposicao de relatoria na pauta neste periodo.", ln=True)
         else:
             for idx, reg in enumerate(registros_relatoria, 1):
-                if pdf.get_y() > 250:
+                if pdf.get_y() > 240:
                     pdf.add_page()
                     pdf.set_y(30)
                 
@@ -607,27 +718,72 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 pdf.cell(0, 6, f"  {reg['data']} as {reg['hora']}", ln=True)
                 
                 pdf.set_x(20)
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(15, 5, "Local: ", ln=False)
                 pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                pdf.cell(0, 5, sanitize_text_pdf(reg['local'])[:60], ln=True)
+                pdf.set_text_color(80, 80, 80)
+                pdf.cell(0, 5, sanitize_text_pdf(reg['local'])[:70], ln=True)
                 
-                pdf.set_x(20)
-                pdf.set_font('Helvetica', 'B', 9)
-                pdf.set_text_color(100, 100, 100)
-                pdf.cell(0, 5, "Materias:", ln=True)
-                pdf.set_x(20)
-                pdf.set_font('Helvetica', '', 8)
-                pdf.set_text_color(0, 51, 102)
-                pdf.multi_cell(170, 4, sanitize_text_pdf(reg['proposicoes'])[:500])
+                # Cada matéria de relatoria
+                for mat in reg['materias']:
+                    if pdf.get_y() > 250:
+                        pdf.add_page()
+                        pdf.set_y(30)
+                    
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.set_text_color(0, 51, 102)
+                    pdf.cell(0, 5, sanitize_text_pdf(mat['sigla']), ln=True)
+                    
+                    # Situação
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'B', 8)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(18, 4, "Situacao: ", ln=False)
+                    pdf.set_font('Helvetica', '', 8)
+                    sit = mat['situacao'] or '-'
+                    if 'Arquiv' in sit:
+                        pdf.set_text_color(150, 50, 50)
+                    elif 'Pronta' in sit:
+                        pdf.set_text_color(50, 150, 50)
+                    else:
+                        pdf.set_text_color(50, 50, 150)
+                    pdf.cell(0, 4, sanitize_text_pdf(sit)[:55], ln=True)
+                    
+                    # Parecer (se houver)
+                    if mat['parecer']:
+                        pdf.set_x(25)
+                        pdf.set_font('Helvetica', 'B', 8)
+                        pdf.set_text_color(150, 100, 0)
+                        pdf.cell(18, 4, "Parecer: ", ln=False)
+                        pdf.set_font('Helvetica', '', 8)
+                        pdf.set_text_color(0, 0, 0)
+                        pdf.multi_cell(145, 4, sanitize_text_pdf(mat['parecer'])[:150])
+                    
+                    # Ementa
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', '', 7)
+                    pdf.set_text_color(60, 60, 60)
+                    ementa = mat['ementa'][:250] + ('...' if len(mat['ementa']) > 250 else '')
+                    pdf.multi_cell(160, 3.5, sanitize_text_pdf(ementa))
+                    
+                    # Link da matéria
+                    pdf.set_x(25)
+                    pdf.set_font('Helvetica', 'I', 6)
+                    pdf.set_text_color(100, 100, 100)
+                    pdf.cell(0, 3, f"Materia: {mat['link']}", ln=True)
+                    
+                    # Link inteiro teor (se houver)
+                    if mat.get('link_teor'):
+                        pdf.set_x(25)
+                        pdf.cell(0, 3, f"Inteiro teor: {mat['link_teor']}", ln=True)
+                    
+                    pdf.ln(2)
                 
-                if reg['link']:
+                # Link do evento
+                if reg['link_evento']:
                     pdf.set_x(20)
                     pdf.set_font('Helvetica', 'I', 7)
                     pdf.set_text_color(100, 100, 100)
-                    pdf.cell(0, 4, f"Link: {reg['link']}", ln=True)
+                    pdf.cell(0, 4, f"Pauta: {reg['link_evento']}", ln=True)
                 
                 pdf.ln(2)
                 pdf.set_draw_color(200, 200, 200)
@@ -2273,7 +2429,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v19 – PDFs profissionais Autoria/Relatoria e Comissões")
+    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
