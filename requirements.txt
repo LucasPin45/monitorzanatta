@@ -3,4 +3,6 @@ requests
 pandas
 python-dotenv
 openpyxl
+fpdf2
 xlsxwriter
+reportlab
