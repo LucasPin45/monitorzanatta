@@ -2155,13 +2155,14 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
 def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
     """
     Gera PDF de palavras-chave na pauta, organizado por Comissão.
+    Foco nas PROPOSIÇÕES (matérias), não nos eventos.
     
-    Estrutura por item:
-    - Matéria
-    - Palavras-chave
+    Estrutura por proposição:
+    - Matéria (PL, REQ, etc)
+    - Palavras-chave encontradas
     - Ementa
-    - Link
     - Relator
+    - Link
     """
     try:
         from fpdf import FPDF
@@ -2210,121 +2211,129 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
         pdf.ln(6)
         
-        # Expandir proposições por evento e agrupar por comissão
+        # Extrair todas as proposições e agrupar por comissão
         proposicoes_por_comissao = {}
+        todas_proposicoes = set()  # Para evitar duplicatas
         
         for _, row in df.iterrows():
-            comissao = row.get("orgao_sigla", "") or row.get("Comissão", "") or "Outras"
-            props_str = row.get("proposicoes_palavras_chave", "") or row.get("Proposições encontradas", "")
+            props_str = row.get("proposicoes_palavras_chave", "") or ""
             
             if not props_str or pd.isna(props_str):
                 continue
             
-            if comissao not in proposicoes_por_comissao:
-                proposicoes_por_comissao[comissao] = []
-            
             # Cada proposição está separada por "; "
             for prop_detail in str(props_str).split("; "):
-                if "|||" in prop_detail:
-                    # Formato detalhado: matéria|||palavras|||ementa|||link|||relator
-                    partes = prop_detail.split("|||")
-                    if len(partes) >= 5:
-                        materia = partes[0].strip()
-                        palavras = partes[1].strip()
-                        ementa = partes[2].strip()
-                        link = partes[3].strip()
-                        relator = partes[4].strip()
-                        
-                        proposicoes_por_comissao[comissao].append({
-                            "materia": materia,
-                            "palavras": palavras,
-                            "ementa": ementa,
-                            "link": link,
-                            "relator": relator
-                        })
-                else:
-                    # Formato antigo: [palavras] matéria - ementa
-                    proposicoes_por_comissao[comissao].append({
-                        "materia": prop_detail,
-                        "palavras": "",
-                        "ementa": "",
-                        "link": "",
-                        "relator": ""
-                    })
+                if "|||" not in prop_detail:
+                    continue
+                    
+                partes = prop_detail.split("|||")
+                
+                # Formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao
+                materia = partes[0].strip() if len(partes) > 0 else ""
+                palavras = partes[1].strip() if len(partes) > 1 else ""
+                ementa = partes[2].strip() if len(partes) > 2 else ""
+                link = partes[3].strip() if len(partes) > 3 else ""
+                relator = partes[4].strip() if len(partes) > 4 else "Sem relator designado"
+                comissao = partes[5].strip() if len(partes) > 5 else row.get("orgao_sigla", "Outras")
+                nome_comissao = partes[6].strip() if len(partes) > 6 else ""
+                
+                if not materia:
+                    continue
+                
+                # Chave única para evitar duplicatas
+                chave_unica = f"{materia}_{comissao}"
+                if chave_unica in todas_proposicoes:
+                    continue
+                todas_proposicoes.add(chave_unica)
+                
+                if comissao not in proposicoes_por_comissao:
+                    proposicoes_por_comissao[comissao] = {
+                        "nome": nome_comissao,
+                        "proposicoes": []
+                    }
+                
+                proposicoes_por_comissao[comissao]["proposicoes"].append({
+                    "materia": materia,
+                    "palavras": palavras,
+                    "ementa": ementa,
+                    "link": link,
+                    "relator": relator
+                })
         
         # Ordenar comissões alfabeticamente
         comissoes_ordenadas = sorted(proposicoes_por_comissao.keys())
         
         # Contar total de proposições
-        total_props = sum(len(props) for props in proposicoes_por_comissao.values())
+        total_props = sum(len(c["proposicoes"]) for c in proposicoes_por_comissao.values())
         
         pdf.set_font('Helvetica', 'B', 11)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Total de proposicoes encontradas: {total_props}", ln=True)
-        pdf.cell(0, 6, f"Comissoes com resultados: {len(comissoes_ordenadas)}", ln=True)
+        pdf.cell(0, 6, f"Total de materias encontradas: {total_props}", ln=True)
+        pdf.cell(0, 6, f"Comissoes: {len(comissoes_ordenadas)}", ln=True)
         pdf.ln(4)
         
         # Iterar por comissão
         for comissao in comissoes_ordenadas:
-            props = proposicoes_por_comissao[comissao]
+            dados = proposicoes_por_comissao[comissao]
+            props = dados["proposicoes"]
+            nome_comissao = dados["nome"]
+            
             if not props:
                 continue
-            
-            # Remover duplicatas por matéria
-            props_unicas = {}
-            for p in props:
-                if p["materia"] not in props_unicas:
-                    props_unicas[p["materia"]] = p
-            props = list(props_unicas.values())
             
             # Cabeçalho da Comissão
             pdf.set_fill_color(0, 102, 153)
             pdf.set_text_color(255, 255, 255)
-            pdf.set_font('Helvetica', 'B', 12)
-            pdf.cell(0, 8, f"  {sanitize_text_pdf(comissao)} ({len(props)} proposicoes)", ln=True, fill=True)
-            pdf.ln(2)
+            pdf.set_font('Helvetica', 'B', 11)
+            titulo_comissao = f"  {sanitize_text_pdf(comissao)}"
+            if nome_comissao:
+                titulo_comissao += f" - {sanitize_text_pdf(nome_comissao)}"
+            titulo_comissao += f" ({len(props)} materia{'s' if len(props) > 1 else ''})"
+            pdf.cell(0, 8, titulo_comissao, ln=True, fill=True)
+            pdf.ln(3)
             
             # Listar proposições
             for idx, prop in enumerate(props, 1):
-                pdf.set_text_color(0, 0, 0)
-                
                 # Matéria (em destaque)
-                pdf.set_font('Helvetica', 'B', 10)
+                pdf.set_font('Helvetica', 'B', 11)
                 pdf.set_text_color(0, 51, 102)
-                pdf.cell(0, 5, f"{idx}. {sanitize_text_pdf(prop['materia'])}", ln=True)
+                pdf.cell(0, 6, f"{idx}. {sanitize_text_pdf(prop['materia'])}", ln=True)
                 
                 # Palavras-chave
                 if prop.get("palavras"):
                     pdf.set_font('Helvetica', 'B', 9)
                     pdf.set_text_color(180, 0, 0)
-                    pdf.cell(20, 4, "   Palavras:", ln=False)
-                    pdf.set_font('Helvetica', '', 9)
-                    pdf.cell(0, 4, sanitize_text_pdf(prop['palavras']), ln=True)
+                    pdf.cell(0, 5, f"   Palavras-chave: {sanitize_text_pdf(prop['palavras'])}", ln=True)
                 
                 # Ementa
                 if prop.get("ementa"):
                     pdf.set_font('Helvetica', '', 9)
                     pdf.set_text_color(60, 60, 60)
                     ementa_text = sanitize_text_pdf(prop['ementa'])
-                    if len(ementa_text) > 200:
-                        ementa_text = ementa_text[:200] + "..."
+                    if len(ementa_text) > 250:
+                        ementa_text = ementa_text[:250] + "..."
                     pdf.multi_cell(0, 4, f"   {ementa_text}")
                 
                 # Relator
-                if prop.get("relator"):
+                relator_text = prop.get("relator", "").strip()
+                if relator_text and relator_text != "Sem relator designado" and relator_text != "(-)" and "(-)" not in relator_text:
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.set_text_color(0, 100, 0)
+                    pdf.cell(0, 5, f"   Relator(a): {sanitize_text_pdf(relator_text)}", ln=True)
+                else:
                     pdf.set_font('Helvetica', 'I', 9)
-                    pdf.set_text_color(80, 80, 80)
-                    pdf.cell(0, 4, f"   Relator: {sanitize_text_pdf(prop['relator'])}", ln=True)
+                    pdf.set_text_color(150, 150, 150)
+                    pdf.cell(0, 5, "   Relator(a): Sem relator designado", ln=True)
                 
                 # Link
                 if prop.get("link"):
                     pdf.set_font('Helvetica', '', 8)
-                    pdf.set_text_color(0, 0, 200)
+                    pdf.set_text_color(0, 0, 180)
                     pdf.cell(0, 4, f"   {prop['link']}", ln=True)
                 
-                pdf.ln(2)
+                pdf.ln(3)
             
-            pdf.ln(3)
+            pdf.ln(2)
         
         pdf_bytes = pdf.output()
         return (bytes(pdf_bytes), "application/pdf", "pdf")
@@ -3423,13 +3432,22 @@ def escanear_eventos(
                 relator_nome = relator_info.get("nome") or ""
                 relator_partido = relator_info.get("siglaPartido") or ""
                 relator_uf = relator_info.get("siglaUf") or ""
-                relator_str = f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome else "Sem relator designado"
+                if relator_nome:
+                    relator_str = f"{relator_nome} ({relator_partido}-{relator_uf})"
+                else:
+                    relator_str = "Sem relator designado"
                 
                 # Link para tramitação
                 link_tram = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={id_prop}" if id_prop else ""
                 
-                # Armazenar com formato detalhado: matéria|palavras|ementa|link|relator
-                proposicoes_palavras_chave.add(f"{identificacao}|||{', '.join(kws_item)}|||{ementa_prop}|||{link_tram}|||{relator_str}")
+                # Armazenar com formato detalhado incluindo comissão
+                # formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao
+                for org in orgaos:
+                    sigla_org_temp = org.get("siglaOrgao") or org.get("sigla") or ""
+                    nome_org_temp = org.get("nomeOrgao") or org.get("nome") or ""
+                    proposicoes_palavras_chave.add(
+                        f"{identificacao}|||{', '.join(kws_item)}|||{ementa_prop}|||{link_tram}|||{relator_str}|||{sigla_org_temp}|||{nome_org_temp}"
+                    )
 
         if not (proposicoes_relatoria or proposicoes_autoria or palavras_evento):
             continue
@@ -4170,7 +4188,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
+    st.caption("v22")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -4586,65 +4604,81 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             if df_kw.empty:
                 st.info("Sem palavras-chave no período.")
             else:
-                # Mostrar quantidade de proposições encontradas
-                st.success(f"🔍 **{len(df_kw)} eventos** com palavras-chave encontradas!")
+                # Extrair proposições individuais para exibição focada na matéria
+                lista_proposicoes = []
                 
-                # Criar versão formatada para exibição na tabela
-                def formatar_proposicoes_tabela(props_str):
-                    """Converte formato interno para exibição amigável"""
+                for _, row in df_kw.iterrows():
+                    props_str = row.get("proposicoes_palavras_chave", "")
                     if not props_str or pd.isna(props_str):
-                        return ""
-                    resultado = []
-                    for prop in str(props_str).split("; "):
-                        if "|||" in prop:
-                            partes = prop.split("|||")
-                            materia = partes[0].strip() if len(partes) > 0 else ""
-                            palavras = partes[1].strip() if len(partes) > 1 else ""
-                            resultado.append(f"[{palavras}] {materia}")
-                        else:
-                            resultado.append(prop)
-                    return "; ".join(resultado)
+                        continue
+                    
+                    for prop_detail in str(props_str).split("; "):
+                        if "|||" not in prop_detail:
+                            continue
+                        
+                        partes = prop_detail.split("|||")
+                        materia = partes[0].strip() if len(partes) > 0 else ""
+                        palavras = partes[1].strip() if len(partes) > 1 else ""
+                        ementa = partes[2].strip() if len(partes) > 2 else ""
+                        link = partes[3].strip() if len(partes) > 3 else ""
+                        relator = partes[4].strip() if len(partes) > 4 else ""
+                        comissao = partes[5].strip() if len(partes) > 5 else row.get("orgao_sigla", "")
+                        nome_comissao = partes[6].strip() if len(partes) > 6 else row.get("orgao_nome", "")
+                        
+                        if materia:
+                            lista_proposicoes.append({
+                                "Matéria": materia,
+                                "Palavras-chave": palavras,
+                                "Comissão": comissao,
+                                "Nome Comissão": nome_comissao,
+                                "Relator": relator if relator and "(-)" not in relator else "Sem relator",
+                                "Ementa": ementa[:100] + "..." if len(ementa) > 100 else ementa,
+                                "Link": link
+                            })
                 
-                view = df_kw[
-                    ["data", "hora", "orgao_sigla", "orgao_nome", "id_evento", "tipo_evento",
-                     "palavras_chave_encontradas", "proposicoes_palavras_chave", "descricao_evento"]
-                ].copy()
-                view["data"] = pd.to_datetime(view["data"], errors="coerce").dt.strftime("%d/%m/%Y")
+                # Criar DataFrame e remover duplicatas
+                df_props = pd.DataFrame(lista_proposicoes)
                 
-                # Formatar proposições para exibição
-                view["proposicoes_formatadas"] = view["proposicoes_palavras_chave"].apply(formatar_proposicoes_tabela)
-                
-                # Renomear colunas para exibição
-                view_display = view[["data", "hora", "orgao_sigla", "orgao_nome", "palavras_chave_encontradas", "proposicoes_formatadas"]].copy()
-                view_display = view_display.rename(columns={
-                    "orgao_sigla": "Comissão",
-                    "orgao_nome": "Nome Comissão",
-                    "palavras_chave_encontradas": "Palavras-chave",
-                    "proposicoes_formatadas": "Proposições encontradas"
-                })
-
-                st.dataframe(view_display, use_container_width=True, hide_index=True)
-
-                col_x2, col_p2 = st.columns(2)
-                with col_x2:
-                    data_bytes, mime, ext = to_xlsx_bytes(view_display, "PalavrasChave_Pauta")
-                    st.download_button(
-                        f"⬇️ XLSX",
-                        data=data_bytes,
-                        file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{ext}",
-                        mime=mime,
-                        key="download_kw_xlsx"
+                if df_props.empty:
+                    st.info("Sem matérias com palavras-chave encontradas.")
+                else:
+                    df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
+                    df_props = df_props.sort_values(["Comissão", "Matéria"])
+                    
+                    # Mostrar quantidade
+                    st.success(f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em **{df_props['Comissão'].nunique()} comissões**!")
+                    
+                    # Exibir tabela focada nas proposições
+                    st.dataframe(
+                        df_props,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
+                            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                        }
                     )
-                with col_p2:
-                    # Usar df_kw para PDF (tem todas as colunas necessárias)
-                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_palavras_chave(df_kw)
-                    st.download_button(
-                        f"⬇️ PDF",
-                        data=pdf_bytes,
-                        file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{pdf_ext}",
-                        mime=pdf_mime,
-                        key="download_kw_pdf"
-                    )
+
+                    col_x2, col_p2 = st.columns(2)
+                    with col_x2:
+                        data_bytes, mime, ext = to_xlsx_bytes(df_props, "PalavrasChave_Pauta")
+                        st.download_button(
+                            f"⬇️ XLSX",
+                            data=data_bytes,
+                            file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{ext}",
+                            mime=mime,
+                            key="download_kw_xlsx"
+                        )
+                    with col_p2:
+                        # Usar df_kw para PDF (tem todas as colunas necessárias)
+                        pdf_bytes, pdf_mime, pdf_ext = to_pdf_palavras_chave(df_kw)
+                        st.download_button(
+                            f"⬇️ PDF",
+                            data=pdf_bytes,
+                            file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{pdf_ext}",
+                            mime=pdf_mime,
+                            key="download_kw_pdf"
+                        )
 
     # ============================================================
     # ABA 4 - COMISSÕES ESTRATÉGICAS
@@ -5571,7 +5605,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
