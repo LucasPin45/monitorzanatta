@@ -3929,7 +3929,7 @@ def main():
         page_title="Monitor Legislativo – Dep. Júlia Zanatta",
         page_icon="🏛️",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
     )
     
     st.markdown("""
@@ -4026,31 +4026,38 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
         with col1:
             st.markdown("""
 **2️⃣ Autoria & Relatoria na pauta**
-- Proposições de **autoria** da deputada que estão na pauta
+- Proposições de **autoria** da deputada que estão na pauta da semana
 - Proposições onde a deputada é **relatora**
-- Filtrado pelo período selecionado na barra lateral
+- Filtrado pelo período selecionado
 
 **3️⃣ Palavras-chave na pauta**
-- Busca por **palavras-chave** configuradas
-- Identifica proposições de interesse temático
-- Vacinas, armas, aborto, PIX, DREX, etc.
+- Busca por **palavras-chave** configuráveis
+- Identifica proposições de interesse temático em pauta na semana
+- Configure suas próprias palavras-chave
 
 **4️⃣ Comissões estratégicas**
-- Eventos nas comissões de interesse
-- CDC, CCOM, CE, CREDN, CCJC
+- Eventos de atenção nas comissões em que a deputada é membro
+- Em 2025: **CDC, CCOM, CE, CREDN, CCJC**
+- Configure as comissões de interesse
             """)
         
         with col2:
             st.markdown("""
 **5️⃣ Buscar Proposição Específica**
-- Busca livre por qualquer proposição
+- Busca livre por qualquer proposição de autoria da deputada
 - Filtros por ano e tipo
-- Detalhes completos com linha do tempo
+- Detalhes completos das proposições com linha do tempo
 
 **6️⃣ Matérias por situação atual**
-- Visão geral da **carteira de proposições**
+- Visão geral das matérias com filtros avançados
 - Gráficos analíticos por situação, tema, órgão
-- Filtros multi-nível avançados
+- Filtros multi-nível (tipo, ano, órgão, tema)
+
+**7️⃣ RICs (Requerimentos de Informação)**
+- Acompanhamento de RICs enviados aos ministérios
+- Prazo constitucional de **30 dias** para resposta
+- Status: Aguardando, Fora do prazo, Respondido
+- Indicadores de urgência por prazo
             """)
         
         st.markdown("---")
@@ -4067,7 +4074,8 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 | **PRC** | Projeto de Resolução da Câmara | Normas internas da Câmara |
 | **PLV** | Projeto de Lei de Conversão | Conversão de Medida Provisória em lei |
 | **MPV** | Medida Provisória | Ato do Presidente com força de lei |
-| **RIC** | Requerimento de Informação | Pedido de informações a órgãos públicos |
+| **RIC** | Requerimento de Informação | Pedido de informações a órgãos públicos (prazo: 30 dias) |
+| **REQ** | Requerimento | Solicitação formal ao Legislativo |
             """)
         
         with st.expander("📊 Situações de Tramitação", expanded=False):
@@ -4079,23 +4087,49 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 | **Pronta para Pauta** | Parecer aprovado, aguarda inclusão em pauta de votação |
 | **Tramitando em Conjunto** | Apensada a outra proposição principal |
 | **Aguardando Deliberação** | Na pauta, aguardando votação |
+| **Aguardando Resposta** | RIC aguardando resposta do Poder Executivo |
+| **Aguardando Remessa ao Arquivo** | Proposição concluída, aguardando arquivamento |
 | **Arquivada** | Proposição arquivada (fim de legislatura ou rejeição) |
             """)
         
-        with st.expander("🚦 Indicadores de Urgência", expanded=False):
+        with st.expander("🚦 Indicadores de Urgência (RICs e Proposições)", expanded=False):
             st.markdown("""
+**Para RICs (prazo de resposta):**
+| Sinal | Condição | Nível |
+|-------|----------|-------|
+| 🚨 | ≤ 2 dias ou VENCIDO | **URGENTÍSSIMO** - Ação imediata |
+| ⚠️ | ≤ 5 dias | **URGENTE** - Prioridade alta |
+| 🔔 | ≤ 15 dias | **ATENÇÃO** - Acompanhar |
+| ✅ | Respondido | **CONCLUÍDO** |
+
+**Para Proposições (tempo parado):**
 | Sinal | Tempo parado | Nível |
 |-------|--------------|-------|
-| 🚨 | ≤ 2 dias | **URGENTÍSSIMO** - Ação imediata necessária |
-| ⚠️ | ≤ 5 dias | **URGENTE** - Requer atenção prioritária |
-| 🔔 | ≤ 15 dias | **RECENTE** - Acompanhar de perto |
 | 🟢 | < 7 dias | Normal - Em movimento |
 | 🟡 | 7-14 dias | Atenção - Verificar |
 | 🟠 | 15-29 dias | Alerta - Possível estagnação |
 | 🔴 | ≥ 30 dias | Crítico - Parado há muito tempo |
             """)
         
-        with st.expander("🏛️ Comissões Estratégicas Monitoradas", expanded=False):
+        with st.expander("📅 Prazo de RICs (Regra Constitucional)", expanded=False):
+            st.markdown("""
+**Regra de contagem do prazo de 30 dias:**
+
+1. **Remessa**: A 1ª Secretaria envia o RIC ao Ministério via ofício
+2. **Dia 1**: Primeiro dia **útil** após a remessa
+3. **Dia 30**: 30º dia se for útil, ou **próximo dia útil** se cair em fim de semana
+
+**Status possíveis:**
+| Status | Descrição |
+|--------|-----------|
+| **Em tramitação na Câmara** | RIC ainda não foi remetido ao Executivo |
+| **Aguardando resposta** | Remetido, dentro do prazo |
+| **Fora do prazo** | Prazo vencido, sem resposta |
+| **Respondido** | Resposta recebida dentro do prazo |
+| **Respondido fora do prazo** | Resposta após o vencimento |
+            """)
+        
+        with st.expander("🏛️ Comissões Estratégicas (2025)", expanded=False):
             st.markdown("""
 | Sigla | Nome Completo |
 |-------|---------------|
@@ -4129,21 +4163,25 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
         st.markdown("### ⚙️ Como Usar")
         
         st.info("""
-1. **Configure o período** na barra lateral (datas de início e fim)
-2. **Clique em "Rodar monitoramento"** para buscar eventos da pauta
-3. **Navegue pelas abas** para ver diferentes visões dos dados
-4. **Use os filtros** para refinar os resultados
-5. **Exporte para XLSX** os dados que precisar
+**Cada aba é independente - basta selecionar o período e clicar no botão!**
+
+1. **Abas 2, 3 e 4** - Configure a data e parâmetros, depois clique em "Carregar pauta"
+2. **Aba 5** - Busque proposições específicas por tipo e ano
+3. **Aba 6** - Carregue todas as matérias e use os filtros
+4. **Aba 7** - Acompanhe os RICs e seus prazos de resposta
+5. **Exporte para XLSX ou PDF** os dados que precisar
         """)
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     # ============================================================
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
     # ============================================================
     with tab2:
         st.subheader("Autoria & Relatoria na pauta")
+        
+        st.info("💡 **Dica:** Selecione o período da semana e clique em **Carregar pauta** para ver as proposições de sua autoria ou relatoria que estão na pauta de votações.")
         
         # Período de busca e botão de rodar
         col_periodo, col_btn = st.columns([3, 1])
@@ -4265,6 +4303,8 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     with tab3:
         st.subheader("Palavras-chave na pauta")
         
+        st.info("💡 **Dica:** Configure palavras-chave de interesse (ex: vacina, aborto, armas) para monitorar proposições temáticas na pauta da semana.")
+        
         # Controles: Data + Palavras-chave + Botão
         col_data_t3, col_kw_t3 = st.columns([1, 1])
         
@@ -4356,6 +4396,8 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     with tab4:
         st.subheader("Comissões estratégicas")
         
+        st.info("💡 **Dica:** Acompanhe eventos nas comissões em que a deputada é membro. Configure as siglas das comissões de interesse (ex: CDC, CCJC, CREDN).")
+        
         # Controles: Data + Comissões + Botão
         col_data_t4, col_com_t4 = st.columns([1, 1])
         
@@ -4445,6 +4487,9 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     # ============================================================
     with tab5:
         st.markdown("### 🔍 Buscar Proposição Específica")
+        
+        st.info("💡 **Dica:** Use os filtros de ano e tipo para encontrar proposições específicas. Clique em uma proposição na tabela para ver detalhes completos, tramitação e estratégia.")
+        
         st.caption("Busque proposições de autoria da deputada e veja detalhes completos")
 
         # Botão de limpar cache
@@ -4600,6 +4645,9 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     # ============================================================
     with tab6:
         st.markdown("### 📊 Matérias por situação atual")
+        
+        st.info("💡 **Dica:** Visualize a carteira completa de proposições por situação de tramitação. Use os filtros para segmentar por ano, tipo, órgão e tema. Clique em uma proposição para ver detalhes.")
+        
         st.caption("Análise da carteira de proposições por status de tramitação")
 
         with st.spinner("Carregando proposições de autoria..."):
@@ -4924,11 +4972,14 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     # ============================================================
     with tab7:
         st.markdown("### 📋 RICs - Requerimentos de Informação")
+        
+        st.info("💡 **Dica:** Acompanhe os prazos de resposta dos RICs (30 dias). Use os filtros de status para identificar RICs vencidos ou próximos do vencimento. Clique em um RIC para ver detalhes e tramitação.")
+        
         st.markdown("""
         **Acompanhamento dos Requerimentos de Informação** da Deputada Júlia Zanatta.
         
         O RIC é um instrumento de fiscalização que permite ao parlamentar solicitar informações 
-        a Ministros de Estado sobre atos de suas pastas. O Poder Executivo tem **30 dias úteis** 
+        a Ministros de Estado sobre atos de suas pastas. O Poder Executivo tem **30 dias** 
         para responder, contados a partir do dia útil seguinte à remessa do ofício.
         """)
         
