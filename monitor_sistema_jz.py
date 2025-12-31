@@ -31,8 +31,43 @@ import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Backend não-interativo
 
-# Timezone de Brasília
+# ============================================================
+# CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
+# ============================================================
+
+st.set_page_config(
+    page_title="Acesso restrito – Gabinete da Deputada Júlia Zanatta",
+    layout="centered"
+)
+
+# ============================================================
+# CONTROLE DE ACESSO — ACESSO RESTRITO AO GABINETE
+# ============================================================
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.markdown("## 🔒 Acesso restrito – Gabinete da Deputada Júlia Zanatta")
+    st.markdown("Este sistema é de uso interno do gabinete.")
+
+    senha = st.text_input("Digite a senha de acesso", type="password")
+
+    if senha:
+        if senha == st.secrets["auth"]["senha"]:
+            st.session_state.autenticado = True
+            st.experimental_rerun()
+        else:
+            st.error("Senha incorreta")
+
+    st.stop()
+
+# ============================================================
+# TIMEZONE DE BRASÍLIA
+# ============================================================
+
 TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
 
 def get_brasilia_now():
     """Retorna datetime atual no fuso de Brasília."""
