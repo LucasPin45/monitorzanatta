@@ -5722,6 +5722,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         df_rics = st.session_state.get("df_rics_completo", pd.DataFrame())
         
         if not df_rics.empty:
+            # Mostrar distribuição por ano para debug
+            anos_dist = df_rics["ano"].value_counts().sort_index(ascending=False)
+            anos_info = ", ".join([f"{ano}: {qtd}" for ano, qtd in anos_dist.items() if str(ano).strip()])
+            st.caption(f"📅 Distribuição por ano: {anos_info}")
+            
             st.markdown("---")
             
             # ============================================================
@@ -5731,9 +5736,21 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 col_f1, col_f2, col_f3, col_f4 = st.columns(4)
                 
                 with col_f1:
-                    # Filtro por ano
-                    anos_ric = sorted(df_rics["ano"].dropna().unique().tolist(), reverse=True)
-                    anos_sel_ric = st.multiselect("Ano", options=anos_ric, default=anos_ric[:2] if len(anos_ric) >= 2 else anos_ric, key="anos_ric")
+                    # Filtro por ano - apenas anos válidos (4 dígitos)
+                    todos_anos = df_rics["ano"].dropna().unique().tolist()
+                    anos_validos = [str(a) for a in todos_anos if str(a).strip().isdigit() and len(str(a).strip()) == 4]
+                    anos_invalidos = [a for a in todos_anos if str(a).strip() not in anos_validos]
+                    
+                    anos_ric = sorted(anos_validos, reverse=True)
+                    
+                    # Contar RICs sem ano válido
+                    rics_sem_ano = len(df_rics[~df_rics["ano"].isin(anos_validos)])
+                    
+                    # Default: todos os anos disponíveis
+                    anos_sel_ric = st.multiselect("Ano", options=anos_ric, default=anos_ric, key="anos_ric")
+                    
+                    if rics_sem_ano > 0:
+                        st.caption(f"⚠️ {rics_sem_ano} RICs sem ano válido")
                 
                 with col_f2:
                     # Filtro por status de resposta - incluindo novos status
@@ -5793,15 +5810,24 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             # ============================================================
             st.markdown("### 📊 Resumo dos RICs")
             
+            # Total geral vs filtrado
+            total_geral = len(df_rics)
+            total_filtrado = len(df_rics_fil)
+            
+            # Mostrar indicação se há filtro ativo
+            if total_filtrado < total_geral:
+                st.caption(f"📌 Exibindo **{total_filtrado}** de **{total_geral}** RICs (filtros ativos)")
+            
             col_m1, col_m2, col_m3, col_m4, col_m5, col_m6, col_m7 = st.columns(7)
             
-            total_rics = len(df_rics_fil)
+            total_rics = total_filtrado
             em_tramitacao = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Em tramitação na Câmara"])
             aguardando = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Aguardando resposta"])
             fora_prazo = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Fora do prazo"])
-            # Respondidos inclui "Respondido" e "Respondido fora do prazo"
-            respondidos = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"].isin(["Respondido", "Respondido fora do prazo"])])
+            # Separar respondidos no prazo e fora do prazo para a soma bater
+            respondidos_ok = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido"])
             respondidos_fora = len(df_rics_fil[df_rics_fil["RIC_StatusResposta"] == "Respondido fora do prazo"])
+            respondidos_total = respondidos_ok + respondidos_fora
             
             # Calcular urgentes (vencendo em até 5 dias, excluindo respondidos)
             urgentes = 0
@@ -5817,19 +5843,28 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         pass
             
             with col_m1:
-                st.metric("Total", total_rics)
+                # Mostrar total com indicação se filtrado
+                if total_filtrado < total_geral:
+                    st.metric("Total", total_rics, help=f"Filtrado: {total_filtrado} de {total_geral} RICs")
+                else:
+                    st.metric("Total", total_rics)
             with col_m2:
-                st.metric("🏛️ Na Câmara", em_tramitacao)
+                st.metric("🏛️ Na Câmara", em_tramitacao, help="RICs ainda em tramitação interna na Câmara")
             with col_m3:
-                st.metric("⏳ Aguardando", aguardando)
+                st.metric("⏳ Aguardando", aguardando, help="Enviados ao Ministério, aguardando resposta dentro do prazo")
             with col_m4:
-                st.metric("⚠️ Fora prazo", fora_prazo, delta=f"-{fora_prazo}" if fora_prazo > 0 else None, delta_color="inverse")
+                st.metric("🚨 S/ resposta", fora_prazo, delta=f"-{fora_prazo}" if fora_prazo > 0 else None, delta_color="inverse", help="Sem resposta e prazo vencido")
             with col_m5:
-                st.metric("✅ Respondidos", respondidos)
+                st.metric("✅ Resp. OK", respondidos_ok, help="Respondidos dentro do prazo de 30 dias")
             with col_m6:
-                st.metric("⚠️ Resp. fora", respondidos_fora)
+                st.metric("⚠️ Resp. atraso", respondidos_fora, help="Respondidos após o prazo de 30 dias")
             with col_m7:
-                st.metric("🔔 Urgentes", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off")
+                st.metric("🔔 Urgentes", urgentes, delta=f"{urgentes}" if urgentes > 0 else None, delta_color="off", help="Vencendo em até 5 dias")
+            
+            # Mostrar validação da soma
+            soma = em_tramitacao + aguardando + fora_prazo + respondidos_ok + respondidos_fora
+            if soma != total_rics:
+                st.warning(f"⚠️ Soma das categorias ({soma}) difere do total ({total_rics}). Pode haver status não mapeado.")
             
             st.markdown("---")
             
