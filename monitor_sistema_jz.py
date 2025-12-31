@@ -52,7 +52,8 @@ DEPUTADA_ID_PADRAO = 220559
 HEADERS = {"User-Agent": "MonitorZanatta/22.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
-    "Vacina", "Armas", "Arma", "Aborto", "Conanda", "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF"
+    "Vacina", "Vacinas", "Armas", "Arma", "Armamento", "Aborto", "Conanda", 
+    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística"
 ]
 
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
@@ -2314,16 +2315,15 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
                         ementa_text = ementa_text[:250] + "..."
                     pdf.multi_cell(0, 4, f"   {ementa_text}")
                 
-                # Relator
+                # Relator - SEMPRE mostrar, mesmo se vazio
                 relator_text = prop.get("relator", "").strip()
-                if relator_text and relator_text != "Sem relator designado" and relator_text != "(-)" and "(-)" not in relator_text:
-                    pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_font('Helvetica', 'B', 9)
+                if relator_text and relator_text != "Sem relator designado" and "(-)" not in relator_text and relator_text != "(-)" and len(relator_text) > 3:
                     pdf.set_text_color(0, 100, 0)
-                    pdf.cell(0, 5, f"   Relator(a): {sanitize_text_pdf(relator_text)}", ln=True)
+                    pdf.cell(0, 5, f"   Relator: {sanitize_text_pdf(relator_text)}", ln=True)
                 else:
-                    pdf.set_font('Helvetica', 'I', 9)
                     pdf.set_text_color(150, 150, 150)
-                    pdf.cell(0, 5, "   Relator(a): Sem relator designado", ln=True)
+                    pdf.cell(0, 5, "   Relator: Sem relator designado", ln=True)
                 
                 # Link
                 if prop.get("link"):
@@ -3278,6 +3278,9 @@ def pauta_item_palavras_chave(item, palavras_chave_normalizadas, id_prop=None):
     """
     Busca palavras-chave na ementa e descrição do item da pauta.
     Se id_prop for fornecido, também busca a ementa completa da proposição na API.
+    
+    IMPORTANTE: Busca por PALAVRA INTEIRA para evitar falsos positivos
+    (ex: "arma" não deve casar com "Farmanguinhos")
     """
     textos = []
     
@@ -3309,9 +3312,16 @@ def pauta_item_palavras_chave(item, palavras_chave_normalizadas, id_prop=None):
 
     texto_norm = normalize_text(" ".join(textos))
     encontradas = set()
+    
     for kw_norm, kw_original in palavras_chave_normalizadas:
-        if kw_norm and kw_norm in texto_norm:
+        if not kw_norm:
+            continue
+        # Usar regex com word boundary para buscar palavra inteira
+        # Isso evita que "arma" case com "farmanguinhos"
+        pattern = r'\b' + re.escape(kw_norm) + r'\b'
+        if re.search(pattern, texto_norm):
             encontradas.add(kw_original)
+    
     return encontradas
 
 
@@ -5605,7 +5615,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
         st.markdown("---")
-        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
