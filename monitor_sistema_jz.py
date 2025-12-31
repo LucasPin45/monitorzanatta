@@ -4529,24 +4529,252 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     # ABA 1 - APRESENTAÇÃO E GLOSSÁRIO
     # ============================================================
-    with tab1:
-        st.subheader("📖 Apresentação do Sistema")
-        
-        st.markdown("""
-Este **Monitor Legislativo** foi desenvolvido para acompanhar em tempo real a atuação parlamentar 
-da Deputada Federal **Júlia Zanatta (PL-SC)** na Câmara dos Deputados.
+   # ============================================================
+# CÓDIGO PARA SUBSTITUIR A ABA 1 - DASHBOARD EXECUTIVO
+# ============================================================
+# Substitua todo o conteúdo do "with tab1:" (linhas 4532-4698)
+# por este código abaixo:
+# ============================================================
 
-O sistema consulta a **API de Dados Abertos da Câmara dos Deputados** para fornecer informações 
-atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
-        """)
+    with tab1:
+        st.title("📊 Dashboard Executivo")
+        
+        # ============================================================
+        # HEADER COM DADOS DA DEPUTADA
+        # ============================================================
+        col_foto, col_info = st.columns([1, 5])
+        with col_foto:
+            try:
+                st.image(f"https://www.camara.leg.br/internet/deputado/bandep/{id_deputada}.jpg", width=120)
+            except:
+                st.markdown("👤")
+        with col_info:
+            st.markdown(f"### {nome_deputada}")
+            st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada} | **ID:** `{id_deputada}`")
+            st.markdown(f"🕐 **Última atualização:** {get_brasilia_now().strftime('%d/%m/%Y às %H:%M:%S')}")
         
         st.markdown("---")
-        st.markdown("### 🎯 Funcionalidades por Aba")
         
-        col1, col2 = st.columns(2)
+        # ============================================================
+        # BUSCAR MÉTRICAS RÁPIDAS
+        # ============================================================
+        with st.spinner("📊 Carregando métricas do dashboard..."):
+            try:
+                # Buscar proposições de autoria (últimos 2 anos)
+                url_autoria = f"{BASE_URL}/proposicoes"
+                params_autoria = {
+                    "idDeputadoAutor": id_deputada,
+                    "dataInicio": "2023-01-01",
+                    "ordem": "DESC",
+                    "ordenarPor": "id",
+                    "itens": 100
+                }
+                resp_autoria = requests.get(url_autoria, headers=HEADERS, params=params_autoria, timeout=30)
+                resp_autoria.raise_for_status()
+                props_autoria = resp_autoria.json().get("dados", [])
+                
+                # Buscar relatoria
+                url_relatoria = f"{BASE_URL}/proposicoes"
+                params_relatoria = {
+                    "idDeputadoRelator": id_deputada,
+                    "ordem": "DESC",
+                    "ordenarPor": "id",
+                    "itens": 100
+                }
+                resp_relatoria = requests.get(url_relatoria, headers=HEADERS, params=params_relatoria, timeout=30)
+                resp_relatoria.raise_for_status()
+                props_relatoria = resp_relatoria.json().get("dados", [])
+                
+            except Exception as e:
+                st.error(f"⚠️ Erro ao carregar métricas: {e}")
+                props_autoria = []
+                props_relatoria = []
+        
+        # ============================================================
+        # CARDS DE MÉTRICAS (KPIs)
+        # ============================================================
+        st.markdown("### 📈 Visão Geral")
+        
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.markdown("""
+            st.metric(
+                label="📝 Proposições de Autoria",
+                value=len(props_autoria),
+                help="Total de proposições de autoria nos últimos 2 anos"
+            )
+        
+        with col2:
+            st.metric(
+                label="📋 Como Relatora",
+                value=len(props_relatoria),
+                help="Total de proposições onde é relatora"
+            )
+        
+        with col3:
+            # Contar proposições tramitando (não arquivadas)
+            tramitando = sum(1 for p in props_autoria if "Arquivada" not in str(p.get("statusProposicao", {}).get("descricaoSituacao", "")))
+            st.metric(
+                label="🔄 Em Tramitação",
+                value=tramitando,
+                help="Proposições de autoria em tramitação ativa"
+            )
+        
+        with col4:
+            # Contar arquivadas
+            arquivadas = sum(1 for p in props_autoria if "Arquivada" in str(p.get("statusProposicao", {}).get("descricaoSituacao", "")))
+            st.metric(
+                label="📁 Arquivadas",
+                value=arquivadas,
+                help="Proposições de autoria arquivadas"
+            )
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # ÚLTIMAS MOVIMENTAÇÕES (48 horas)
+        # ============================================================
+        st.markdown("### 🔔 Últimas Movimentações (últimas 48 horas)")
+        
+        movimentacoes_recentes = []
+        
+        with st.spinner("🔍 Verificando tramitações recentes..."):
+            # Buscar últimas tramitações das 30 proposições mais recentes
+            data_corte = (get_brasilia_now() - datetime.timedelta(hours=48)).strftime("%Y-%m-%d")
+            
+            for prop in props_autoria[:30]:
+                try:
+                    prop_id = prop['id']
+                    url_tram = f"{BASE_URL}/proposicoes/{prop_id}/tramitacoes"
+                    params_tram = {"ordem": "DESC", "ordenarPor": "dataHora", "itens": 1}
+                    
+                    resp_tram = requests.get(url_tram, headers=HEADERS, params=params_tram, timeout=10)
+                    resp_tram.raise_for_status()
+                    tramitacoes = resp_tram.json().get("dados", [])
+                    
+                    if tramitacoes:
+                        tram = tramitacoes[0]
+                        data_tram = tram.get("dataHora", "")[:10]
+                        
+                        # Verificar se é recente (últimas 48h)
+                        if data_tram >= data_corte:
+                            movimentacoes_recentes.append({
+                                "proposicao": f"{prop.get('siglaTipo', '')} {prop.get('numero', '')}/{prop.get('ano', '')}",
+                                "data": data_tram,
+                                "descricao": tram.get("despacho", "") or tram.get("descricaoTramitacao", ""),
+                                "link": f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}"
+                            })
+                    
+                    time.sleep(0.2)  # Rate limit
+                    
+                except Exception:
+                    continue
+        
+        if movimentacoes_recentes:
+            # Ordenar por data (mais recente primeiro)
+            movimentacoes_recentes.sort(key=lambda x: x['data'], reverse=True)
+            
+            for mov in movimentacoes_recentes[:10]:  # Mostrar apenas as 10 mais recentes
+                with st.container():
+                    col_data, col_info = st.columns([1, 4])
+                    with col_data:
+                        dt_obj = datetime.datetime.strptime(mov['data'], "%Y-%m-%d")
+                        st.markdown(f"**{dt_obj.strftime('%d/%m/%Y')}**")
+                    with col_info:
+                        st.markdown(f"**{mov['proposicao']}**")
+                        st.caption(mov['descricao'])
+                        st.markdown(f"[🔗 Ver tramitação]({mov['link']})")
+                    st.markdown("---")
+        else:
+            st.info("📭 Nenhuma movimentação nas últimas 48 horas.")
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # GRÁFICOS RESUMIDOS
+        # ============================================================
+        st.markdown("### 📊 Análise Rápida")
+        
+        col_graf1, col_graf2 = st.columns(2)
+        
+        with col_graf1:
+            # Gráfico por tipo de proposição
+            if props_autoria:
+                tipos = {}
+                for p in props_autoria:
+                    tipo = p.get('siglaTipo', 'Outro')
+                    tipos[tipo] = tipos.get(tipo, 0) + 1
+                
+                df_tipos = pd.DataFrame(list(tipos.items()), columns=['Tipo', 'Quantidade'])
+                df_tipos = df_tipos.sort_values('Quantidade', ascending=False)
+                
+                fig, ax = plt.subplots(figsize=(8, 5))
+                ax.barh(df_tipos['Tipo'], df_tipos['Quantidade'], color='steelblue')
+                ax.set_xlabel('Quantidade')
+                ax.set_title('Proposições por Tipo')
+                ax.grid(axis='x', alpha=0.3)
+                st.pyplot(fig)
+                plt.close()
+        
+        with col_graf2:
+            # Gráfico por situação
+            if props_autoria:
+                situacoes = {}
+                for p in props_autoria:
+                    situacao = p.get('statusProposicao', {}).get('descricaoSituacao', 'Não identificada')
+                    # Simplificar nomes longos
+                    if len(situacao) > 30:
+                        situacao = situacao[:27] + "..."
+                    situacoes[situacao] = situacoes.get(situacao, 0) + 1
+                
+                df_situacoes = pd.DataFrame(list(situacoes.items()), columns=['Situação', 'Quantidade'])
+                df_situacoes = df_situacoes.sort_values('Quantidade', ascending=False).head(8)
+                
+                fig, ax = plt.subplots(figsize=(8, 5))
+                ax.barh(df_situacoes['Situação'], df_situacoes['Quantidade'], color='coral')
+                ax.set_xlabel('Quantidade')
+                ax.set_title('Proposições por Situação (Top 8)')
+                ax.grid(axis='x', alpha=0.3)
+                st.pyplot(fig)
+                plt.close()
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # ALERTAS E AÇÕES RÁPIDAS
+        # ============================================================
+        st.markdown("### ⚡ Ações Rápidas")
+        
+        col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+        
+        with col_btn1:
+            if st.button("📅 Ver Pauta da Semana", use_container_width=True):
+                st.info("👉 Vá para a aba 2️⃣ **Autoria & Relatoria na pauta**")
+        
+        with col_btn2:
+            if st.button("🔍 Buscar Proposição", use_container_width=True):
+                st.info("👉 Vá para a aba 5️⃣ **Buscar Proposição Específica**")
+        
+        with col_btn3:
+            if st.button("📊 Ver Todas as Matérias", use_container_width=True):
+                st.info("👉 Vá para a aba 6️⃣ **Matérias por situação atual**")
+        
+        with col_btn4:
+            if st.button("📝 Ver RICs", use_container_width=True):
+                st.info("👉 Vá para a aba 7️⃣ **RICs (Requerimentos)**")
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # GLOSSÁRIO (em expander, opcional)
+        # ============================================================
+        with st.expander("📚 Glossário e Ajuda do Sistema", expanded=False):
+            st.markdown("### 🎯 Funcionalidades por Aba")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
 **2️⃣ Autoria & Relatoria na pauta**
 - Proposições de **autoria** da deputada que estão na pauta da semana
 - Proposições onde a deputada é **relatora**
@@ -4561,10 +4789,10 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 - Eventos de atenção nas comissões em que a deputada é membro
 - Em 2025: **CDC, CCOM, CE, CREDN, CCJC**
 - Configure as comissões de interesse
-            """)
-        
-        with col2:
-            st.markdown("""
+                """)
+            
+            with col2:
+                st.markdown("""
 **5️⃣ Buscar Proposição Específica**
 - Busca livre por qualquer proposição de autoria da deputada
 - Filtros por ano e tipo
@@ -4580,12 +4808,11 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 - Prazo constitucional de **30 dias** para resposta
 - Status: Aguardando, Fora do prazo, Respondido
 - Indicadores de urgência por prazo
-            """)
-        
-        st.markdown("---")
-        st.markdown("### 📚 Glossário de Termos")
-        
-        with st.expander("📋 Tipos de Proposições", expanded=False):
+                """)
+            
+            st.markdown("---")
+            st.markdown("### 📋 Tipos de Proposições")
+            
             st.markdown("""
 | Sigla | Nome Completo | Descrição |
 |-------|---------------|-----------|
@@ -4594,105 +4821,8 @@ atualizadas sobre proposições, tramitações, pautas e eventos legislativos.
 | **PEC** | Proposta de Emenda à Constituição | Altera a Constituição Federal |
 | **PDL** | Projeto de Decreto Legislativo | Matérias de competência exclusiva do Congresso |
 | **PRC** | Projeto de Resolução da Câmara | Normas internas da Câmara |
-| **PLV** | Projeto de Lei de Conversão | Conversão de Medida Provisória em lei |
-| **MPV** | Medida Provisória | Ato do Presidente com força de lei |
 | **RIC** | Requerimento de Informação | Pedido de informações a órgãos públicos (prazo: 30 dias) |
-| **REQ** | Requerimento | Solicitação formal ao Legislativo |
             """)
-        
-        with st.expander("📊 Situações de Tramitação", expanded=False):
-            st.markdown("""
-| Situação | Significado |
-|----------|-------------|
-| **Aguardando Designação de Relator** | Proposição aguarda indicação de parlamentar para analisar |
-| **Aguardando Parecer** | Relator designado, aguardando elaboração do parecer |
-| **Pronta para Pauta** | Parecer aprovado, aguarda inclusão em pauta de votação |
-| **Tramitando em Conjunto** | Apensada a outra proposição principal |
-| **Aguardando Deliberação** | Na pauta, aguardando votação |
-| **Aguardando Resposta** | RIC aguardando resposta do Poder Executivo |
-| **Aguardando Remessa ao Arquivo** | Proposição concluída, aguardando arquivamento |
-| **Arquivada** | Proposição arquivada (fim de legislatura ou rejeição) |
-            """)
-        
-        with st.expander("🚦 Indicadores de Urgência (RICs e Proposições)", expanded=False):
-            st.markdown("""
-**Para RICs (prazo de resposta):**
-| Sinal | Condição | Nível |
-|-------|----------|-------|
-| 🚨 | ≤ 2 dias ou VENCIDO | **URGENTÍSSIMO** - Ação imediata |
-| ⚠️ | ≤ 5 dias | **URGENTE** - Prioridade alta |
-| 🔔 | ≤ 15 dias | **ATENÇÃO** - Acompanhar |
-| ✅ | Respondido | **CONCLUÍDO** |
-
-**Para Proposições (tempo parado):**
-| Sinal | Tempo parado | Nível |
-|-------|--------------|-------|
-| 🟢 | < 7 dias | Normal - Em movimento |
-| 🟡 | 7-14 dias | Atenção - Verificar |
-| 🟠 | 15-29 dias | Alerta - Possível estagnação |
-| 🔴 | ≥ 30 dias | Crítico - Parado há muito tempo |
-            """)
-        
-        with st.expander("📅 Prazo de RICs (Regra Constitucional)", expanded=False):
-            st.markdown("""
-**Regra de contagem do prazo de 30 dias:**
-
-1. **Remessa**: A 1ª Secretaria envia o RIC ao Ministério via ofício
-2. **Dia 1**: Primeiro dia **útil** após a remessa
-3. **Dia 30**: 30º dia se for útil, ou **próximo dia útil** se cair em fim de semana
-
-**Status possíveis:**
-| Status | Descrição |
-|--------|-----------|
-| **Em tramitação na Câmara** | RIC ainda não foi remetido ao Executivo |
-| **Aguardando resposta** | Remetido, dentro do prazo |
-| **Fora do prazo** | Prazo vencido, sem resposta |
-| **Respondido** | Resposta recebida dentro do prazo |
-| **Respondido fora do prazo** | Resposta após o vencimento |
-            """)
-        
-        with st.expander("🏛️ Comissões Estratégicas (2025)", expanded=False):
-            st.markdown("""
-| Sigla | Nome Completo |
-|-------|---------------|
-| **CDC** | Comissão de Defesa do Consumidor |
-| **CCOM** | Comissão de Comunicação |
-| **CE** | Comissão de Educação |
-| **CREDN** | Comissão de Relações Exteriores e Defesa Nacional |
-| **CCJC** | Comissão de Constituição e Justiça e de Cidadania |
-            """)
-        
-        with st.expander("🏷️ Categorias de Temas", expanded=False):
-            st.markdown("""
-O sistema categoriza automaticamente as proposições nos seguintes temas:
-
-- **Saúde** - Vacinas, hospitais, medicamentos, SUS, ANVISA
-- **Segurança Pública** - Armas, polícia, crimes, sistema penal
-- **Economia e Tributos** - PIX, DREX, impostos, IRPF, previdência
-- **Família e Costumes** - Aborto, CONANDA, crianças, gênero
-- **Educação** - Escolas, universidades, MEC, FUNDEB
-- **Agronegócio** - Produtores rurais, terra, MST, defensivos
-- **Meio Ambiente** - IBAMA, florestas, clima, saneamento
-- **Comunicação e Tecnologia** - Internet, redes sociais, LGPD, IA
-- **Administração Pública** - Servidores, concursos, licitações
-- **Transporte e Infraestrutura** - Rodovias, portos, mobilidade
-- **Defesa e Soberania** - Forças Armadas, fronteiras, militar
-- **Direito e Justiça** - STF, STJ, tribunais, processos
-- **Relações Exteriores** - Diplomacia, tratados, comércio exterior
-            """)
-        
-        st.markdown("---")
-        st.markdown("### ⚙️ Como Usar")
-        
-        st.info("""
-**Cada aba é independente - basta selecionar o período e clicar no botão!**
-
-1. **Abas 2, 3 e 4** - Configure a data e parâmetros, depois clique em "Carregar pauta"
-2. **Aba 5** - Busque proposições específicas por tipo e ano
-3. **Aba 6** - Carregue todas as matérias e use os filtros
-4. **Aba 7** - Acompanhe os RICs e seus prazos de resposta
-5. **Exporte para XLSX ou PDF** os dados que precisar
-        """)
         
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
