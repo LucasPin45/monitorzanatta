@@ -2152,6 +2152,194 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
         return (csv_bytes, "text/csv", "csv")
 
 
+def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
+    """
+    Gera PDF de palavras-chave na pauta, organizado por Comissão.
+    
+    Estrutura por item:
+    - Matéria
+    - Palavras-chave
+    - Ementa
+    - Link
+    - Relator
+    """
+    try:
+        from fpdf import FPDF
+        
+        class RelatorioPDF(FPDF):
+            def header(self):
+                self.set_fill_color(0, 51, 102)
+                self.rect(0, 0, 210, 25, 'F')
+                self.set_font('Helvetica', 'B', 18)
+                self.set_text_color(255, 255, 255)
+                self.set_y(8)
+                self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+                self.ln(20)
+                
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Helvetica', 'I', 8)
+                self.set_text_color(128, 128, 128)
+                self.set_x(10)
+                self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
+                self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+        
+        pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.add_page()
+        
+        # Subtítulo e data
+        pdf.set_y(30)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 8, "Palavras-chave na Pauta", ln=True, align='C')
+        
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
+        pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
+        
+        pdf.ln(2)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br", ln=True, align='C')
+        
+        pdf.ln(3)
+        pdf.set_draw_color(0, 51, 102)
+        pdf.set_line_width(0.5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(6)
+        
+        # Expandir proposições por evento e agrupar por comissão
+        proposicoes_por_comissao = {}
+        
+        for _, row in df.iterrows():
+            comissao = row.get("orgao_sigla", "") or row.get("Comissão", "") or "Outras"
+            props_str = row.get("proposicoes_palavras_chave", "") or row.get("Proposições encontradas", "")
+            
+            if not props_str or pd.isna(props_str):
+                continue
+            
+            if comissao not in proposicoes_por_comissao:
+                proposicoes_por_comissao[comissao] = []
+            
+            # Cada proposição está separada por "; "
+            for prop_detail in str(props_str).split("; "):
+                if "|||" in prop_detail:
+                    # Formato detalhado: matéria|||palavras|||ementa|||link|||relator
+                    partes = prop_detail.split("|||")
+                    if len(partes) >= 5:
+                        materia = partes[0].strip()
+                        palavras = partes[1].strip()
+                        ementa = partes[2].strip()
+                        link = partes[3].strip()
+                        relator = partes[4].strip()
+                        
+                        proposicoes_por_comissao[comissao].append({
+                            "materia": materia,
+                            "palavras": palavras,
+                            "ementa": ementa,
+                            "link": link,
+                            "relator": relator
+                        })
+                else:
+                    # Formato antigo: [palavras] matéria - ementa
+                    proposicoes_por_comissao[comissao].append({
+                        "materia": prop_detail,
+                        "palavras": "",
+                        "ementa": "",
+                        "link": "",
+                        "relator": ""
+                    })
+        
+        # Ordenar comissões alfabeticamente
+        comissoes_ordenadas = sorted(proposicoes_por_comissao.keys())
+        
+        # Contar total de proposições
+        total_props = sum(len(props) for props in proposicoes_por_comissao.values())
+        
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 6, f"Total de proposicoes encontradas: {total_props}", ln=True)
+        pdf.cell(0, 6, f"Comissoes com resultados: {len(comissoes_ordenadas)}", ln=True)
+        pdf.ln(4)
+        
+        # Iterar por comissão
+        for comissao in comissoes_ordenadas:
+            props = proposicoes_por_comissao[comissao]
+            if not props:
+                continue
+            
+            # Remover duplicatas por matéria
+            props_unicas = {}
+            for p in props:
+                if p["materia"] not in props_unicas:
+                    props_unicas[p["materia"]] = p
+            props = list(props_unicas.values())
+            
+            # Cabeçalho da Comissão
+            pdf.set_fill_color(0, 102, 153)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font('Helvetica', 'B', 12)
+            pdf.cell(0, 8, f"  {sanitize_text_pdf(comissao)} ({len(props)} proposicoes)", ln=True, fill=True)
+            pdf.ln(2)
+            
+            # Listar proposições
+            for idx, prop in enumerate(props, 1):
+                pdf.set_text_color(0, 0, 0)
+                
+                # Matéria (em destaque)
+                pdf.set_font('Helvetica', 'B', 10)
+                pdf.set_text_color(0, 51, 102)
+                pdf.cell(0, 5, f"{idx}. {sanitize_text_pdf(prop['materia'])}", ln=True)
+                
+                # Palavras-chave
+                if prop.get("palavras"):
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.set_text_color(180, 0, 0)
+                    pdf.cell(20, 4, "   Palavras:", ln=False)
+                    pdf.set_font('Helvetica', '', 9)
+                    pdf.cell(0, 4, sanitize_text_pdf(prop['palavras']), ln=True)
+                
+                # Ementa
+                if prop.get("ementa"):
+                    pdf.set_font('Helvetica', '', 9)
+                    pdf.set_text_color(60, 60, 60)
+                    ementa_text = sanitize_text_pdf(prop['ementa'])
+                    if len(ementa_text) > 200:
+                        ementa_text = ementa_text[:200] + "..."
+                    pdf.multi_cell(0, 4, f"   {ementa_text}")
+                
+                # Relator
+                if prop.get("relator"):
+                    pdf.set_font('Helvetica', 'I', 9)
+                    pdf.set_text_color(80, 80, 80)
+                    pdf.cell(0, 4, f"   Relator: {sanitize_text_pdf(prop['relator'])}", ln=True)
+                
+                # Link
+                if prop.get("link"):
+                    pdf.set_font('Helvetica', '', 8)
+                    pdf.set_text_color(0, 0, 200)
+                    pdf.cell(0, 4, f"   {prop['link']}", ln=True)
+                
+                pdf.ln(2)
+            
+            pdf.ln(3)
+        
+        pdf_bytes = pdf.output()
+        return (bytes(pdf_bytes), "application/pdf", "pdf")
+        
+    except Exception as e:
+        # Fallback simples
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font('Helvetica', '', 10)
+        pdf.cell(0, 10, f"Erro ao gerar PDF: {str(e)}", ln=True)
+        pdf_bytes = pdf.output()
+        return (bytes(pdf_bytes), "application/pdf", "pdf")
+
+
 def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos de Informação") -> tuple[bytes, str, str]:
     """
     Gera PDF de RICs organizado por blocos de status.
@@ -3230,7 +3418,18 @@ def escanear_eventos(
             if has_keywords:
                 for kw in kws_item:
                     palavras_evento.add(kw)
-                proposicoes_palavras_chave.add(f"[{', '.join(kws_item)}] {texto_completo}")
+                # Pegar relator do item
+                relator_info = item.get("relator") or {}
+                relator_nome = relator_info.get("nome") or ""
+                relator_partido = relator_info.get("siglaPartido") or ""
+                relator_uf = relator_info.get("siglaUf") or ""
+                relator_str = f"{relator_nome} ({relator_partido}-{relator_uf})" if relator_nome else "Sem relator designado"
+                
+                # Link para tramitação
+                link_tram = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={id_prop}" if id_prop else ""
+                
+                # Armazenar com formato detalhado: matéria|palavras|ementa|link|relator
+                proposicoes_palavras_chave.add(f"{identificacao}|||{', '.join(kws_item)}|||{ementa_prop}|||{link_tram}|||{relator_str}")
 
         if not (proposicoes_relatoria or proposicoes_autoria or palavras_evento):
             continue
@@ -3971,7 +4170,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v22")
+    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -4390,23 +4589,45 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 # Mostrar quantidade de proposições encontradas
                 st.success(f"🔍 **{len(df_kw)} eventos** com palavras-chave encontradas!")
                 
+                # Criar versão formatada para exibição na tabela
+                def formatar_proposicoes_tabela(props_str):
+                    """Converte formato interno para exibição amigável"""
+                    if not props_str or pd.isna(props_str):
+                        return ""
+                    resultado = []
+                    for prop in str(props_str).split("; "):
+                        if "|||" in prop:
+                            partes = prop.split("|||")
+                            materia = partes[0].strip() if len(partes) > 0 else ""
+                            palavras = partes[1].strip() if len(partes) > 1 else ""
+                            resultado.append(f"[{palavras}] {materia}")
+                        else:
+                            resultado.append(prop)
+                    return "; ".join(resultado)
+                
                 view = df_kw[
                     ["data", "hora", "orgao_sigla", "orgao_nome", "id_evento", "tipo_evento",
                      "palavras_chave_encontradas", "proposicoes_palavras_chave", "descricao_evento"]
                 ].copy()
                 view["data"] = pd.to_datetime(view["data"], errors="coerce").dt.strftime("%d/%m/%Y")
                 
+                # Formatar proposições para exibição
+                view["proposicoes_formatadas"] = view["proposicoes_palavras_chave"].apply(formatar_proposicoes_tabela)
+                
                 # Renomear colunas para exibição
-                view = view.rename(columns={
+                view_display = view[["data", "hora", "orgao_sigla", "orgao_nome", "palavras_chave_encontradas", "proposicoes_formatadas"]].copy()
+                view_display = view_display.rename(columns={
+                    "orgao_sigla": "Comissão",
+                    "orgao_nome": "Nome Comissão",
                     "palavras_chave_encontradas": "Palavras-chave",
-                    "proposicoes_palavras_chave": "Proposições encontradas"
+                    "proposicoes_formatadas": "Proposições encontradas"
                 })
 
-                st.dataframe(view, use_container_width=True, hide_index=True)
+                st.dataframe(view_display, use_container_width=True, hide_index=True)
 
                 col_x2, col_p2 = st.columns(2)
                 with col_x2:
-                    data_bytes, mime, ext = to_xlsx_bytes(view, "PalavrasChave_Pauta")
+                    data_bytes, mime, ext = to_xlsx_bytes(view_display, "PalavrasChave_Pauta")
                     st.download_button(
                         f"⬇️ XLSX",
                         data=data_bytes,
@@ -4415,7 +4636,8 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         key="download_kw_xlsx"
                     )
                 with col_p2:
-                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(view, "Palavras-chave na Pauta")
+                    # Usar df_kw para PDF (tem todas as colunas necessárias)
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_palavras_chave(df_kw)
                     st.download_button(
                         f"⬇️ PDF",
                         data=pdf_bytes,
@@ -5349,7 +5571,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
         st.markdown("---")
-        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
