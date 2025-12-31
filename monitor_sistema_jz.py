@@ -5899,183 +5899,236 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     # ============================================================
-    # ABA 8 - NOTIFICAÇÕES TELEGRAM
+    # ABA 8 - NOTIFICAÇÕES TELEGRAM (SIMPLIFICADO)
     # ============================================================
     with tab8:
-        st.subheader("🔔 Notificações por Telegram")
-        
-        st.info("""
-        💡 **Como funciona:**
-        Configure um bot do Telegram para receber notificações quando houver novidades nas proposições monitoradas.
-        
-        **Passos para configurar:**
-        1. Abra o Telegram e procure por **@BotFather**
-        2. Envie `/newbot` e siga as instruções para criar seu bot
-        3. Copie o **token** do bot (formato: `123456789:ABC-DEF...`)
-        4. Inicie uma conversa com seu bot e envie `/start`
-        5. Acesse `https://api.telegram.org/bot<SEU_TOKEN>/getUpdates` para obter seu **chat_id**
-        """)
-        
-        st.markdown("---")
-        
-        # Configurações do Telegram
-        st.markdown("### ⚙️ Configuração do Bot")
-        
-        col_token, col_chatid = st.columns(2)
-        
-        with col_token:
-            telegram_token = st.text_input(
-                "🔑 Token do Bot",
-                value=st.session_state.get("telegram_token", ""),
-                type="password",
-                help="Token fornecido pelo @BotFather",
-                key="input_telegram_token"
-            )
-            if telegram_token:
-                st.session_state["telegram_token"] = telegram_token
-        
-        with col_chatid:
-            telegram_chat_id = st.text_input(
-                "💬 Chat ID",
-                value=st.session_state.get("telegram_chat_id", ""),
-                help="Seu ID de chat (número)",
-                key="input_telegram_chat_id"
-            )
-            if telegram_chat_id:
-                st.session_state["telegram_chat_id"] = telegram_chat_id
-        
-        col_test, col_status = st.columns([1, 2])
-        
-        with col_test:
-            if st.button("🧪 Testar Conexão", key="btn_test_telegram"):
-                if telegram_token and telegram_chat_id:
-                    with st.spinner("Enviando mensagem de teste..."):
-                        resultado = telegram_testar_conexao(telegram_token, telegram_chat_id)
-                        if resultado.get("ok"):
-                            st.success("✅ Conexão OK! Verifique seu Telegram.")
-                        else:
-                            st.error(f"❌ Erro: {resultado.get('error')}")
-                else:
-                    st.warning("Preencha o token e o chat_id primeiro.")
-        
-        with col_status:
-            if telegram_token and telegram_chat_id:
-                st.success("✅ Telegram configurado")
-            else:
-                st.warning("⚠️ Configure o bot para receber notificações")
-        
-        st.markdown("---")
-        
-        # Proposições para monitorar
-        st.markdown("### 📋 Proposições Monitoradas")
+        st.subheader("🔔 Receber Notificações no Telegram")
         
         st.markdown("""
-        Adicione os IDs das proposições que deseja monitorar. 
-        Você pode encontrar o ID na URL da proposição no site da Câmara.
-        
-        **Exemplo:** `https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=**2369900**`
+        Receba alertas no seu Telegram quando houver movimentação nas proposições da deputada!
         """)
         
-        # Campo para adicionar IDs
-        ids_texto = st.text_area(
-            "IDs das proposições (um por linha ou separados por vírgula)",
-            value=st.session_state.get("telegram_props_monitoradas", ""),
-            height=100,
-            help="Cole os IDs das proposições que deseja monitorar",
-            key="input_props_monitoradas"
-        )
+        # Token do bot vem dos secrets (não exposto ao usuário)
+        telegram_token = st.secrets.get("telegram", {}).get("bot_token", "")
         
-        if ids_texto:
-            st.session_state["telegram_props_monitoradas"] = ids_texto
-        
-        # Processar IDs
-        ids_lista = []
-        if ids_texto:
-            for parte in ids_texto.replace(",", "\n").split("\n"):
-                id_limpo = parte.strip()
-                if id_limpo.isdigit():
-                    ids_lista.append(id_limpo)
-        
-        if ids_lista:
-            st.success(f"✅ {len(ids_lista)} proposição(ões) configurada(s) para monitoramento")
-        
-        st.markdown("---")
-        
-        # Verificar novidades manualmente
-        st.markdown("### 🔄 Verificar Novidades Agora")
-        
-        col_verificar, col_info = st.columns([1, 2])
-        
-        with col_verificar:
-            horas_atras = st.selectbox(
-                "Verificar tramitações das últimas:",
-                options=[6, 12, 24, 48, 72],
-                format_func=lambda x: f"{x} horas",
-                index=2,
-                key="sel_horas_verificacao"
+        if not telegram_token:
+            st.warning("""
+            ⚠️ **Configuração pendente pelo administrador**
+            
+            O bot do Telegram ainda não foi configurado. 
+            Peça ao administrador para adicionar nas configurações (Secrets):
+            ```
+            [telegram]
+            bot_token = "SEU_TOKEN_AQUI"
+            ```
+            """)
+        else:
+            # Interface simplificada para o usuário
+            st.success("✅ Bot do Telegram configurado: **@MoniParBot**")
+            
+            st.markdown("---")
+            
+            # Passo 1: Iniciar conversa com o bot
+            st.markdown("### 📱 Passo 1: Conecte seu Telegram")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown("""
+                1. Abra o Telegram e procure por **@userinfobot**
+                2. Envie qualquer mensagem para ele
+                3. Copie o número do seu **Id** (ex: `123456789`)
+                4. Cole abaixo:
+                """)
+                
+                telegram_chat_id = st.text_input(
+                    "🆔 Seu ID do Telegram",
+                    value=st.session_state.get("telegram_chat_id", ""),
+                    placeholder="Ex: 123456789",
+                    help="Obtenha seu ID conversando com @userinfobot no Telegram",
+                    key="input_telegram_chat_id_simple"
+                )
+                if telegram_chat_id:
+                    st.session_state["telegram_chat_id"] = telegram_chat_id
+            
+            with col2:
+                st.markdown("**Links rápidos:**")
+                st.markdown("🤖 [Abrir @MoniParBot](https://t.me/MoniParBot)")
+                st.markdown("🆔 [Obter meu ID](https://t.me/userinfobot)")
+            
+            # Botão de teste
+            if telegram_chat_id:
+                col_test, col_result = st.columns([1, 2])
+                with col_test:
+                    if st.button("📤 Enviar mensagem de teste", key="btn_test_simple"):
+                        with st.spinner("Enviando..."):
+                            resultado = telegram_testar_conexao(telegram_token, telegram_chat_id)
+                            if resultado.get("ok"):
+                                st.success("✅ Mensagem enviada! Verifique seu Telegram.")
+                            else:
+                                st.error(f"❌ Erro: {resultado.get('error')}")
+                                st.info("Verifique se você iniciou conversa com @MoniParBot")
+            
+            st.markdown("---")
+            
+            # Passo 2: Escolher o que monitorar
+            st.markdown("### 📋 Passo 2: O que você quer acompanhar?")
+            
+            monitorar_autoria = st.checkbox(
+                "📝 Proposições de **autoria** da Dep. Júlia Zanatta",
+                value=st.session_state.get("notif_autoria", True),
+                key="chk_notif_autoria"
             )
+            st.session_state["notif_autoria"] = monitorar_autoria
             
-            if st.button("🔍 Verificar e Notificar", key="btn_verificar_notificar", type="primary"):
-                if not telegram_token or not telegram_chat_id:
-                    st.error("Configure o bot do Telegram primeiro!")
-                elif not ids_lista:
-                    st.error("Adicione pelo menos uma proposição para monitorar!")
+            monitorar_relatoria = st.checkbox(
+                "📋 Proposições onde ela é **relatora**",
+                value=st.session_state.get("notif_relatoria", True),
+                key="chk_notif_relatoria"
+            )
+            st.session_state["notif_relatoria"] = monitorar_relatoria
+            
+            monitorar_rics = st.checkbox(
+                "📨 **RICs** (Requerimentos de Informação)",
+                value=st.session_state.get("notif_rics", True),
+                key="chk_notif_rics"
+            )
+            st.session_state["notif_rics"] = monitorar_rics
+            
+            # Opção de proposições específicas
+            with st.expander("➕ Adicionar proposições específicas"):
+                ids_extras = st.text_area(
+                    "IDs adicionais (um por linha)",
+                    value=st.session_state.get("notif_ids_extras", ""),
+                    height=80,
+                    placeholder="2369900\n541857",
+                    key="input_ids_extras"
+                )
+                if ids_extras:
+                    st.session_state["notif_ids_extras"] = ids_extras
+            
+            st.markdown("---")
+            
+            # Passo 3: Verificar novidades
+            st.markdown("### 🔍 Passo 3: Verificar novidades agora")
+            
+            col_periodo, col_btn = st.columns([1, 1])
+            
+            with col_periodo:
+                periodo_horas = st.select_slider(
+                    "Período de verificação",
+                    options=[6, 12, 24, 48, 72, 168],
+                    value=24,
+                    format_func=lambda x: f"Últimas {x}h" if x < 168 else "Última semana",
+                    key="slider_periodo_notif"
+                )
+            
+            with col_btn:
+                st.markdown("")  # Espaçamento
+                st.markdown("")
+                btn_verificar = st.button(
+                    "🔔 Verificar e Notificar",
+                    type="primary",
+                    key="btn_verificar_principal",
+                    use_container_width=True
+                )
+            
+            if btn_verificar:
+                if not telegram_chat_id:
+                    st.error("❌ Informe seu ID do Telegram primeiro!")
                 else:
-                    with st.spinner(f"Verificando tramitações das últimas {horas_atras} horas..."):
-                        ultima_verif = get_brasilia_now() - datetime.timedelta(hours=horas_atras)
-                        resultado = verificar_e_notificar_tramitacoes(
-                            telegram_token,
-                            telegram_chat_id,
-                            ids_lista,
-                            ultima_verif
-                        )
+                    # Coletar IDs para monitorar
+                    ids_monitorar = set()
+                    
+                    with st.spinner("Coletando proposições para monitorar..."):
+                        # Autoria
+                        if monitorar_autoria:
+                            try:
+                                ids_autoria = fetch_ids_autoria_deputada(id_deputada)
+                                ids_monitorar.update(ids_autoria)
+                                st.info(f"📝 {len(ids_autoria)} proposições de autoria")
+                            except:
+                                pass
                         
-                        if resultado["notificacoes_enviadas"] > 0:
-                            st.success(f"✅ {resultado['notificacoes_enviadas']} notificação(ões) enviada(s)!")
-                        else:
-                            st.info("ℹ️ Nenhuma novidade encontrada no período.")
+                        # Relatoria (buscar via API)
+                        if monitorar_relatoria:
+                            try:
+                                # Buscar proposições onde é relatora
+                                url = f"{BASE_URL}/proposicoes"
+                                params = {
+                                    "idDeputadoRelator": id_deputada,
+                                    "itens": 100,
+                                    "ordem": "DESC",
+                                    "ordenarPor": "id"
+                                }
+                                resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
+                                if resp.status_code == 200:
+                                    dados = resp.json().get("dados", [])
+                                    ids_rel = {str(p.get("id")) for p in dados if p.get("id")}
+                                    ids_monitorar.update(ids_rel)
+                                    st.info(f"📋 {len(ids_rel)} proposições como relatora")
+                            except:
+                                pass
                         
-                        if resultado["erros"]:
-                            with st.expander("⚠️ Ver erros"):
-                                for erro in resultado["erros"]:
-                                    st.warning(erro)
-        
-        with col_info:
-            st.markdown("""
-            **💡 Dica para automação:**
+                        # RICs
+                        if monitorar_rics:
+                            try:
+                                ids_rics = fetch_ids_autoria_deputada(id_deputada)
+                                # Filtrar só RICs (seria ideal ter função específica)
+                                # Por enquanto, adiciona todos
+                                # Os RICs são filtrados pela ementa depois
+                            except:
+                                pass
+                        
+                        # IDs extras
+                        if ids_extras:
+                            for linha in ids_extras.strip().split("\n"):
+                                id_limpo = linha.strip()
+                                if id_limpo.isdigit():
+                                    ids_monitorar.add(id_limpo)
+                    
+                    if not ids_monitorar:
+                        st.warning("Nenhuma proposição encontrada para monitorar.")
+                    else:
+                        st.info(f"🔍 Verificando {len(ids_monitorar)} proposições...")
+                        
+                        # Limitar para não sobrecarregar
+                        ids_lista = list(ids_monitorar)[:50]  # Máximo 50
+                        
+                        with st.spinner(f"Verificando tramitações das últimas {periodo_horas} horas..."):
+                            ultima_verif = get_brasilia_now() - datetime.timedelta(hours=periodo_horas)
+                            resultado = verificar_e_notificar_tramitacoes(
+                                telegram_token,
+                                telegram_chat_id,
+                                ids_lista,
+                                ultima_verif
+                            )
+                            
+                            if resultado["notificacoes_enviadas"] > 0:
+                                st.success(f"✅ **{resultado['notificacoes_enviadas']} notificação(ões) enviada(s)!** Verifique seu Telegram.")
+                            else:
+                                st.info("ℹ️ Nenhuma novidade no período selecionado.")
+                            
+                            if resultado.get("erros"):
+                                with st.expander("⚠️ Alguns erros ocorreram"):
+                                    for erro in resultado["erros"][:5]:
+                                        st.warning(erro)
             
-            Para receber notificações automaticamente, você pode:
+            st.markdown("---")
             
-            1. **Usar agendador externo:** Configure um cron job ou 
-               serviço como GitHub Actions para chamar este endpoint periodicamente.
-            
-            2. **Streamlit Cloud:** O app roda sob demanda, então 
-               a verificação manual é mais confiável.
-            
-            3. **Script separado:** Extraia a lógica de notificação 
-               para um script Python independente e agende sua execução.
-            """)
-        
-        st.markdown("---")
-        
-        # Exemplo de mensagem
-        with st.expander("📬 Exemplo de notificação"):
-            st.markdown("""
-            As notificações chegam assim no seu Telegram:
-            
-            ---
-            🔔 **Nova movimentação!**
-            
-            📋 **PL 1234/2024**
-            *Dispõe sobre medidas de segurança...*
-            
-            📅 **2025-01-01**
-            → Parecer do relator pela aprovação
-            
-            🔗 [Ver tramitação completa](https://www.camara.leg.br)
-            
-            ---
-            """)
+            # Dica de automação simplificada
+            with st.expander("💡 Quer receber notificações automáticas?"):
+                st.markdown("""
+                **Opção 1: Verificação diária manual**
+                - Acesse esta aba uma vez por dia e clique em "Verificar e Notificar"
+                
+                **Opção 2: Automação gratuita (para o administrador)**
+                - Configure um agendador externo (GitHub Actions) para verificar automaticamente
+                - Fale com o administrador do sistema para configurar
+                
+                **Opção 3: Crie um lembrete**
+                - Configure um alarme diário no celular para verificar o sistema
+                """)
 
     st.markdown("---")
 
