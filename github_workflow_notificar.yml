@@ -1,0 +1,51 @@
+# .github/workflows/notificar-tramitacoes.yml
+# 
+# Workflow para verificar tramitações e enviar notificações via Telegram
+# Executa automaticamente a cada 6 horas
+#
+# Configuração necessária no repositório:
+# Settings > Secrets and variables > Actions > New repository secret
+#   - TELEGRAM_BOT_TOKEN: Token do bot do Telegram
+#   - TELEGRAM_CHAT_ID: ID do chat para notificações
+
+name: Notificar Tramitações
+
+on:
+  # Executa a cada 6 horas
+  schedule:
+    - cron: '0 */6 * * *'  # 00:00, 06:00, 12:00, 18:00 UTC
+  
+  # Permite execução manual
+  workflow_dispatch:
+    inputs:
+      horas:
+        description: 'Verificar últimas X horas'
+        required: false
+        default: '24'
+        type: string
+
+jobs:
+  notificar:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependências
+        run: |
+          pip install requests
+      
+      - name: Executar verificação de tramitações
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEPUTADA_ID: '220559'
+          HORAS_VERIFICAR: ${{ github.event.inputs.horas || '8' }}
+        run: |
+          python notificar_tramitacoes.py
