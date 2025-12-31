@@ -10,7 +10,7 @@ Configuração via variáveis de ambiente:
     TELEGRAM_BOT_TOKEN - Token do bot do Telegram
     TELEGRAM_CHAT_ID - ID do chat para enviar notificações
     DEPUTADA_ID - ID da deputada na API da Câmara (default: 220559)
-    HORAS_VERIFICAR - Quantas horas para trás verificar (default: 24)
+    HORAS_VERIFICAR - Quantas horas para trás verificar (default: 120)
 """
 
 import os
@@ -27,7 +27,7 @@ HEADERS = {"User-Agent": "MonitorZanatta/AutoNotify-v3 (github-actions)"}
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DEPUTADA_ID = os.environ.get("DEPUTADA_ID", "220559")
-HORAS_VERIFICAR = int(os.environ.get("HORAS_VERIFICAR", "24"))
+HORAS_VERIFICAR = int(os.environ.get("HORAS_VERIFICAR", "120"))
 
 
 def get_data_hora_brasilia():
@@ -304,3 +304,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
