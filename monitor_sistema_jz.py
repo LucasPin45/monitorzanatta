@@ -4530,65 +4530,40 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 1 - APRESENTAÇÃO E GLOSSÁRIO
     # ============================================================
    # ============================================================
-# CÓDIGO PARA SUBSTITUIR A ABA 1 - DASHBOARD EXECUTIVO
 # ============================================================
-# Substitua todo o conteúdo do "with tab1:" (linhas 4532-4698)
-# por este código abaixo:
+# CÓDIGO CORRIGIDO - DASHBOARD EXECUTIVO (Aba 1)
+# ============================================================
+# Substitua o conteúdo do "with tab1:" por este código
 # ============================================================
 
     with tab1:
         st.title("📊 Dashboard Executivo")
         
         # ============================================================
-        # HEADER COM DADOS DA DEPUTADA
+        # HEADER SIMPLES (sem foto)
         # ============================================================
-        col_foto, col_info = st.columns([1, 5])
-        with col_foto:
-            try:
-                st.image(f"https://www.camara.leg.br/internet/deputado/bandep/{id_deputada}.jpg", width=120)
-            except:
-                st.markdown("👤")
-        with col_info:
-            st.markdown(f"### {nome_deputada}")
-            st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada} | **ID:** `{id_deputada}`")
-            st.markdown(f"🕐 **Última atualização:** {get_brasilia_now().strftime('%d/%m/%Y às %H:%M:%S')}")
+        st.markdown(f"### {nome_deputada}")
+        st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada} | **ID:** `{id_deputada}`")
+        st.markdown(f"🕐 **Última atualização:** {get_brasilia_now().strftime('%d/%m/%Y às %H:%M:%S')}")
         
         st.markdown("---")
         
         # ============================================================
-        # BUSCAR MÉTRICAS RÁPIDAS
+        # BUSCAR MÉTRICAS USANDO FUNÇÃO EXISTENTE
         # ============================================================
         with st.spinner("📊 Carregando métricas do dashboard..."):
             try:
-                # Buscar proposições de autoria (últimos 2 anos)
-                url_autoria = f"{BASE_URL}/proposicoes"
-                params_autoria = {
-                    "idDeputadoAutor": id_deputada,
-                    "dataInicio": "2023-01-01",
-                    "ordem": "DESC",
-                    "ordenarPor": "id",
-                    "itens": 100
-                }
-                resp_autoria = requests.get(url_autoria, headers=HEADERS, params=params_autoria, timeout=30)
-                resp_autoria.raise_for_status()
-                props_autoria = resp_autoria.json().get("dados", [])
+                # Usar função que já existe no código
+                df_props = fetch_lista_proposicoes_autoria(id_deputada)
                 
-                # Buscar relatoria
-                url_relatoria = f"{BASE_URL}/proposicoes"
-                params_relatoria = {
-                    "idDeputadoRelator": id_deputada,
-                    "ordem": "DESC",
-                    "ordenarPor": "id",
-                    "itens": 100
-                }
-                resp_relatoria = requests.get(url_relatoria, headers=HEADERS, params=params_relatoria, timeout=30)
-                resp_relatoria.raise_for_status()
-                props_relatoria = resp_relatoria.json().get("dados", [])
+                if df_props.empty:
+                    props_autoria = []
+                else:
+                    props_autoria = df_props.to_dict('records')
                 
             except Exception as e:
                 st.error(f"⚠️ Erro ao carregar métricas: {e}")
                 props_autoria = []
-                props_relatoria = []
         
         # ============================================================
         # CARDS DE MÉTRICAS (KPIs)
@@ -4601,92 +4576,80 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             st.metric(
                 label="📝 Proposições de Autoria",
                 value=len(props_autoria),
-                help="Total de proposições de autoria nos últimos 2 anos"
+                help="Total de proposições de autoria (todas)"
             )
         
         with col2:
+            # Contar por tipo
+            tipos_count = {}
+            for p in props_autoria:
+                tipo = p.get('siglaTipo', 'Outro')
+                tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+            
+            rics = tipos_count.get('RIC', 0)
             st.metric(
-                label="📋 Como Relatora",
-                value=len(props_relatoria),
-                help="Total de proposições onde é relatora"
+                label="📄 RICs",
+                value=rics,
+                help="Requerimentos de Informação"
             )
         
         with col3:
-            # Contar proposições tramitando (não arquivadas)
-            tramitando = sum(1 for p in props_autoria if "Arquivada" not in str(p.get("statusProposicao", {}).get("descricaoSituacao", "")))
+            pls = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)
             st.metric(
-                label="🔄 Em Tramitação",
-                value=tramitando,
-                help="Proposições de autoria em tramitação ativa"
+                label="📋 Projetos de Lei",
+                value=pls,
+                help="PL + PLP"
             )
         
         with col4:
-            # Contar arquivadas
-            arquivadas = sum(1 for p in props_autoria if "Arquivada" in str(p.get("statusProposicao", {}).get("descricaoSituacao", "")))
+            outros = sum(v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP'])
             st.metric(
-                label="📁 Arquivadas",
-                value=arquivadas,
-                help="Proposições de autoria arquivadas"
+                label="📑 Outros",
+                value=outros,
+                help="PEC, PDL, MPV, etc."
             )
         
         st.markdown("---")
         
         # ============================================================
-        # ÚLTIMAS MOVIMENTAÇÕES (48 horas)
+        # ÚLTIMAS PROPOSIÇÕES (10 mais recentes)
         # ============================================================
-        st.markdown("### 🔔 Últimas Movimentações (últimas 48 horas)")
+        st.markdown("### 🆕 Proposições Mais Recentes (últimas 10)")
         
-        movimentacoes_recentes = []
-        
-        with st.spinner("🔍 Verificando tramitações recentes..."):
-            # Buscar últimas tramitações das 30 proposições mais recentes
-            data_corte = (get_brasilia_now() - datetime.timedelta(hours=48)).strftime("%Y-%m-%d")
+        if props_autoria:
+            # Ordenar por ano e número (mais recente primeiro)
+            props_sorted = sorted(props_autoria, key=lambda x: (int(x.get('ano', '0')), int(x.get('numero', '0'))), reverse=True)
             
-            for prop in props_autoria[:30]:
-                try:
-                    prop_id = prop['id']
-                    url_tram = f"{BASE_URL}/proposicoes/{prop_id}/tramitacoes"
-                    params_tram = {"ordem": "DESC", "ordenarPor": "dataHora", "itens": 1}
-                    
-                    resp_tram = requests.get(url_tram, headers=HEADERS, params=params_tram, timeout=10)
-                    resp_tram.raise_for_status()
-                    tramitacoes = resp_tram.json().get("dados", [])
-                    
-                    if tramitacoes:
-                        tram = tramitacoes[0]
-                        data_tram = tram.get("dataHora", "")[:10]
-                        
-                        # Verificar se é recente (últimas 48h)
-                        if data_tram >= data_corte:
-                            movimentacoes_recentes.append({
-                                "proposicao": f"{prop.get('siglaTipo', '')} {prop.get('numero', '')}/{prop.get('ano', '')}",
-                                "data": data_tram,
-                                "descricao": tram.get("despacho", "") or tram.get("descricaoTramitacao", ""),
-                                "link": f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}"
-                            })
-                    
-                    time.sleep(0.2)  # Rate limit
-                    
-                except Exception:
-                    continue
-        
-        if movimentacoes_recentes:
-            # Ordenar por data (mais recente primeiro)
-            movimentacoes_recentes.sort(key=lambda x: x['data'], reverse=True)
-            
-            for mov in movimentacoes_recentes[:10]:  # Mostrar apenas as 10 mais recentes
+            for i, prop in enumerate(props_sorted[:10], 1):
                 with st.container():
-                    col_data, col_info = st.columns([1, 4])
-                    with col_data:
-                        dt_obj = datetime.datetime.strptime(mov['data'], "%Y-%m-%d")
-                        st.markdown(f"**{dt_obj.strftime('%d/%m/%Y')}**")
+                    col_num, col_info = st.columns([1, 5])
+                    with col_num:
+                        st.markdown(f"**#{i}**")
                     with col_info:
-                        st.markdown(f"**{mov['proposicao']}**")
-                        st.caption(mov['descricao'])
-                        st.markdown(f"[🔗 Ver tramitação]({mov['link']})")
-                    st.markdown("---")
+                        sigla = prop.get('siglaTipo', '')
+                        numero = prop.get('numero', '')
+                        ano = prop.get('ano', '')
+                        ementa = prop.get('ementa', '')
+                        prop_id = prop.get('id', '')
+                        
+                        st.markdown(f"**{sigla} {numero}/{ano}**")
+                        
+                        # Limitar ementa
+                        if len(ementa) > 150:
+                            ementa_curta = ementa[:147] + "..."
+                        else:
+                            ementa_curta = ementa
+                        
+                        st.caption(ementa_curta)
+                        
+                        if prop_id:
+                            link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}"
+                            st.markdown(f"[🔗 Ver tramitação]({link})")
+                    
+                    if i < 10:  # Não colocar linha após o último
+                        st.markdown("---")
         else:
-            st.info("📭 Nenhuma movimentação nas últimas 48 horas.")
+            st.info("📭 Nenhuma proposição encontrada.")
         
         st.markdown("---")
         
@@ -4699,13 +4662,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         with col_graf1:
             # Gráfico por tipo de proposição
-            if props_autoria:
-                tipos = {}
-                for p in props_autoria:
-                    tipo = p.get('siglaTipo', 'Outro')
-                    tipos[tipo] = tipos.get(tipo, 0) + 1
-                
-                df_tipos = pd.DataFrame(list(tipos.items()), columns=['Tipo', 'Quantidade'])
+            if props_autoria and tipos_count:
+                df_tipos = pd.DataFrame(list(tipos_count.items()), columns=['Tipo', 'Quantidade'])
                 df_tipos = df_tipos.sort_values('Quantidade', ascending=False)
                 
                 fig, ax = plt.subplots(figsize=(8, 5))
@@ -4713,55 +4671,62 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 ax.set_xlabel('Quantidade')
                 ax.set_title('Proposições por Tipo')
                 ax.grid(axis='x', alpha=0.3)
+                
+                # Adicionar valores nas barras
+                for i, v in enumerate(df_tipos['Quantidade']):
+                    ax.text(v + 0.5, i, str(v), va='center')
+                
                 st.pyplot(fig)
                 plt.close()
         
         with col_graf2:
-            # Gráfico por situação
+            # Gráfico por ano
             if props_autoria:
-                situacoes = {}
+                anos_count = {}
                 for p in props_autoria:
-                    situacao = p.get('statusProposicao', {}).get('descricaoSituacao', 'Não identificada')
-                    # Simplificar nomes longos
-                    if len(situacao) > 30:
-                        situacao = situacao[:27] + "..."
-                    situacoes[situacao] = situacoes.get(situacao, 0) + 1
+                    ano = p.get('ano', 'Não identificado')
+                    anos_count[ano] = anos_count.get(ano, 0) + 1
                 
-                df_situacoes = pd.DataFrame(list(situacoes.items()), columns=['Situação', 'Quantidade'])
-                df_situacoes = df_situacoes.sort_values('Quantidade', ascending=False).head(8)
+                df_anos = pd.DataFrame(list(anos_count.items()), columns=['Ano', 'Quantidade'])
+                df_anos = df_anos.sort_values('Ano', ascending=False)
                 
                 fig, ax = plt.subplots(figsize=(8, 5))
-                ax.barh(df_situacoes['Situação'], df_situacoes['Quantidade'], color='coral')
+                ax.barh(df_anos['Ano'], df_anos['Quantidade'], color='coral')
                 ax.set_xlabel('Quantidade')
-                ax.set_title('Proposições por Situação (Top 8)')
+                ax.set_title('Proposições por Ano')
                 ax.grid(axis='x', alpha=0.3)
+                
+                # Adicionar valores nas barras
+                for i, v in enumerate(df_anos['Quantidade']):
+                    ax.text(v + 0.5, i, str(v), va='center')
+                
                 st.pyplot(fig)
                 plt.close()
         
         st.markdown("---")
         
         # ============================================================
-        # ALERTAS E AÇÕES RÁPIDAS
+        # AÇÕES RÁPIDAS
         # ============================================================
         st.markdown("### ⚡ Ações Rápidas")
         
         col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
         
         with col_btn1:
-            if st.button("📅 Ver Pauta da Semana", use_container_width=True):
-                st.info("👉 Vá para a aba 2️⃣ **Autoria & Relatoria na pauta**")
+            if st.button("📅 Ver Pauta", use_container_width=True):
+                st.info("👉 Vá para a aba **2️⃣ Autoria & Relatoria na pauta**")
         
         with col_btn2:
             if st.button("🔍 Buscar Proposição", use_container_width=True):
-                st.info("👉 Vá para a aba 5️⃣ **Buscar Proposição Específica**")
+                st.info("👉 Vá para a aba **5️⃣ Buscar Proposição Específica**")
         
         with col_btn3:
-            if st.button("📊 Ver Todas as Matérias", use_container_width=True):
-                st.info("👉 Vá para a aba 6️⃣ **Matérias por situação atual**")
+            if st.button("📊 Ver Matérias", use_container_width=True):
+                st.info("👉 Vá para a aba **6️⃣ Matérias por situação atual**")
         
         with col_btn4:
             if st.button("📝 Ver RICs", use_container_width=True):
-                st.info("👉 Vá para a aba 7️⃣ **RICs (Requerimentos)**")
+                st.info("👉 Vá para a aba **7️⃣ RICs (Requerimentos)**")
         
         st.markdown("---")
         
@@ -4783,49 +4748,44 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 **3️⃣ Palavras-chave na pauta**
 - Busca por **palavras-chave** configuráveis
 - Identifica proposições de interesse temático em pauta na semana
-- Configure suas próprias palavras-chave
 
 **4️⃣ Comissões estratégicas**
-- Eventos de atenção nas comissões em que a deputada é membro
-- Em 2025: **CDC, CCOM, CE, CREDN, CCJC**
-- Configure as comissões de interesse
+- Eventos nas comissões estratégicas
+- CDC, CCOM, CE, CREDN, CCJC
                 """)
             
             with col2:
                 st.markdown("""
 **5️⃣ Buscar Proposição Específica**
-- Busca livre por qualquer proposição de autoria da deputada
+- Busca livre por qualquer proposição
 - Filtros por ano e tipo
-- Detalhes completos das proposições com linha do tempo
+- Detalhes completos com linha do tempo
 
 **6️⃣ Matérias por situação atual**
-- Visão geral das matérias com filtros avançados
-- Gráficos analíticos por situação, tema, órgão
-- Filtros multi-nível (tipo, ano, órgão, tema)
+- Visão geral com filtros avançados
+- Gráficos analíticos
 
-**7️⃣ RICs (Requerimentos de Informação)**
-- Acompanhamento de RICs enviados aos ministérios
-- Prazo constitucional de **30 dias** para resposta
-- Status: Aguardando, Fora do prazo, Respondido
-- Indicadores de urgência por prazo
+**7️⃣ RICs**
+- Requerimentos de Informação
+- Prazo de 30 dias para resposta
+- Indicadores de urgência
                 """)
             
             st.markdown("---")
             st.markdown("### 📋 Tipos de Proposições")
             
             st.markdown("""
-| Sigla | Nome Completo | Descrição |
-|-------|---------------|-----------|
-| **PL** | Projeto de Lei | Proposta de lei ordinária |
-| **PLP** | Projeto de Lei Complementar | Lei que complementa a Constituição |
-| **PEC** | Proposta de Emenda à Constituição | Altera a Constituição Federal |
-| **PDL** | Projeto de Decreto Legislativo | Matérias de competência exclusiva do Congresso |
-| **PRC** | Projeto de Resolução da Câmara | Normas internas da Câmara |
-| **RIC** | Requerimento de Informação | Pedido de informações a órgãos públicos (prazo: 30 dias) |
+| Sigla | Nome | Descrição |
+|-------|------|-----------|
+| **PL** | Projeto de Lei | Lei ordinária |
+| **PLP** | Projeto de Lei Complementar | Complementa a Constituição |
+| **PEC** | Proposta de Emenda | Altera a Constituição |
+| **RIC** | Requerimento de Informação | Prazo: 30 dias |
+| **PDL** | Projeto de Decreto Legislativo | Competência do Congresso |
             """)
         
         st.markdown("---")
-        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("📊 Dados: API Câmara dos Deputados | Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta")
 
     # ============================================================
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
