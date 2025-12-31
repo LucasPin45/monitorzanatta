@@ -25,4 +25,5 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DEPUTADA_ID: '220559'
           HORAS_VERIFICAR: ${{ github.event.inputs.horas || '8' }}
-        run: python notificar_tramitacoes.py
+        run: python Notificar_tramitacoes.py
+
