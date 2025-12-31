@@ -36,8 +36,10 @@ matplotlib.use('Agg')  # Backend não-interativo
 # ============================================================
 
 st.set_page_config(
-    page_title="Acesso restrito – Gabinete da Deputada Júlia Zanatta",
-    layout="centered"
+    page_title="Monitor Legislativo – Dep. Júlia Zanatta",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 # ============================================================
@@ -94,7 +96,7 @@ HEADERS = {"User-Agent": "MonitorZanatta/22.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Vacinas", "Armas", "Arma", "Armamento", "Aborto", "Conanda", 
-    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística"
+    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística", "Imposto"
 ]
 
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
@@ -4257,19 +4259,31 @@ def render_grafico_orgao(df: pd.DataFrame):
 # ============================================================
 
 def main():
-    st.set_page_config(
-        page_title="Monitor Legislativo – Dep. Júlia Zanatta",
-        page_icon="🏛️",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-    )
-    
     st.markdown("""
     <style>
+    /* Estabilizar layout - evitar "pulos" ao clicar */
+    .main .block-container {
+        min-width: 800px;
+        max-width: 1200px;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    
+    /* Manter tabelas com largura consistente */
     .map-small iframe { height: 320px !important; }
     div[data-testid="stDataFrame"] * {
         white-space: normal !important;
         word-break: break-word !important;
+    }
+    
+    /* Evitar redimensionamento de colunas */
+    div[data-testid="column"] {
+        min-height: 50px;
+    }
+    
+    /* Botões com tamanho mínimo */
+    .stButton > button {
+        min-width: 120px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -4278,7 +4292,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v22")
+    st.caption("v23")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
