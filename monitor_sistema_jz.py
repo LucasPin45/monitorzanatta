@@ -1,7 +1,10 @@
-# monitor_sistema_jz.py - v22
+# monitor_sistema_jz.py - v23
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 22: RIC com prazo de resposta, links de relator, ministérios
+# VERSÃO 23: Notificações Telegram + correções de layout
+# - Notificações via Telegram para novidades em tramitações
+# - Layout wide fixo (sem redimensionamento ao clicar)
+# - CSS estabilizado para evitar "pulos" na interface
 # - Links clicáveis no PDF
 # - Data da última tramitação (não data de cadastro)
 # - Ordenação por data mais recente primeiro
@@ -96,7 +99,7 @@ HEADERS = {"User-Agent": "MonitorZanatta/22.0 (gabinete-julia-zanatta)"}
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Vacinas", "Armas", "Arma", "Armamento", "Aborto", "Conanda", 
-    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística", "Imposto"
+    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística"
 ]
 
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
@@ -583,6 +586,178 @@ def camara_link_deputado(id_deputado: str) -> str:
 # ============================================================
 # FUNÇÕES AUXILIARES PARA RIC (Prazo de Resposta)
 # ============================================================
+
+
+# ============================================================
+# NOTIFICAÇÕES - TELEGRAM
+# ============================================================
+
+def telegram_enviar_mensagem(bot_token: str, chat_id: str, mensagem: str, parse_mode: str = "HTML") -> dict:
+    """
+    Envia mensagem via Telegram Bot API.
+    
+    Para configurar:
+    1. Crie um bot com @BotFather no Telegram
+    2. Copie o token do bot
+    3. Inicie conversa com o bot e envie /start
+    4. Obtenha seu chat_id em: https://api.telegram.org/bot<TOKEN>/getUpdates
+    
+    Returns:
+        dict com 'ok' (bool) e 'message' ou 'error'
+    """
+    if not bot_token or not chat_id:
+        return {"ok": False, "error": "Bot token ou chat_id não configurado"}
+    
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": mensagem,
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True
+        }
+        resp = requests.post(url, json=payload, timeout=10)
+        data = resp.json()
+        
+        if data.get("ok"):
+            return {"ok": True, "message": "Mensagem enviada com sucesso!"}
+        else:
+            return {"ok": False, "error": data.get("description", "Erro desconhecido")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def telegram_testar_conexao(bot_token: str, chat_id: str) -> dict:
+    """Testa a conexão enviando uma mensagem de teste."""
+    msg = "🔔 <b>Monitor Legislativo</b>\n\n✅ Conexão configurada com sucesso!\n\nVocê receberá notificações de novidades na tramitação."
+    return telegram_enviar_mensagem(bot_token, chat_id, msg)
+
+
+def formatar_notificacao_tramitacao(proposicao: dict, tramitacoes_novas: list) -> str:
+    """
+    Formata mensagem de notificação para nova tramitação.
+    
+    Args:
+        proposicao: dict com dados da proposição (sigla, numero, ano, ementa)
+        tramitacoes_novas: lista de tramitações novas
+    """
+    sigla = proposicao.get("sigla", "")
+    numero = proposicao.get("numero", "")
+    ano = proposicao.get("ano", "")
+    ementa = proposicao.get("ementa", "")[:200]
+    id_prop = proposicao.get("id", "")
+    
+    titulo = f"{sigla} {numero}/{ano}" if sigla and numero and ano else "Proposição"
+    
+    linhas = [
+        f"🔔 <b>Nova movimentação!</b>",
+        f"",
+        f"📋 <b>{titulo}</b>",
+    ]
+    
+    if ementa:
+        linhas.append(f"<i>{ementa}...</i>")
+    
+    linhas.append("")
+    
+    for tram in tramitacoes_novas[:3]:  # Limita a 3 tramitações
+        data = tram.get("dataHora", "")[:10] if tram.get("dataHora") else ""
+        despacho = tram.get("despacho", "")[:150] or tram.get("descricaoSituacao", "")[:150]
+        if data:
+            linhas.append(f"📅 <b>{data}</b>")
+        if despacho:
+            linhas.append(f"→ {despacho}")
+        linhas.append("")
+    
+    if id_prop:
+        link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={id_prop}"
+        linhas.append(f"🔗 <a href='{link}'>Ver tramitação completa</a>")
+    
+    return "\n".join(linhas)
+
+
+def verificar_e_notificar_tramitacoes(
+    bot_token: str,
+    chat_id: str,
+    proposicoes_monitoradas: list,
+    ultima_verificacao: datetime.datetime = None
+) -> dict:
+    """
+    Verifica tramitações novas e envia notificações.
+    
+    Args:
+        bot_token: Token do bot Telegram
+        chat_id: ID do chat para enviar
+        proposicoes_monitoradas: Lista de IDs de proposições para monitorar
+        ultima_verificacao: Data/hora da última verificação (para filtrar novidades)
+    
+    Returns:
+        dict com 'notificacoes_enviadas' e 'erros'
+    """
+    if not bot_token or not chat_id:
+        return {"notificacoes_enviadas": 0, "erros": ["Telegram não configurado"]}
+    
+    if ultima_verificacao is None:
+        # Se não tem última verificação, usa últimas 24 horas
+        ultima_verificacao = get_brasilia_now() - datetime.timedelta(days=1)
+    
+    notificacoes = 0
+    erros = []
+    
+    for id_prop in proposicoes_monitoradas:
+        try:
+            # Busca tramitações da proposição
+            url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code != 200:
+                continue
+            
+            data = resp.json()
+            tramitacoes = data.get("dados", [])
+            
+            # Filtra tramitações novas
+            tramitacoes_novas = []
+            for tram in tramitacoes:
+                data_hora = tram.get("dataHora", "")
+                if data_hora:
+                    try:
+                        dt_tram = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
+                        if dt_tram.tzinfo is None:
+                            dt_tram = dt_tram.replace(tzinfo=TZ_BRASILIA)
+                        
+                        if dt_tram > ultima_verificacao.replace(tzinfo=TZ_BRASILIA):
+                            tramitacoes_novas.append(tram)
+                    except:
+                        pass
+            
+            if tramitacoes_novas:
+                # Busca dados da proposição
+                info = fetch_proposicao_info(id_prop)
+                if info:
+                    proposicao = {
+                        "id": id_prop,
+                        "sigla": info.get("sigla", ""),
+                        "numero": info.get("numero", ""),
+                        "ano": info.get("ano", ""),
+                        "ementa": info.get("ementa", "")
+                    }
+                    
+                    # Formata e envia mensagem
+                    msg = formatar_notificacao_tramitacao(proposicao, tramitacoes_novas)
+                    resultado = telegram_enviar_mensagem(bot_token, chat_id, msg)
+                    
+                    if resultado.get("ok"):
+                        notificacoes += 1
+                    else:
+                        erros.append(f"Erro ao notificar {id_prop}: {resultado.get('error')}")
+                    
+                    # Pausa para não sobrecarregar API do Telegram
+                    time.sleep(0.5)
+        
+        except Exception as e:
+            erros.append(f"Erro ao verificar {id_prop}: {str(e)}")
+    
+    return {"notificacoes_enviadas": notificacoes, "erros": erros}
 
 def proximo_dia_util(dt: datetime.date) -> datetime.date:
     """
@@ -4340,14 +4515,15 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     # ABAS REORGANIZADAS (7 abas)
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
         "4️⃣ Comissões estratégicas",
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
-        "7️⃣ RICs (Requerimentos de Informação)"
+        "7️⃣ RICs (Requerimentos de Informação)",
+        "🔔 Notificações"
     ])
 
     # ============================================================
@@ -5721,6 +5897,185 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
         
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+
+    # ============================================================
+    # ABA 8 - NOTIFICAÇÕES TELEGRAM
+    # ============================================================
+    with tab8:
+        st.subheader("🔔 Notificações por Telegram")
+        
+        st.info("""
+        💡 **Como funciona:**
+        Configure um bot do Telegram para receber notificações quando houver novidades nas proposições monitoradas.
+        
+        **Passos para configurar:**
+        1. Abra o Telegram e procure por **@BotFather**
+        2. Envie `/newbot` e siga as instruções para criar seu bot
+        3. Copie o **token** do bot (formato: `123456789:ABC-DEF...`)
+        4. Inicie uma conversa com seu bot e envie `/start`
+        5. Acesse `https://api.telegram.org/bot<SEU_TOKEN>/getUpdates` para obter seu **chat_id**
+        """)
+        
+        st.markdown("---")
+        
+        # Configurações do Telegram
+        st.markdown("### ⚙️ Configuração do Bot")
+        
+        col_token, col_chatid = st.columns(2)
+        
+        with col_token:
+            telegram_token = st.text_input(
+                "🔑 Token do Bot",
+                value=st.session_state.get("telegram_token", ""),
+                type="password",
+                help="Token fornecido pelo @BotFather",
+                key="input_telegram_token"
+            )
+            if telegram_token:
+                st.session_state["telegram_token"] = telegram_token
+        
+        with col_chatid:
+            telegram_chat_id = st.text_input(
+                "💬 Chat ID",
+                value=st.session_state.get("telegram_chat_id", ""),
+                help="Seu ID de chat (número)",
+                key="input_telegram_chat_id"
+            )
+            if telegram_chat_id:
+                st.session_state["telegram_chat_id"] = telegram_chat_id
+        
+        col_test, col_status = st.columns([1, 2])
+        
+        with col_test:
+            if st.button("🧪 Testar Conexão", key="btn_test_telegram"):
+                if telegram_token and telegram_chat_id:
+                    with st.spinner("Enviando mensagem de teste..."):
+                        resultado = telegram_testar_conexao(telegram_token, telegram_chat_id)
+                        if resultado.get("ok"):
+                            st.success("✅ Conexão OK! Verifique seu Telegram.")
+                        else:
+                            st.error(f"❌ Erro: {resultado.get('error')}")
+                else:
+                    st.warning("Preencha o token e o chat_id primeiro.")
+        
+        with col_status:
+            if telegram_token and telegram_chat_id:
+                st.success("✅ Telegram configurado")
+            else:
+                st.warning("⚠️ Configure o bot para receber notificações")
+        
+        st.markdown("---")
+        
+        # Proposições para monitorar
+        st.markdown("### 📋 Proposições Monitoradas")
+        
+        st.markdown("""
+        Adicione os IDs das proposições que deseja monitorar. 
+        Você pode encontrar o ID na URL da proposição no site da Câmara.
+        
+        **Exemplo:** `https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=**2369900**`
+        """)
+        
+        # Campo para adicionar IDs
+        ids_texto = st.text_area(
+            "IDs das proposições (um por linha ou separados por vírgula)",
+            value=st.session_state.get("telegram_props_monitoradas", ""),
+            height=100,
+            help="Cole os IDs das proposições que deseja monitorar",
+            key="input_props_monitoradas"
+        )
+        
+        if ids_texto:
+            st.session_state["telegram_props_monitoradas"] = ids_texto
+        
+        # Processar IDs
+        ids_lista = []
+        if ids_texto:
+            for parte in ids_texto.replace(",", "\n").split("\n"):
+                id_limpo = parte.strip()
+                if id_limpo.isdigit():
+                    ids_lista.append(id_limpo)
+        
+        if ids_lista:
+            st.success(f"✅ {len(ids_lista)} proposição(ões) configurada(s) para monitoramento")
+        
+        st.markdown("---")
+        
+        # Verificar novidades manualmente
+        st.markdown("### 🔄 Verificar Novidades Agora")
+        
+        col_verificar, col_info = st.columns([1, 2])
+        
+        with col_verificar:
+            horas_atras = st.selectbox(
+                "Verificar tramitações das últimas:",
+                options=[6, 12, 24, 48, 72],
+                format_func=lambda x: f"{x} horas",
+                index=2,
+                key="sel_horas_verificacao"
+            )
+            
+            if st.button("🔍 Verificar e Notificar", key="btn_verificar_notificar", type="primary"):
+                if not telegram_token or not telegram_chat_id:
+                    st.error("Configure o bot do Telegram primeiro!")
+                elif not ids_lista:
+                    st.error("Adicione pelo menos uma proposição para monitorar!")
+                else:
+                    with st.spinner(f"Verificando tramitações das últimas {horas_atras} horas..."):
+                        ultima_verif = get_brasilia_now() - datetime.timedelta(hours=horas_atras)
+                        resultado = verificar_e_notificar_tramitacoes(
+                            telegram_token,
+                            telegram_chat_id,
+                            ids_lista,
+                            ultima_verif
+                        )
+                        
+                        if resultado["notificacoes_enviadas"] > 0:
+                            st.success(f"✅ {resultado['notificacoes_enviadas']} notificação(ões) enviada(s)!")
+                        else:
+                            st.info("ℹ️ Nenhuma novidade encontrada no período.")
+                        
+                        if resultado["erros"]:
+                            with st.expander("⚠️ Ver erros"):
+                                for erro in resultado["erros"]:
+                                    st.warning(erro)
+        
+        with col_info:
+            st.markdown("""
+            **💡 Dica para automação:**
+            
+            Para receber notificações automaticamente, você pode:
+            
+            1. **Usar agendador externo:** Configure um cron job ou 
+               serviço como GitHub Actions para chamar este endpoint periodicamente.
+            
+            2. **Streamlit Cloud:** O app roda sob demanda, então 
+               a verificação manual é mais confiável.
+            
+            3. **Script separado:** Extraia a lógica de notificação 
+               para um script Python independente e agende sua execução.
+            """)
+        
+        st.markdown("---")
+        
+        # Exemplo de mensagem
+        with st.expander("📬 Exemplo de notificação"):
+            st.markdown("""
+            As notificações chegam assim no seu Telegram:
+            
+            ---
+            🔔 **Nova movimentação!**
+            
+            📋 **PL 1234/2024**
+            *Dispõe sobre medidas de segurança...*
+            
+            📅 **2025-01-01**
+            → Parecer do relator pela aprovação
+            
+            🔗 [Ver tramitação completa](https://www.camara.leg.br)
+            
+            ---
+            """)
 
     st.markdown("---")
 
