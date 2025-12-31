@@ -6037,23 +6037,53 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                 if not telegram_chat_id:
                     st.error("❌ Informe seu ID do Telegram primeiro!")
                 else:
-                    # Coletar IDs para monitorar
+                    # Coletar IDs para monitorar - TODAS as proposições do último ano
                     ids_monitorar = set()
                     
                     with st.spinner("Coletando proposições para monitorar..."):
-                        # Autoria
+                        # Buscar proposições de autoria do último ano com paginação
                         if monitorar_autoria:
                             try:
-                                ids_autoria = fetch_ids_autoria_deputada(id_deputada)
-                                ids_monitorar.update(ids_autoria)
-                                st.info(f"📝 {len(ids_autoria)} proposições de autoria")
-                            except:
-                                pass
+                                um_ano_atras = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+                                pagina = 1
+                                total_autoria = 0
+                                
+                                while pagina <= 20:  # Máximo 20 páginas (2000 proposições)
+                                    url = f"{BASE_URL}/proposicoes"
+                                    params = {
+                                        "idDeputadoAutor": id_deputada,
+                                        "dataApresentacaoInicio": um_ano_atras,
+                                        "itens": 100,
+                                        "pagina": pagina,
+                                        "ordem": "DESC",
+                                        "ordenarPor": "id"
+                                    }
+                                    resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
+                                    if resp.status_code != 200:
+                                        break
+                                    
+                                    dados = resp.json().get("dados", [])
+                                    if not dados:
+                                        break
+                                    
+                                    for p in dados:
+                                        if p.get("id"):
+                                            ids_monitorar.add(str(p["id"]))
+                                    
+                                    total_autoria += len(dados)
+                                    
+                                    if len(dados) < 100:
+                                        break
+                                    pagina += 1
+                                    time.sleep(0.1)
+                                
+                                st.info(f"📝 {total_autoria} proposições de autoria (último ano)")
+                            except Exception as e:
+                                st.warning(f"Erro ao buscar autoria: {e}")
                         
-                        # Relatoria (buscar via API)
+                        # Relatoria
                         if monitorar_relatoria:
                             try:
-                                # Buscar proposições onde é relatora
                                 url = f"{BASE_URL}/proposicoes"
                                 params = {
                                     "idDeputadoRelator": id_deputada,
@@ -6070,16 +6100,6 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                             except:
                                 pass
                         
-                        # RICs
-                        if monitorar_rics:
-                            try:
-                                ids_rics = fetch_ids_autoria_deputada(id_deputada)
-                                # Filtrar só RICs (seria ideal ter função específica)
-                                # Por enquanto, adiciona todos
-                                # Os RICs são filtrados pela ementa depois
-                            except:
-                                pass
-                        
                         # IDs extras
                         if ids_extras:
                             for linha in ids_extras.strip().split("\n"):
@@ -6090,19 +6110,20 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     if not ids_monitorar:
                         st.warning("Nenhuma proposição encontrada para monitorar.")
                     else:
-                        # Ordenar por ID decrescente (mais recentes primeiro) e limitar
-                        ids_ordenados = sorted(ids_monitorar, key=lambda x: int(x) if x.isdigit() else 0, reverse=True)
-                        ids_lista = ids_ordenados[:100]  # Máximo 100 (as mais recentes)
+                        # Verificar TODAS as proposições encontradas
+                        ids_lista = list(ids_monitorar)
                         
-                        st.info(f"🔍 Verificando as **{len(ids_lista)} proposições mais recentes** de {len(ids_monitorar)} total...")
+                        st.info(f"🔍 Verificando **{len(ids_lista)} proposições** do último ano...")
                         
                         # Barra de progresso
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
+                        # Data de corte como string YYYY-MM-DD
+                        data_corte_str = (get_brasilia_now() - datetime.timedelta(hours=periodo_horas)).strftime("%Y-%m-%d")
+                        st.caption(f"📆 Buscando tramitações desde: {data_corte_str}")
+                        
                         with st.spinner(f"Verificando tramitações das últimas {periodo_horas} horas..."):
-                            ultima_verif = get_brasilia_now() - datetime.timedelta(hours=periodo_horas)
-                            
                             # Fazer verificação com progresso
                             notificacoes = 0
                             erros = []
@@ -6110,7 +6131,8 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                             
                             for i, id_prop in enumerate(ids_lista):
                                 progress_bar.progress((i + 1) / len(ids_lista))
-                                status_text.text(f"Verificando {i+1}/{len(ids_lista)}...")
+                                if (i + 1) % 50 == 0:
+                                    status_text.text(f"Verificando {i+1}/{len(ids_lista)}...")
                                 
                                 try:
                                     # Busca tramitações da proposição
@@ -6122,20 +6144,15 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                                     data = resp.json()
                                     tramitacoes = data.get("dados", [])
                                     
-                                    # Filtra tramitações novas (comparação simplificada)
+                                    # Filtra tramitações novas (comparação simples de strings)
                                     tramitacoes_novas = []
                                     for tram in tramitacoes[:5]:  # Só verifica as 5 mais recentes
                                         data_hora = tram.get("dataHora", "")
                                         if data_hora and len(data_hora) >= 10:
-                                            try:
-                                                # Pega só a data (YYYY-MM-DD)
-                                                data_tram = datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d")
-                                                data_corte = ultima_verif.replace(tzinfo=None)
-                                                
-                                                if data_tram >= data_corte.replace(hour=0, minute=0, second=0):
-                                                    tramitacoes_novas.append(tram)
-                                            except:
-                                                pass
+                                            data_tram_str = data_hora[:10]  # YYYY-MM-DD
+                                            # Comparação simples de strings (funciona porque é formato ISO)
+                                            if data_tram_str >= data_corte_str:
+                                                tramitacoes_novas.append(tram)
                                     
                                     if tramitacoes_novas:
                                         # Busca dados da proposição
