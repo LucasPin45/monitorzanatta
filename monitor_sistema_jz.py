@@ -3077,18 +3077,38 @@ def pauta_item_tem_relatoria_deputada(item, alvo_nome, alvo_partido, alvo_uf):
     return True
 
 
-def pauta_item_palavras_chave(item, palavras_chave_normalizadas):
+def pauta_item_palavras_chave(item, palavras_chave_normalizadas, id_prop=None):
+    """
+    Busca palavras-chave na ementa e descrição do item da pauta.
+    Se id_prop for fornecido, também busca a ementa completa da proposição na API.
+    """
     textos = []
+    
+    # Busca nos campos do item da pauta
     for chave in ("ementa", "ementaDetalhada", "titulo", "descricao", "descricaoTipo"):
         v = item.get(chave)
         if v:
             textos.append(str(v))
 
+    # Busca nos campos da proposição interna do item
     prop = item.get("proposicao") or {}
     for chave in ("ementa", "ementaDetalhada", "titulo"):
         v = prop.get(chave)
         if v:
             textos.append(str(v))
+    
+    # Busca na proposição relacionada
+    prop_rel = item.get("proposicaoRelacionada") or item.get("proposicao_") or {}
+    for chave in ("ementa", "ementaDetalhada", "titulo"):
+        v = prop_rel.get(chave)
+        if v:
+            textos.append(str(v))
+    
+    # Se tiver ID da proposição, busca ementa completa na API
+    if id_prop:
+        info_prop = fetch_proposicao_info(id_prop)
+        if info_prop and info_prop.get("ementa"):
+            textos.append(info_prop["ementa"])
 
     texto_norm = normalize_text(" ".join(textos))
     encontradas = set()
@@ -3167,18 +3187,21 @@ def escanear_eventos(
         proposicoes_relatoria = set()
         proposicoes_autoria = set()
         palavras_evento = set()
+        proposicoes_palavras_chave = set()  # Proposições que contêm palavras-chave
         ids_proposicoes_autoria = set()
         ids_proposicoes_relatoria = set()
 
         for item in pauta:
-            kws_item = pauta_item_palavras_chave(item, palavras_chave_norm)
+            # Primeiro, pega o ID da proposição para buscar ementa completa
+            id_prop_tmp = get_proposicao_id_from_item(item)
+            
+            # Busca palavras-chave passando o ID para buscar ementa completa
+            kws_item = pauta_item_palavras_chave(item, palavras_chave_norm, id_prop_tmp)
             has_keywords = bool(kws_item)
             relatoria_flag = pauta_item_tem_relatoria_deputada(item, alvo_nome, alvo_partido, alvo_uf)
 
             autoria_flag = False
-            id_prop_tmp = None
             if buscar_autoria and ids_autoria_deputada:
-                id_prop_tmp = get_proposicao_id_from_item(item)
                 if id_prop_tmp and id_prop_tmp in ids_autoria_deputada:
                     autoria_flag = True
 
@@ -3207,6 +3230,7 @@ def escanear_eventos(
             if has_keywords:
                 for kw in kws_item:
                     palavras_evento.add(kw)
+                proposicoes_palavras_chave.add(f"[{', '.join(kws_item)}] {texto_completo}")
 
         if not (proposicoes_relatoria or proposicoes_autoria or palavras_evento):
             continue
@@ -3234,6 +3258,7 @@ def escanear_eventos(
                     "ids_proposicoes_autoria": ";".join(sorted(ids_proposicoes_autoria)),
                     "tem_palavras_chave": bool(palavras_evento),
                     "palavras_chave_encontradas": "; ".join(sorted(palavras_evento)),
+                    "proposicoes_palavras_chave": "; ".join(sorted(proposicoes_palavras_chave)),
                     "comissao_estrategica": is_comissao_estrategica(sigla_org, comissoes_estrategicas),
                 }
             )
@@ -3946,7 +3971,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
+    st.caption("v22")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -4362,11 +4387,20 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             if df_kw.empty:
                 st.info("Sem palavras-chave no período.")
             else:
+                # Mostrar quantidade de proposições encontradas
+                st.success(f"🔍 **{len(df_kw)} eventos** com palavras-chave encontradas!")
+                
                 view = df_kw[
                     ["data", "hora", "orgao_sigla", "orgao_nome", "id_evento", "tipo_evento",
-                     "palavras_chave_encontradas", "descricao_evento"]
+                     "palavras_chave_encontradas", "proposicoes_palavras_chave", "descricao_evento"]
                 ].copy()
                 view["data"] = pd.to_datetime(view["data"], errors="coerce").dt.strftime("%d/%m/%Y")
+                
+                # Renomear colunas para exibição
+                view = view.rename(columns={
+                    "palavras_chave_encontradas": "Palavras-chave",
+                    "proposicoes_palavras_chave": "Proposições encontradas"
+                })
 
                 st.dataframe(view, use_container_width=True, hide_index=True)
 
@@ -5315,7 +5349,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
