@@ -6090,28 +6090,93 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     if not ids_monitorar:
                         st.warning("Nenhuma proposição encontrada para monitorar.")
                     else:
-                        st.info(f"🔍 Verificando {len(ids_monitorar)} proposições...")
+                        # Ordenar por ID decrescente (mais recentes primeiro) e limitar
+                        ids_ordenados = sorted(ids_monitorar, key=lambda x: int(x) if x.isdigit() else 0, reverse=True)
+                        ids_lista = ids_ordenados[:100]  # Máximo 100 (as mais recentes)
                         
-                        # Limitar para não sobrecarregar
-                        ids_lista = list(ids_monitorar)[:50]  # Máximo 50
+                        st.info(f"🔍 Verificando as **{len(ids_lista)} proposições mais recentes** de {len(ids_monitorar)} total...")
+                        
+                        # Barra de progresso
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
                         
                         with st.spinner(f"Verificando tramitações das últimas {periodo_horas} horas..."):
                             ultima_verif = get_brasilia_now() - datetime.timedelta(hours=periodo_horas)
-                            resultado = verificar_e_notificar_tramitacoes(
-                                telegram_token,
-                                telegram_chat_id,
-                                ids_lista,
-                                ultima_verif
-                            )
                             
-                            if resultado["notificacoes_enviadas"] > 0:
-                                st.success(f"✅ **{resultado['notificacoes_enviadas']} notificação(ões) enviada(s)!** Verifique seu Telegram.")
+                            # Fazer verificação com progresso
+                            notificacoes = 0
+                            erros = []
+                            props_com_novidade = []
+                            
+                            for i, id_prop in enumerate(ids_lista):
+                                progress_bar.progress((i + 1) / len(ids_lista))
+                                status_text.text(f"Verificando {i+1}/{len(ids_lista)}...")
+                                
+                                try:
+                                    # Busca tramitações da proposição
+                                    url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
+                                    resp = requests.get(url, headers=HEADERS, timeout=10)
+                                    if resp.status_code != 200:
+                                        continue
+                                    
+                                    data = resp.json()
+                                    tramitacoes = data.get("dados", [])
+                                    
+                                    # Filtra tramitações novas (comparação simplificada)
+                                    tramitacoes_novas = []
+                                    for tram in tramitacoes[:5]:  # Só verifica as 5 mais recentes
+                                        data_hora = tram.get("dataHora", "")
+                                        if data_hora and len(data_hora) >= 10:
+                                            try:
+                                                # Pega só a data (YYYY-MM-DD)
+                                                data_tram = datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d")
+                                                data_corte = ultima_verif.replace(tzinfo=None)
+                                                
+                                                if data_tram >= data_corte.replace(hour=0, minute=0, second=0):
+                                                    tramitacoes_novas.append(tram)
+                                            except:
+                                                pass
+                                    
+                                    if tramitacoes_novas:
+                                        # Busca dados da proposição
+                                        info = fetch_proposicao_info(id_prop)
+                                        if info:
+                                            proposicao = {
+                                                "id": id_prop,
+                                                "sigla": info.get("siglaTipo", "") or info.get("sigla", ""),
+                                                "numero": info.get("numero", ""),
+                                                "ano": info.get("ano", ""),
+                                                "ementa": (info.get("ementa", "") or "")[:200]
+                                            }
+                                            
+                                            # Formata e envia mensagem
+                                            msg = formatar_notificacao_tramitacao(proposicao, tramitacoes_novas)
+                                            resultado = telegram_enviar_mensagem(telegram_token, telegram_chat_id, msg)
+                                            
+                                            if resultado.get("ok"):
+                                                notificacoes += 1
+                                                props_com_novidade.append(f"{proposicao['sigla']} {proposicao['numero']}/{proposicao['ano']}")
+                                            
+                                            time.sleep(0.3)  # Evitar rate limit
+                                
+                                except Exception as e:
+                                    erros.append(str(e))
+                            
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            if notificacoes > 0:
+                                st.success(f"✅ **{notificacoes} notificação(ões) enviada(s)!** Verifique seu Telegram.")
+                                with st.expander("📋 Proposições notificadas"):
+                                    for p in props_com_novidade:
+                                        st.write(f"• {p}")
                             else:
                                 st.info("ℹ️ Nenhuma novidade no período selecionado.")
+                                st.caption("💡 Isso é normal em períodos de recesso parlamentar (fim de ano, carnaval, etc.)")
                             
-                            if resultado.get("erros"):
-                                with st.expander("⚠️ Alguns erros ocorreram"):
-                                    for erro in resultado["erros"][:5]:
+                            if erros:
+                                with st.expander(f"⚠️ {len(erros)} erros ocorreram"):
+                                    for erro in erros[:5]:
                                         st.warning(erro)
             
             st.markdown("---")
