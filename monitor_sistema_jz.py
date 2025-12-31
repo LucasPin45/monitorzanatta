@@ -53,12 +53,12 @@ if not st.session_state.autenticado:
 
     senha = st.text_input("Digite a senha de acesso", type="password")
 
-    if senha:
-        if senha == st.secrets["auth"]["senha"]:
-            st.session_state.autenticado = True
-            st.experimental_rerun()
-        else:
-            st.error("Senha incorreta")
+    if senha == st.secrets["auth"]["senha"]:
+    st.session_state.autenticado = True
+    st.rerun()
+else:
+    st.error("Senha incorreta")
+
 
     st.stop()
 
