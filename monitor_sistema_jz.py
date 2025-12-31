@@ -4618,7 +4618,13 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         if props_autoria:
             # Ordenar por ano e número (mais recente primeiro)
-            props_sorted = sorted(props_autoria, key=lambda x: (int(x.get('ano', '0')), int(x.get('numero', '0'))), reverse=True)
+            # Usa função safe_int para tratar valores vazios ou None que causariam ValueError em int()
+            def safe_int(val):
+                try:
+                    return int(val) if val else 0
+                except (ValueError, TypeError):
+                    return 0
+            props_sorted = sorted(props_autoria, key=lambda x: (safe_int(x.get('ano')), safe_int(x.get('numero'))), reverse=True)
             
             for i, prop in enumerate(props_sorted[:10], 1):
                 with st.container():
@@ -5828,7 +5834,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.warning(f"⚠️ **{len(df_urgentes_alert)} RIC(s) VENCENDO EM ATÉ 5 DIAS!**")
                 for _, row in df_urgentes_alert.head(5).iterrows():
                     prop = row.get("Proposicao", "")
-                    dias = int(row.get("RIC_DiasRestantes", 0))
+                    try:
+                        dias = int(row.get("RIC_DiasRestantes", 0) or 0)
+                    except (ValueError, TypeError):
+                        dias = 0
                     ministerio = row.get("RIC_Ministerio", "Não identificado")
                     link = camara_link_tramitacao(row.get("id", ""))
                     st.markdown(f"- **[{prop}]({link})** - Vence em **{dias} dias** - {ministerio}")
