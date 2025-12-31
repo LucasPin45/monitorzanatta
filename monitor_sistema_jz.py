@@ -53,14 +53,20 @@ if not st.session_state.autenticado:
 
     senha = st.text_input("Digite a senha de acesso", type="password")
 
-    if senha == st.secrets["auth"]["senha"]:
-    st.session_state.autenticado = True
-    st.rerun()
-else:
-    st.error("Senha incorreta")
+    senha_correta = st.secrets.get("auth", {}).get("senha")
+    if not senha_correta:
+        st.error("Erro de configuração: defina [auth].senha em Settings → Secrets.")
+        st.stop()
 
+    if senha:
+        if senha == senha_correta:
+            st.session_state.autenticado = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta")
 
     st.stop()
+
 
 # ============================================================
 # TIMEZONE DE BRASÍLIA
