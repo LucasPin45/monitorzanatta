@@ -2234,7 +2234,14 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 palavras = partes[1].strip() if len(partes) > 1 else ""
                 ementa = partes[2].strip() if len(partes) > 2 else ""
                 link = partes[3].strip() if len(partes) > 3 else ""
-                relator = partes[4].strip() if len(partes) > 4 else "Sem relator designado"
+                
+                # Relator - garantir que não está corrompido
+                relator_raw = partes[4].strip() if len(partes) > 4 else ""
+                if not relator_raw or len(relator_raw) < 5:
+                    relator = "Sem relator designado"
+                else:
+                    relator = relator_raw
+                
                 comissao = partes[5].strip() if len(partes) > 5 else row.get("orgao_sigla", "Outras")
                 nome_comissao = partes[6].strip() if len(partes) > 6 else ""
                 
@@ -2295,41 +2302,58 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
             
             # Listar proposições
             for idx, prop in enumerate(props, 1):
-                # Matéria (em destaque)
+                # 1. Matéria (em destaque)
                 pdf.set_font('Helvetica', 'B', 11)
                 pdf.set_text_color(0, 51, 102)
-                pdf.cell(0, 6, f"{idx}. {sanitize_text_pdf(prop['materia'])}", ln=True)
+                materia_text = sanitize_text_pdf(prop.get('materia', '') or '')
+                pdf.cell(0, 6, f"{idx}. {materia_text}", ln=True)
                 
-                # Palavras-chave
-                if prop.get("palavras"):
+                # 2. Palavras-chave
+                palavras = (prop.get("palavras", "") or "").strip()
+                if palavras:
                     pdf.set_font('Helvetica', 'B', 9)
                     pdf.set_text_color(180, 0, 0)
-                    pdf.cell(0, 5, f"   Palavras-chave: {sanitize_text_pdf(prop['palavras'])}", ln=True)
+                    pdf.cell(0, 5, f"   Palavras-chave: {sanitize_text_pdf(palavras)}", ln=True)
                 
-                # Ementa
-                if prop.get("ementa"):
+                # 3. Ementa (pode ser longa, usar multi_cell)
+                ementa = (prop.get("ementa", "") or "").strip()
+                if ementa:
                     pdf.set_font('Helvetica', '', 9)
                     pdf.set_text_color(60, 60, 60)
-                    ementa_text = sanitize_text_pdf(prop['ementa'])
+                    ementa_text = sanitize_text_pdf(ementa)
                     if len(ementa_text) > 250:
                         ementa_text = ementa_text[:250] + "..."
                     pdf.multi_cell(0, 4, f"   {ementa_text}")
+                    # Garantir nova linha após multi_cell
+                    pdf.ln(1)
                 
-                # Relator - SEMPRE mostrar, mesmo se vazio
-                relator_text = prop.get("relator", "").strip()
+                # 4. Relator - linha curta, usar cell
+                relator_raw = (prop.get("relator", "") or "").strip()
+                
+                # Validação do relator
+                relator_valido = (
+                    relator_raw 
+                    and len(relator_raw) > 5 
+                    and "Sem relator" not in relator_raw 
+                    and "(-)" not in relator_raw
+                )
+                
                 pdf.set_font('Helvetica', 'B', 9)
-                if relator_text and relator_text != "Sem relator designado" and "(-)" not in relator_text and relator_text != "(-)" and len(relator_text) > 3:
+                if relator_valido:
                     pdf.set_text_color(0, 100, 0)
-                    pdf.cell(0, 5, f"   Relator: {sanitize_text_pdf(relator_text)}", ln=True)
+                    texto_relator = "   Relator(a): " + sanitize_text_pdf(relator_raw)
                 else:
-                    pdf.set_text_color(150, 150, 150)
-                    pdf.cell(0, 5, "   Relator: Sem relator designado", ln=True)
+                    pdf.set_text_color(128, 128, 128)
+                    texto_relator = "   Relator(a): Sem relator designado"
                 
-                # Link
-                if prop.get("link"):
+                pdf.cell(0, 5, texto_relator, ln=True)
+                
+                # 5. Link
+                link = (prop.get("link", "") or "").strip()
+                if link:
                     pdf.set_font('Helvetica', '', 8)
                     pdf.set_text_color(0, 0, 180)
-                    pdf.cell(0, 4, f"   {prop['link']}", ln=True)
+                    pdf.cell(0, 4, f"   {link}", ln=True)
                 
                 pdf.ln(3)
             
@@ -4198,7 +4222,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v22")
+    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
