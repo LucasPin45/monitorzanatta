@@ -752,9 +752,20 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
     # ============================================================
     # PASSO 4: Verificar se foi RESPONDIDO
     # Critério: 1SECM + "Recebimento de resposta conforme Ofício"
+    # A data da resposta é a data mencionada NO TEXTO do ofício, não a data da tramitação
     # ============================================================
     data_resposta = None
     respondido = False
+    
+    # Regex para extrair data do texto do ofício
+    # Padrões: "de 24 de novembro de 2025" ou "de 27/12/2025"
+    meses_pt = {
+        'janeiro': 1, 'fevereiro': 2, 'marco': 3, 'março': 3, 'abril': 4,
+        'maio': 5, 'junho': 6, 'julho': 7, 'agosto': 8,
+        'setembro': 9, 'outubro': 10, 'novembro': 11, 'dezembro': 12
+    }
+    regex_data_extenso = r"de\s+(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})"
+    regex_data_num = r"de\s+(\d{1,2})/(\d{1,2})/(\d{4})"
     
     for t in tramitacoes_ordenadas:
         sigla_orgao = (t.get("siglaOrgao") or "").upper().strip()
@@ -769,15 +780,41 @@ def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dic
         is_recebimento_resposta = "recebimento de resposta conforme of" in texto_busca
         
         if is_1secm and is_recebimento_resposta:
-            data_str = t.get("dataHora") or t.get("data")
-            if data_str:
+            respondido = True
+            
+            # Tentar extrair data do texto do ofício (ex: "de 24 de novembro de 2025")
+            match_extenso = re.search(regex_data_extenso, texto, re.IGNORECASE)
+            match_num = re.search(regex_data_num, texto)
+            
+            if match_extenso:
                 try:
-                    dt_resp = pd.to_datetime(data_str, errors="coerce")
-                    if pd.notna(dt_resp):
-                        respondido = True
-                        data_resposta = dt_resp.date()
+                    dia = int(match_extenso.group(1))
+                    mes_nome = match_extenso.group(2).lower()
+                    ano = int(match_extenso.group(3))
+                    mes = meses_pt.get(mes_nome)
+                    if mes:
+                        data_resposta = datetime.date(ano, mes, dia)
                 except:
                     pass
+            elif match_num:
+                try:
+                    dia = int(match_num.group(1))
+                    mes = int(match_num.group(2))
+                    ano = int(match_num.group(3))
+                    data_resposta = datetime.date(ano, mes, dia)
+                except:
+                    pass
+            
+            # Se não conseguiu extrair do texto, usar data da tramitação como fallback
+            if not data_resposta:
+                data_str = t.get("dataHora") or t.get("data")
+                if data_str:
+                    try:
+                        dt_resp = pd.to_datetime(data_str, errors="coerce")
+                        if pd.notna(dt_resp):
+                            data_resposta = dt_resp.date()
+                    except:
+                        pass
     
     resultado["respondido"] = respondido
     resultado["data_resposta"] = data_resposta
@@ -3913,7 +3950,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
+    st.caption("v20)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -4170,7 +4207,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
         """)
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     # ============================================================
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
@@ -5155,7 +5192,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
