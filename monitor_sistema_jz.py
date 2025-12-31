@@ -4572,6 +4572,13 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         col1, col2, col3, col4 = st.columns(4)
         
+        # Contar por tipo primeiro para usar em todos os cards
+        tipos_count = {}
+        for p in props_autoria:
+            tipo = p.get('siglaTipo', 'Outro')
+            if tipo:  # Ignora tipos vazios
+                tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+        
         with col1:
             st.metric(
                 label="📝 Proposições de Autoria",
@@ -4580,12 +4587,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             )
         
         with col2:
-            # Contar por tipo
-            tipos_count = {}
-            for p in props_autoria:
-                tipo = p.get('siglaTipo', 'Outro')
-                tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
-            
             rics = tipos_count.get('RIC', 0)
             st.metric(
                 label="📄 RICs",
@@ -4602,60 +4603,50 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             )
         
         with col4:
-            outros = sum(v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP'])
+            # Calcular outros e listar tipos incluídos
+            tipos_outros = {k: v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP']}
+            outros = sum(tipos_outros.values())
+            
+            # Criar descrição dos tipos incluídos
+            if tipos_outros:
+                # Ordenar por quantidade (top 5)
+                tipos_sorted = sorted(tipos_outros.items(), key=lambda x: x[1], reverse=True)[:5]
+                tipos_desc = ", ".join([f"{k}({v})" for k, v in tipos_sorted])
+                if len(tipos_outros) > 5:
+                    tipos_desc += f" e mais {len(tipos_outros) - 5} tipos"
+                help_text = f"Inclui: {tipos_desc}"
+            else:
+                help_text = "Outros tipos de proposição"
+            
             st.metric(
                 label="📑 Outros",
                 value=outros,
-                help="PEC, PDL, MPV, etc."
+                help=help_text
             )
         
-        st.markdown("---")
-        
-        # ============================================================
-        # ÚLTIMAS PROPOSIÇÕES (10 mais recentes)
-        # ============================================================
-        st.markdown("### 🆕 Proposições Mais Recentes (últimas 10)")
-        
-        if props_autoria:
-            # Ordenar por ano e número (mais recente primeiro)
-            # Usa função safe_int para tratar valores vazios ou None que causariam ValueError em int()
-            def safe_int(val):
-                try:
-                    return int(val) if val else 0
-                except (ValueError, TypeError):
-                    return 0
-            props_sorted = sorted(props_autoria, key=lambda x: (safe_int(x.get('ano')), safe_int(x.get('numero'))), reverse=True)
-            
-            for i, prop in enumerate(props_sorted[:10], 1):
-                with st.container():
-                    col_num, col_info = st.columns([1, 5])
-                    with col_num:
-                        st.markdown(f"**#{i}**")
-                    with col_info:
-                        sigla = prop.get('siglaTipo', '')
-                        numero = prop.get('numero', '')
-                        ano = prop.get('ano', '')
-                        ementa = prop.get('ementa', '')
-                        prop_id = prop.get('id', '')
-                        
-                        st.markdown(f"**{sigla} {numero}/{ano}**")
-                        
-                        # Limitar ementa
-                        if len(ementa) > 150:
-                            ementa_curta = ementa[:147] + "..."
-                        else:
-                            ementa_curta = ementa
-                        
-                        st.caption(ementa_curta)
-                        
-                        if prop_id:
-                            link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}"
-                            st.markdown(f"[🔗 Ver tramitação]({link})")
-                    
-                    if i < 10:  # Não colocar linha após o último
-                        st.markdown("---")
-        else:
-            st.info("📭 Nenhuma proposição encontrada.")
+        # Expander com detalhamento de todos os tipos
+        with st.expander("📋 Ver todos os tipos de proposição", expanded=False):
+            if tipos_count:
+                # Criar dataframe para exibir
+                df_tipos_detalhe = pd.DataFrame(
+                    sorted(tipos_count.items(), key=lambda x: x[1], reverse=True),
+                    columns=['Tipo', 'Quantidade']
+                )
+                
+                col_t1, col_t2 = st.columns([2, 1])
+                with col_t1:
+                    st.dataframe(df_tipos_detalhe, use_container_width=True, hide_index=True)
+                with col_t2:
+                    st.markdown("**Legenda:**")
+                    st.caption("• **RIC** - Req. de Informação")
+                    st.caption("• **PL** - Projeto de Lei")
+                    st.caption("• **PLP** - Projeto de Lei Complementar")
+                    st.caption("• **PEC** - Proposta de Emenda")
+                    st.caption("• **REQ** - Requerimento")
+                    st.caption("• **PDL** - Projeto de Decreto Legislativo")
+                    st.caption("• **RPD** - Requerimento de PD")
+            else:
+                st.info("Nenhum tipo encontrado.")
         
         st.markdown("---")
         
@@ -4686,28 +4677,33 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 plt.close()
         
         with col_graf2:
-            # Gráfico por ano
+            # Gráfico por ano (filtra anos válidos)
             if props_autoria:
                 anos_count = {}
                 for p in props_autoria:
-                    ano = p.get('ano', 'Não identificado')
-                    anos_count[ano] = anos_count.get(ano, 0) + 1
+                    ano = p.get('ano', '')
+                    # Filtra apenas anos válidos (4 dígitos numéricos)
+                    if ano and str(ano).isdigit() and len(str(ano)) == 4:
+                        anos_count[str(ano)] = anos_count.get(str(ano), 0) + 1
                 
-                df_anos = pd.DataFrame(list(anos_count.items()), columns=['Ano', 'Quantidade'])
-                df_anos = df_anos.sort_values('Ano', ascending=False)
-                
-                fig, ax = plt.subplots(figsize=(8, 5))
-                ax.barh(df_anos['Ano'], df_anos['Quantidade'], color='coral')
-                ax.set_xlabel('Quantidade')
-                ax.set_title('Proposições por Ano')
-                ax.grid(axis='x', alpha=0.3)
-                
-                # Adicionar valores nas barras
-                for i, v in enumerate(df_anos['Quantidade']):
-                    ax.text(v + 0.5, i, str(v), va='center')
-                
-                st.pyplot(fig)
-                plt.close()
+                if anos_count:
+                    df_anos = pd.DataFrame(list(anos_count.items()), columns=['Ano', 'Quantidade'])
+                    df_anos = df_anos.sort_values('Ano', ascending=False)
+                    
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    ax.barh(df_anos['Ano'], df_anos['Quantidade'], color='coral')
+                    ax.set_xlabel('Quantidade')
+                    ax.set_title('Proposições por Ano')
+                    ax.grid(axis='x', alpha=0.3)
+                    
+                    # Adicionar valores nas barras
+                    for i, v in enumerate(df_anos['Quantidade']):
+                        ax.text(v + 0.5, i, str(v), va='center')
+                    
+                    st.pyplot(fig)
+                    plt.close()
+                else:
+                    st.info("Nenhum ano válido encontrado.")
         
         st.markdown("---")
         
@@ -4719,20 +4715,38 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
         
         with col_btn1:
-            if st.button("📅 Ver Pauta", use_container_width=True):
+            if st.button("📅 Ver Pauta", use_container_width=True, key="btn_pauta_home"):
+                st.session_state["aba_destino"] = "pauta"
                 st.info("👉 Vá para a aba **2️⃣ Autoria & Relatoria na pauta**")
         
         with col_btn2:
-            if st.button("🔍 Buscar Proposição", use_container_width=True):
+            if st.button("🔍 Buscar Proposição", use_container_width=True, key="btn_buscar_home"):
+                st.session_state["aba_destino"] = "buscar"
                 st.info("👉 Vá para a aba **5️⃣ Buscar Proposição Específica**")
         
         with col_btn3:
-            if st.button("📊 Ver Matérias", use_container_width=True):
+            if st.button("📊 Ver Matérias", use_container_width=True, key="btn_materias_home"):
+                st.session_state["aba_destino"] = "materias"
                 st.info("👉 Vá para a aba **6️⃣ Matérias por situação atual**")
         
         with col_btn4:
-            if st.button("📝 Ver RICs", use_container_width=True):
+            if st.button("📝 Ver RICs", use_container_width=True, key="btn_rics_home"):
+                st.session_state["aba_destino"] = "rics"
                 st.info("👉 Vá para a aba **7️⃣ RICs (Requerimentos)**")
+        
+        # Mostrar indicação se algum destino foi selecionado
+        if st.session_state.get("aba_destino"):
+            destinos = {
+                "pauta": "2️⃣ Autoria & Relatoria na pauta",
+                "buscar": "5️⃣ Buscar Proposição Específica",
+                "materias": "6️⃣ Matérias por situação atual",
+                "rics": "7️⃣ RICs (Requerimentos)"
+            }
+            destino = destinos.get(st.session_state["aba_destino"], "")
+            if destino:
+                st.success(f"👆 Clique na aba **{destino}** acima para acessar")
+                # Limpa após mostrar
+                st.session_state["aba_destino"] = None
         
         st.markdown("---")
         
