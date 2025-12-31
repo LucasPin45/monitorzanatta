@@ -1457,6 +1457,8 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
                 self.set_y(-15)
                 self.set_font('Helvetica', 'I', 8)
                 self.set_text_color(128, 128, 128)
+                self.set_x(10)
+                self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
                 self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
         
         pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
@@ -1635,6 +1637,8 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 self.set_y(-15)
                 self.set_font('Helvetica', 'I', 8)
                 self.set_text_color(128, 128, 128)
+                self.set_x(10)
+                self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
                 self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
         
         pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
@@ -2006,6 +2010,8 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 self.set_y(-15)
                 self.set_font('Helvetica', 'I', 8)
                 self.set_text_color(128, 128, 128)
+                self.set_x(10)
+                self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
                 self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
         
         pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
@@ -2173,6 +2179,8 @@ def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos
                 self.set_y(-15)
                 self.set_font('Helvetica', 'I', 8)
                 self.set_text_color(128, 128, 128)
+                self.set_x(10)
+                self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
                 self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
         
         pdf = RelatorioPDF(orientation='P', unit='mm', format='A4')
@@ -3662,7 +3670,7 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
         if prazo_info.get("data_remessa"):
             st.markdown("#### 📅 Prazo de Resposta")
             
-            col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+            col_p1, col_p2, col_p3 = st.columns(3)
             
             with col_p1:
                 data_remessa = prazo_info.get("data_remessa")
@@ -3675,18 +3683,6 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
             with col_p3:
                 prazo_fim = prazo_info.get("prazo_fim")
                 st.metric("Prazo final", prazo_fim.strftime("%d/%m/%Y") if prazo_fim else "—")
-            
-            with col_p4:
-                dias_rest = prazo_info.get("dias_restantes")
-                if dias_rest is not None:
-                    if dias_rest < 0:
-                        st.metric("Dias restantes", f"{abs(dias_rest)} dias VENCIDO", delta=f"-{abs(dias_rest)}", delta_color="inverse")
-                    elif dias_rest <= 5:
-                        st.metric("Dias restantes", f"{dias_rest} dias", delta="Urgente!", delta_color="inverse")
-                    else:
-                        st.metric("Dias restantes", f"{dias_rest} dias")
-                else:
-                    st.metric("Dias restantes", "—")
         
         st.markdown("---")
 
@@ -3950,47 +3946,20 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v20)")
+    st.caption("v21")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
 
+    # Constantes fixas da deputada (não editáveis)
+    nome_deputada = DEPUTADA_NOME_PADRAO
+    partido_deputada = DEPUTADA_PARTIDO_PADRAO
+    uf_deputada = DEPUTADA_UF_PADRAO
+    id_deputada = DEPUTADA_ID_PADRAO
+    
     with st.sidebar:
         st.header("⚙️ Configurações")
         
-        # Dados abertos da deputada
-        st.subheader("Deputada monitorada")
-        nome_deputada = st.text_input("Nome completo", value=DEPUTADA_NOME_PADRAO)
-        
-        c1, c2, c3 = st.columns([1, 1, 1])
-        with c1:
-            partido_deputada = st.text_input("Partido", value=DEPUTADA_PARTIDO_PADRAO)
-        with c2:
-            uf_deputada = st.text_input("UF", value=DEPUTADA_UF_PADRAO)
-        with c3:
-            id_dep_str = st.text_input("ID (Dados Abertos)", value=str(DEPUTADA_ID_PADRAO))
-        
-        try:
-            id_deputada = int(id_dep_str)
-        except ValueError:
-            st.error("ID da deputada inválido. Use apenas números.")
-            return
-
-        st.markdown("---")
-        st.subheader("Período de busca (pauta)")
-        hoje = datetime.date.today()
-        date_range = st.date_input(
-            "Intervalo de datas", 
-            value=(hoje, hoje + datetime.timedelta(days=7)),
-            format="DD/MM/YYYY"
-        )
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            dt_inicio, dt_fim = date_range
-        else:
-            dt_inicio = hoje
-            dt_fim = hoje + datetime.timedelta(days=7)
-
-        st.markdown("---")
         st.subheader("Palavras-chave")
         palavras_str = st.text_area("Uma por linha", value="\n".join(PALAVRAS_CHAVE_PADRAO), height=120)
         palavras_chave = [p.strip() for p in palavras_str.splitlines() if p.strip()]
@@ -3998,34 +3967,12 @@ def main():
         st.subheader("Comissões estratégicas")
         comissoes_str = st.text_input("Siglas (sep. vírgula)", value=", ".join(COMISSOES_ESTRATEGICAS_PADRAO))
         comissoes_estrategicas = [c.strip().upper() for c in comissoes_str.split(",") if c.strip()]
-
+        
         st.markdown("---")
-        run_scan = st.button("▶️ Rodar monitoramento (pauta)", type="primary")
+        st.caption("Monitor Legislativo v22")
+        st.caption(f"Dep. {nome_deputada} ({partido_deputada}/{uf_deputada})")
 
     df = st.session_state.get("df_scan", pd.DataFrame())
-
-    if run_scan:
-        with st.spinner("Carregando eventos..."):
-            eventos = fetch_eventos(dt_inicio, dt_fim)
-
-        with st.spinner("Carregando autorias..."):
-            ids_autoria = fetch_ids_autoria_deputada(int(id_deputada))
-
-        with st.spinner("Escaneando pautas..."):
-            df = escanear_eventos(
-                eventos,
-                nome_deputada,
-                partido_deputada,
-                uf_deputada,
-                palavras_chave,
-                comissoes_estrategicas,
-                apenas_reuniao_deliberativa=False,
-                buscar_autoria=True,
-                ids_autoria_deputada=ids_autoria,
-            )
-
-        st.session_state["df_scan"] = df
-        st.success(f"Monitoramento concluído – {len(df)} registros")
 
     # ============================================================
     # CARD FIXO DA DEPUTADA (aparece em todas as abas)
@@ -4215,8 +4162,47 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     with tab2:
         st.subheader("Autoria & Relatoria na pauta")
         
+        # Período de busca e botão de rodar
+        col_periodo, col_btn = st.columns([3, 1])
+        with col_periodo:
+            hoje = datetime.date.today()
+            date_range_tab2 = st.date_input(
+                "📅 Período de busca", 
+                value=st.session_state.get("date_range_pauta", (hoje, hoje + datetime.timedelta(days=7))),
+                format="DD/MM/YYYY",
+                key="date_range_tab2"
+            )
+            if isinstance(date_range_tab2, tuple) and len(date_range_tab2) == 2:
+                dt_inicio, dt_fim = date_range_tab2
+                st.session_state["date_range_pauta"] = date_range_tab2
+            else:
+                dt_inicio = hoje
+                dt_fim = hoje + datetime.timedelta(days=7)
+        
+        with col_btn:
+            st.write("")  # Espaçador
+            run_scan_tab2 = st.button("▶️ Carregar pauta", type="primary", key="run_scan_tab2")
+        
+        if run_scan_tab2:
+            with st.spinner("Carregando eventos..."):
+                eventos = fetch_eventos(dt_inicio, dt_fim)
+            with st.spinner("Carregando autorias..."):
+                ids_autoria = fetch_ids_autoria_deputada(int(id_deputada))
+            with st.spinner("Escaneando pautas..."):
+                df = escanear_eventos(
+                    eventos, nome_deputada, partido_deputada, uf_deputada,
+                    palavras_chave, comissoes_estrategicas,
+                    apenas_reuniao_deliberativa=False, buscar_autoria=True,
+                    ids_autoria_deputada=ids_autoria,
+                )
+            st.session_state["df_scan"] = df
+            st.success(f"✅ {len(df)} registros carregados")
+            st.rerun()
+        
+        df = st.session_state.get("df_scan", pd.DataFrame())
+        
         if df.empty:
-            st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
+            st.info("👆 Selecione o período e clique em **Carregar pauta** para começar.")
         else:
             df_a = df[df["tem_autoria_deputada"] | df["tem_relatoria_deputada"]].copy()
             if df_a.empty:
@@ -4293,9 +4279,16 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     # ============================================================
     with tab3:
         st.subheader("Palavras-chave na pauta")
+        
+        df = st.session_state.get("df_scan", pd.DataFrame())
+        
         if df.empty:
-            st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
+            st.info("👆 Carregue a pauta na aba **2️⃣ Autoria & Relatoria na pauta** primeiro.")
         else:
+            # Pegar datas do session_state
+            date_range_pauta = st.session_state.get("date_range_pauta", (datetime.date.today(), datetime.date.today() + datetime.timedelta(days=7)))
+            dt_inicio, dt_fim = date_range_pauta
+            
             df_kw = df[df["tem_palavras_chave"]].copy()
             if df_kw.empty:
                 st.info("Sem palavras-chave no período.")
@@ -4333,9 +4326,16 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
     # ============================================================
     with tab4:
         st.subheader("Comissões estratégicas")
+        
+        df = st.session_state.get("df_scan", pd.DataFrame())
+        
         if df.empty:
-            st.info("Clique em **Rodar monitoramento (pauta)** na lateral para carregar.")
+            st.info("👆 Carregue a pauta na aba **2️⃣ Autoria & Relatoria na pauta** primeiro.")
         else:
+            # Pegar datas do session_state
+            date_range_pauta = st.session_state.get("date_range_pauta", (datetime.date.today(), datetime.date.today() + datetime.timedelta(days=7)))
+            dt_inicio, dt_fim = date_range_pauta
+            
             df_com = df[df["comissao_estrategica"]].copy()
             if df_com.empty:
                 st.info("Sem eventos em comissões estratégicas no período.")
