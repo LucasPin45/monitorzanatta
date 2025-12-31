@@ -4570,7 +4570,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         # ============================================================
         st.markdown("### 📈 Visão Geral")
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         # Contar por tipo primeiro para usar em todos os cards
         tipos_count = {}
@@ -4603,8 +4603,16 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             )
         
         with col4:
-            # Calcular outros e listar tipos incluídos
-            tipos_outros = {k: v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP']}
+            pareceres = tipos_count.get('PRL', 0)
+            st.metric(
+                label="📑 Pareceres",
+                value=pareceres,
+                help="Pareceres de Relatoria (PRL)"
+            )
+        
+        with col5:
+            # Calcular outros e listar tipos incluídos (excluindo RIC, PL, PLP e PRL)
+            tipos_outros = {k: v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP', 'PRL']}
             outros = sum(tipos_outros.values())
             
             # Criar descrição dos tipos incluídos
@@ -4619,7 +4627,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 help_text = "Outros tipos de proposição"
             
             st.metric(
-                label="📑 Outros",
+                label="📁 Outros",
                 value=outros,
                 help=help_text
             )
@@ -4641,10 +4649,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     st.caption("• **RIC** - Req. de Informação")
                     st.caption("• **PL** - Projeto de Lei")
                     st.caption("• **PLP** - Projeto de Lei Complementar")
+                    st.caption("• **PRL** - Parecer de Relatoria")
                     st.caption("• **PEC** - Proposta de Emenda")
                     st.caption("• **REQ** - Requerimento")
                     st.caption("• **PDL** - Projeto de Decreto Legislativo")
-                    st.caption("• **RPD** - Requerimento de PD")
+                    st.caption("• **RPD** - Req. regimentais de procedimentos internos (Retirada de Pauta, Adiamento, etc.)")
             else:
                 st.info("Nenhum tipo encontrado.")
         
