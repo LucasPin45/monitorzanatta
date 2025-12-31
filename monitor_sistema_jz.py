@@ -2229,7 +2229,7 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
                     
                 partes = prop_detail.split("|||")
                 
-                # Formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao
+                # Formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao|||data
                 materia = partes[0].strip() if len(partes) > 0 else ""
                 palavras = partes[1].strip() if len(partes) > 1 else ""
                 ementa = partes[2].strip() if len(partes) > 2 else ""
@@ -2244,6 +2244,16 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
                 
                 comissao = partes[5].strip() if len(partes) > 5 else row.get("orgao_sigla", "Outras")
                 nome_comissao = partes[6].strip() if len(partes) > 6 else ""
+                data_evento = partes[7].strip() if len(partes) > 7 else ""
+                
+                # Formatar data para DD/MM/YYYY
+                data_formatada = ""
+                if data_evento and len(data_evento) >= 10:
+                    try:
+                        dt = datetime.datetime.strptime(data_evento[:10], "%Y-%m-%d")
+                        data_formatada = dt.strftime("%d/%m/%Y")
+                    except:
+                        data_formatada = data_evento
                 
                 if not materia:
                     continue
@@ -2265,7 +2275,8 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
                     "palavras": palavras,
                     "ementa": ementa,
                     "link": link,
-                    "relator": relator
+                    "relator": relator,
+                    "data": data_formatada
                 })
         
         # Ordenar comissões alfabeticamente
@@ -2302,11 +2313,15 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
             
             # Listar proposições
             for idx, prop in enumerate(props, 1):
-                # 1. Matéria (em destaque)
+                # 1. Matéria (em destaque) com data
                 pdf.set_font('Helvetica', 'B', 11)
                 pdf.set_text_color(0, 51, 102)
                 materia_text = sanitize_text_pdf(prop.get('materia', '') or '')
-                pdf.cell(0, 6, f"{idx}. {materia_text}", ln=True)
+                data_text = (prop.get("data", "") or "").strip()
+                if data_text:
+                    pdf.cell(0, 6, f"{idx}. [{data_text}] {materia_text}", ln=True)
+                else:
+                    pdf.cell(0, 6, f"{idx}. {materia_text}", ln=True)
                 
                 # 2. Palavras-chave
                 palavras = (prop.get("palavras", "") or "").strip()
@@ -3474,13 +3489,13 @@ def escanear_eventos(
                 # Link para tramitação
                 link_tram = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={id_prop}" if id_prop else ""
                 
-                # Armazenar com formato detalhado incluindo comissão
-                # formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao
+                # Armazenar com formato detalhado incluindo comissão e data
+                # formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao|||data
                 for org in orgaos:
                     sigla_org_temp = org.get("siglaOrgao") or org.get("sigla") or ""
                     nome_org_temp = org.get("nomeOrgao") or org.get("nome") or ""
                     proposicoes_palavras_chave.add(
-                        f"{identificacao}|||{', '.join(kws_item)}|||{ementa_prop}|||{link_tram}|||{relator_str}|||{sigla_org_temp}|||{nome_org_temp}"
+                        f"{identificacao}|||{', '.join(kws_item)}|||{ementa_prop}|||{link_tram}|||{relator_str}|||{sigla_org_temp}|||{nome_org_temp}|||{data_str}"
                     )
 
         if not (proposicoes_relatoria or proposicoes_autoria or palavras_evento):
@@ -4222,7 +4237,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v20 – PDF Autoria/Relatoria completo (relator, situacao, parecer)")
+    st.caption("v22")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -4658,9 +4673,20 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                         relator = partes[4].strip() if len(partes) > 4 else ""
                         comissao = partes[5].strip() if len(partes) > 5 else row.get("orgao_sigla", "")
                         nome_comissao = partes[6].strip() if len(partes) > 6 else row.get("orgao_nome", "")
+                        data_evento = partes[7].strip() if len(partes) > 7 else row.get("data", "")
+                        
+                        # Formatar data para DD/MM/YYYY
+                        data_formatada = ""
+                        if data_evento and len(data_evento) >= 10:
+                            try:
+                                dt = datetime.datetime.strptime(data_evento[:10], "%Y-%m-%d")
+                                data_formatada = dt.strftime("%d/%m/%Y")
+                            except:
+                                data_formatada = data_evento
                         
                         if materia:
                             lista_proposicoes.append({
+                                "Data": data_formatada,
                                 "Matéria": materia,
                                 "Palavras-chave": palavras,
                                 "Comissão": comissao,
@@ -4677,7 +4703,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
                     st.info("Sem matérias com palavras-chave encontradas.")
                 else:
                     df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
-                    df_props = df_props.sort_values(["Comissão", "Matéria"])
+                    df_props = df_props.sort_values(["Data", "Comissão", "Matéria"])
                     
                     # Mostrar quantidade
                     st.success(f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em **{df_props['Comissão'].nunique()} comissões**!")
@@ -5639,7 +5665,7 @@ O sistema categoriza automaticamente as proposições nos seguintes temas:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
         st.markdown("---")
-        st.caption("Desenvolvido para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
