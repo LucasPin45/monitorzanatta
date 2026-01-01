@@ -1831,9 +1831,12 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         pdf.output(output)
         return (output.getvalue(), "application/pdf", "pdf")
         
-    except (ImportError, Exception) as e:
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        return (csv_bytes, "text/csv", "csv")
+    except ImportError:
+        # fpdf não instalado - gerar PDF simples de erro
+        raise Exception("Biblioteca fpdf2 não disponível. Instale com: pip install fpdf2")
+    except Exception as e:
+        # Propagar o erro para debug - NÃO fazer fallback para CSV
+        raise Exception(f"Erro ao gerar PDF: {str(e)}")
 
 
 
@@ -2206,8 +2209,7 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
         return (output.getvalue(), "application/pdf", "pdf")
         
     except Exception as e:
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        return (csv_bytes, "text/csv", "csv")
+        raise Exception(f"Erro ao gerar PDF de autoria/relatoria: {str(e)}")
 
 
 def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
@@ -2367,8 +2369,7 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
         return (output.getvalue(), "application/pdf", "pdf")
         
     except Exception as e:
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        return (csv_bytes, "text/csv", "csv")
+        raise Exception(f"Erro ao gerar PDF de comissões estratégicas: {str(e)}")
 
 
 def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
@@ -2813,13 +2814,7 @@ def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos
         return (output.getvalue(), "application/pdf", "pdf")
         
     except Exception as e:
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        return (csv_bytes, "text/csv", "csv")
-    s_raw = (situacao or "").strip()
-    s = normalize_text(s_raw)
-    if "parecer" in s:
-        return "Aguardando Parecer de Relator(a)"
-    return s_raw
+        raise Exception(f"Erro ao gerar PDF de RICs: {str(e)}")
 
 
 def buscar_pauta_semana_atual(id_deputada: int, nome_deputada: str, partido: str, uf: str) -> pd.DataFrame:
@@ -4760,23 +4755,29 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
 
         col_xlsx, col_pdf = st.columns(2)
         with col_xlsx:
-            bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
-            st.download_button(
-                f"⬇️ Baixar XLSX",
-                data=bytes_out,
-                file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
-                mime=mime,
-                key=f"{key_prefix}_download_timeline_xlsx_{selected_id}"
-            )
+            try:
+                bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
+                st.download_button(
+                    f"⬇️ Baixar XLSX",
+                    data=bytes_out,
+                    file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
+                    mime=mime,
+                    key=f"{key_prefix}_download_timeline_xlsx_{selected_id}"
+                )
+            except Exception as e:
+                st.error(f"Erro ao gerar XLSX: {e}")
         with col_pdf:
-            pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tram10, f"Linha do Tempo - ID {selected_id}")
-            st.download_button(
-                f"⬇️ Baixar PDF",
-                data=pdf_bytes,
-                file_name=f"linha_do_tempo_10_{selected_id}.{pdf_ext}",
-                mime=pdf_mime,
-                key=f"{key_prefix}_download_timeline_pdf_{selected_id}"
-            )
+            try:
+                pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tram10, f"Linha do Tempo - ID {selected_id}")
+                st.download_button(
+                    f"⬇️ Baixar PDF",
+                    data=pdf_bytes,
+                    file_name=f"linha_do_tempo_10_{selected_id}.{pdf_ext}",
+                    mime=pdf_mime,
+                    key=f"{key_prefix}_download_timeline_pdf_{selected_id}"
+                )
+            except Exception as e:
+                st.error(f"Erro ao gerar PDF: {e}")
 
 
 def montar_estrategia_tabela(situacao: str, relator_alerta: str = "") -> pd.DataFrame:
@@ -5973,23 +5974,29 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             # Exportação
             col_x4, col_p4 = st.columns(2)
             with col_x4:
-                bytes_rast, mime_rast, ext_rast = to_xlsx_bytes(df_tbl[show_cols_r], "Busca_Especifica")
-                st.download_button(
-                    f"⬇️ XLSX",
-                    data=bytes_rast,
-                    file_name=f"busca_especifica_proposicoes.{ext_rast}",
-                    mime=mime_rast,
-                    key="export_busca_xlsx_tab5"
-                )
+                try:
+                    bytes_rast, mime_rast, ext_rast = to_xlsx_bytes(df_tbl[show_cols_r], "Busca_Especifica")
+                    st.download_button(
+                        f"⬇️ XLSX",
+                        data=bytes_rast,
+                        file_name=f"busca_especifica_proposicoes.{ext_rast}",
+                        mime=mime_rast,
+                        key="export_busca_xlsx_tab5"
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao gerar XLSX: {e}")
             with col_p4:
-                pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tbl[show_cols_r], "Busca Específica")
-                st.download_button(
-                    f"⬇️ PDF",
-                    data=pdf_bytes,
-                    file_name=f"busca_especifica_proposicoes.{pdf_ext}",
-                    mime=pdf_mime,
-                    key="export_busca_pdf_tab5"
-                )
+                try:
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tbl[show_cols_r], "Busca Específica")
+                    st.download_button(
+                        f"⬇️ PDF",
+                        data=pdf_bytes,
+                        file_name=f"busca_especifica_proposicoes.{pdf_ext}",
+                        mime=pdf_mime,
+                        key="export_busca_pdf_tab5"
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
 
             # Detalhes da proposição selecionada
             selected_id = None
@@ -6317,23 +6324,29 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
                 col_x5, col_p5 = st.columns(2)
                 with col_x5:
-                    bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status[show_cols], "Materias_Situacao")
-                    st.download_button(
-                        f"⬇️ XLSX",
-                        data=bytes_out,
-                        file_name=f"materias_por_situacao_atual.{ext}",
-                        mime=mime,
-                        key="download_materias_xlsx_tab6"
-                    )
+                    try:
+                        bytes_out, mime, ext = to_xlsx_bytes(df_tbl_status[show_cols], "Materias_Situacao")
+                        st.download_button(
+                            f"⬇️ XLSX",
+                            data=bytes_out,
+                            file_name=f"materias_por_situacao_atual.{ext}",
+                            mime=mime,
+                            key="download_materias_xlsx_tab6"
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar XLSX: {e}")
                 with col_p5:
-                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tbl_status[show_cols], "Matérias por Situação")
-                    st.download_button(
-                        f"⬇️ PDF",
-                        data=pdf_bytes,
-                        file_name=f"materias_por_situacao_atual.{pdf_ext}",
-                        mime=pdf_mime,
-                        key="download_materias_pdf_tab6"
-                    )
+                    try:
+                        pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tbl_status[show_cols], "Matérias por Situação")
+                        st.download_button(
+                            f"⬇️ PDF",
+                            data=pdf_bytes,
+                            file_name=f"materias_por_situacao_atual.{pdf_ext}",
+                            mime=pdf_mime,
+                            key="download_materias_pdf_tab6"
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar PDF: {e}")
 
     # ============================================================
     # ABA 7 - RICs (REQUERIMENTOS DE INFORMAÇÃO)
