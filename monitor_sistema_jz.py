@@ -1638,7 +1638,8 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
     """
     colunas_excluir = ['Tipo', 'Ano', 'Alerta', 'ID', 'id', 'sinal', 'AnoStatus', 'MesStatus', 
                        'ids_proposicoes_autoria', 'ids_proposicoes_relatoria', 'id_evento',
-                       'DataStatus_dt', 'Data do status (raw)', '_search']
+                       'DataStatus_dt', 'Data do status (raw)', '_search', '_dt_sort',
+                       '_situacao_group', '_categoria_info', '_ordem_prioridade', '_categoria_agrupada']
     
     try:
         from fpdf import FPDF
@@ -1660,7 +1661,11 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
             else:
                 df_sorted['_dt_sort'] = pd.to_datetime(df_sorted[col_data_sort], errors='coerce', dayfirst=True)
                 df_sorted = df_sorted.sort_values('_dt_sort', ascending=False, na_position='last')
-                df_sorted = df_sorted.drop(columns=['_dt_sort'], errors='ignore')
+        
+        # Garantir remoção de colunas temporárias
+        for col_temp in ['_dt_sort', '_search']:
+            if col_temp in df_sorted.columns:
+                df_sorted = df_sorted.drop(columns=[col_temp])
         
         class RelatorioPDF(FPDF):
             def header(self):
@@ -1712,6 +1717,7 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         pdf.cell(0, 6, f"Total de registros: {len(df_sorted)}", ln=True)
         pdf.ln(3)
         
+        # Definir colunas para renderização (excluindo colunas temporárias)
         cols_mostrar = [c for c in df_sorted.columns if c not in colunas_excluir]
         
         col_proposicao = next((c for c in cols_mostrar if 'Proposi' in c or c == 'Proposição'), None)
@@ -1739,7 +1745,13 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
             if '_dt_sort' not in df_sorted.columns and col_data_sort:
                 df_sorted['_dt_sort'] = pd.to_datetime(df_sorted[col_data_sort], errors='coerce', dayfirst=True)
             
-            df_sorted = df_sorted.sort_values(['_ordem_prioridade', '_dt_sort'], ascending=[True, False], na_position='last')
+            # Ordenar - usar _dt_sort só se existir
+            if '_dt_sort' in df_sorted.columns:
+                df_sorted = df_sorted.sort_values(['_ordem_prioridade', '_dt_sort'], ascending=[True, False], na_position='last')
+                # Remover _dt_sort após ordenação
+                df_sorted = df_sorted.drop(columns=['_dt_sort'])
+            else:
+                df_sorted = df_sorted.sort_values('_ordem_prioridade', ascending=True, na_position='last')
             
             # Agrupar por categoria agrupada (não pela situação original)
             categorias_ordenadas = df_sorted.groupby('_categoria_agrupada', sort=False).agg({
@@ -1809,6 +1821,11 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
                 if registro_num > 300:
                     break
         else:
+            # Remover colunas temporárias antes de iterar
+            for col_temp in ['_dt_sort', '_search']:
+                if col_temp in df_sorted.columns:
+                    df_sorted = df_sorted.drop(columns=[col_temp])
+            
             for idx, (_, row) in enumerate(df_sorted.head(300).iterrows()):
                 if pdf.get_y() > 250:
                     pdf.add_page()
@@ -1836,7 +1853,8 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         raise Exception("Biblioteca fpdf2 não disponível. Instale com: pip install fpdf2")
     except Exception as e:
         # Propagar o erro para debug - NÃO fazer fallback para CSV
-        raise Exception(f"Erro ao gerar PDF: {str(e)}")
+        import traceback
+        raise Exception(f"Erro ao gerar PDF: {str(e)} | Traceback: {traceback.format_exc()}")
 
 
 
