@@ -2833,169 +2833,195 @@ def gerar_relatorio_semanal(
 ) -> bytes:
     """
     Gera um relatório PDF consolidado com análise estratégica da semana.
+    Segue o padrão visual dos outros PDFs do sistema.
     """
     from fpdf import FPDF
     
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    class RelatorioSemanalPDF(FPDF):
+        def header(self):
+            self.set_fill_color(0, 51, 102)
+            self.rect(0, 0, 210, 25, 'F')
+            self.set_font('Helvetica', 'B', 20)
+            self.set_text_color(255, 255, 255)
+            self.set_y(8)
+            self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+            self.ln(20)
+            
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Helvetica', 'I', 8)
+            self.set_text_color(128, 128, 128)
+            self.set_x(10)
+            self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
+            self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+    
+    pdf = RelatorioSemanalPDF(orientation='P', unit='mm', format='A4')
+    pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
     
     # ============================================================
-    # CABEÇALHO
+    # SUBTÍTULO E INFORMAÇÕES
     # ============================================================
-    pdf.set_font('Helvetica', 'B', 18)
-    pdf.set_text_color(0, 51, 102)
-    pdf.cell(0, 12, "RELATORIO SEMANAL - MONITOR LEGISLATIVO", ln=True, align='C')
-    
+    pdf.set_y(30)
     pdf.set_font('Helvetica', 'B', 14)
-    pdf.set_text_color(0, 0, 0)
-    pdf.cell(0, 10, sanitize_text_pdf(f"Dep. {nome_deputada} ({partido}/{uf})"), ln=True, align='C')
+    pdf.set_text_color(0, 51, 102)
+    pdf.cell(0, 8, "Relatorio Semanal", ln=True, align='C')
     
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 6, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y as %H:%M')}", ln=True, align='C')
+    pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
+    pdf.cell(0, 6, sanitize_text_pdf(f"Dep. {nome_deputada} ({partido}-{uf})"), ln=True, align='C')
     
-    pdf.ln(8)
-    pdf.set_draw_color(0, 51, 102)
-    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-    pdf.ln(8)
-    
-    # ============================================================
-    # ANÁLISE ESTRATÉGICA (texto gerado automaticamente)
-    # ============================================================
-    pdf.set_font('Helvetica', 'B', 14)
-    pdf.set_text_color(0, 51, 102)
-    pdf.cell(0, 10, "ANALISE ESTRATEGICA DA SEMANA", ln=True)
     pdf.ln(2)
+    pdf.set_font('Helvetica', 'I', 8)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br", ln=True, align='C')
     
-    # Gerar texto de análise baseado nos dados
-    analise_texto = gerar_analise_estrategica(props_autoria, tipos_count, df_pauta, df_rics)
-    
-    pdf.set_font('Helvetica', '', 10)
-    pdf.set_text_color(0, 0, 0)
-    pdf.multi_cell(0, 5, sanitize_text_pdf(analise_texto))
-    pdf.ln(5)
+    pdf.ln(3)
+    pdf.set_draw_color(0, 51, 102)
+    pdf.set_line_width(0.5)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(6)
     
     # ============================================================
     # RESUMO EM NÚMEROS
     # ============================================================
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font('Helvetica', 'B', 12)
     pdf.set_text_color(0, 51, 102)
-    pdf.cell(0, 10, "RESUMO EM NUMEROS", ln=True)
+    pdf.cell(0, 8, "Resumo em Numeros", ln=True)
     pdf.ln(2)
     
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(0, 0, 0)
     
-    # Proposições de autoria
     total_props = len(props_autoria) if props_autoria else 0
     rics_total = tipos_count.get('RIC', 0) if tipos_count else 0
-    pls_total = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0) if tipos_count else 0
+    pls_total = (tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)) if tipos_count else 0
     pareceres_total = tipos_count.get('PRL', 0) if tipos_count else 0
     
-    pdf.cell(0, 6, f"- Total de proposicoes de autoria: {total_props}", ln=True)
-    pdf.cell(0, 6, f"- Requerimentos de Informacao (RIC): {rics_total}", ln=True)
-    pdf.cell(0, 6, f"- Projetos de Lei (PL + PLP): {pls_total}", ln=True)
-    pdf.cell(0, 6, f"- Pareceres (PRL): {pareceres_total}", ln=True)
+    pdf.cell(0, 6, f"Total de proposicoes de autoria: {total_props}", ln=True)
+    pdf.cell(0, 6, f"Requerimentos de Informacao (RIC): {rics_total}", ln=True)
+    pdf.cell(0, 6, f"Projetos de Lei (PL + PLP): {pls_total}", ln=True)
+    pdf.cell(0, 6, f"Pareceres (PRL): {pareceres_total}", ln=True)
     
-    # Pauta da semana
-    if not df_pauta.empty:
-        df_autoria_pauta = df_pauta[df_pauta.get("tem_autoria_deputada", False) == True] if "tem_autoria_deputada" in df_pauta.columns else pd.DataFrame()
-        df_relatoria_pauta = df_pauta[df_pauta.get("tem_relatoria_deputada", False) == True] if "tem_relatoria_deputada" in df_pauta.columns else pd.DataFrame()
-        pdf.cell(0, 6, f"- Materias de autoria na pauta: {len(df_autoria_pauta)}", ln=True)
-        pdf.cell(0, 6, f"- Materias de relatoria na pauta: {len(df_relatoria_pauta)}", ln=True)
-    
-    # RICs
+    # RICs pendentes
+    rics_pendentes = 0
+    rics_respondidos = 0
     if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
         rics_pendentes = len(df_rics[df_rics["RIC_StatusResposta"].isin(["Aguardando resposta", "Fora do prazo", "Em tramitação na Câmara"])])
         rics_respondidos = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Respondido", na=False)])
-        pdf.cell(0, 6, f"- RICs pendentes de resposta: {rics_pendentes}", ln=True)
-        pdf.cell(0, 6, f"- RICs respondidos: {rics_respondidos}", ln=True)
+        pdf.cell(0, 6, f"RICs pendentes de resposta: {rics_pendentes}", ln=True)
+        pdf.cell(0, 6, f"RICs respondidos: {rics_respondidos}", ln=True)
     
-    pdf.ln(5)
+    pdf.ln(4)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.set_line_width(0.3)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(6)
     
     # ============================================================
-    # AGENDA DA SEMANA (se houver pauta)
+    # PAUTA DA SEMANA
     # ============================================================
-    if not df_pauta.empty:
-        pdf.add_page()
-        pdf.set_font('Helvetica', 'B', 14)
-        pdf.set_text_color(0, 51, 102)
-        pdf.cell(0, 10, "AGENDA DA SEMANA - MATERIAS NA PAUTA", ln=True)
-        pdf.ln(2)
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.set_text_color(0, 51, 102)
+    pdf.cell(0, 8, "Pauta da Semana", ln=True)
+    pdf.ln(2)
+    
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(0, 0, 0)
+    
+    if df_pauta.empty:
+        pdf.set_font('Helvetica', 'I', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, "Nao ha materias na pauta da semana.", ln=True)
+    else:
+        total_eventos = len(df_pauta)
+        tem_autoria = "tem_autoria_deputada" in df_pauta.columns
+        tem_relatoria = "tem_relatoria_deputada" in df_pauta.columns
         
-        # Autoria na pauta
-        if "tem_autoria_deputada" in df_pauta.columns:
+        autoria_count = len(df_pauta[df_pauta["tem_autoria_deputada"] == True]) if tem_autoria else 0
+        relatoria_count = len(df_pauta[df_pauta["tem_relatoria_deputada"] == True]) if tem_relatoria else 0
+        
+        pdf.cell(0, 6, f"Total de eventos na pauta: {total_eventos}", ln=True)
+        pdf.cell(0, 6, f"Materias de autoria na pauta: {autoria_count}", ln=True)
+        pdf.cell(0, 6, f"Materias de relatoria na pauta: {relatoria_count}", ln=True)
+        
+        # Listar matérias de autoria
+        if tem_autoria and autoria_count > 0:
+            pdf.ln(4)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.set_fill_color(40, 167, 69)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(0, 7, f"  AUTORIA NA PAUTA ({autoria_count})", ln=True, fill=True)
+            pdf.ln(2)
+            
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(0, 0, 0)
+            
             df_aut_pauta = df_pauta[df_pauta["tem_autoria_deputada"] == True]
-            if not df_aut_pauta.empty:
-                pdf.set_font('Helvetica', 'B', 11)
-                pdf.set_fill_color(40, 167, 69)
-                pdf.set_text_color(255, 255, 255)
-                pdf.cell(0, 7, f"  AUTORIA ({len(df_aut_pauta)} materias)", ln=True, fill=True)
-                pdf.ln(2)
+            for idx, (_, row) in enumerate(df_aut_pauta.head(10).iterrows(), 1):
+                data = row.get("data", "")
+                hora = row.get("hora", "")
+                orgao = row.get("orgao_sigla", "")
+                props = row.get("proposicoes_autoria", "")
                 
-                pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                
-                for _, row in df_aut_pauta.head(10).iterrows():
-                    data = row.get("data", "")
-                    hora = row.get("hora", "")
-                    orgao = row.get("orgao_sigla", "")
-                    props = row.get("proposicoes_autoria", "")
-                    
-                    if props:
-                        pdf.set_font('Helvetica', 'B', 9)
-                        pdf.cell(0, 5, f"{data} {hora} - {orgao}", ln=True)
-                        pdf.set_font('Helvetica', '', 8)
-                        props_trunc = props[:150] + "..." if len(str(props)) > 150 else props
-                        pdf.multi_cell(0, 4, f"  {sanitize_text_pdf(str(props_trunc))}")
-                        pdf.ln(1)
+                if props:
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.cell(0, 5, f"{idx}. {data} {hora} - {orgao}", ln=True)
+                    pdf.set_font('Helvetica', '', 8)
+                    props_trunc = str(props)[:200] + "..." if len(str(props)) > 200 else str(props)
+                    pdf.multi_cell(0, 4, f"   {sanitize_text_pdf(props_trunc)}")
+                    pdf.ln(1)
         
-        # Relatoria na pauta
-        if "tem_relatoria_deputada" in df_pauta.columns:
+        # Listar matérias de relatoria
+        if tem_relatoria and relatoria_count > 0:
+            pdf.ln(4)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.set_fill_color(0, 123, 255)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(0, 7, f"  RELATORIA NA PAUTA ({relatoria_count})", ln=True, fill=True)
+            pdf.ln(2)
+            
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(0, 0, 0)
+            
             df_rel_pauta = df_pauta[df_pauta["tem_relatoria_deputada"] == True]
-            if not df_rel_pauta.empty:
-                pdf.ln(3)
-                pdf.set_font('Helvetica', 'B', 11)
-                pdf.set_fill_color(0, 123, 255)
-                pdf.set_text_color(255, 255, 255)
-                pdf.cell(0, 7, f"  RELATORIA ({len(df_rel_pauta)} materias)", ln=True, fill=True)
-                pdf.ln(2)
+            for idx, (_, row) in enumerate(df_rel_pauta.head(10).iterrows(), 1):
+                data = row.get("data", "")
+                hora = row.get("hora", "")
+                orgao = row.get("orgao_sigla", "")
+                props = row.get("proposicoes_relatoria", "")
                 
-                pdf.set_font('Helvetica', '', 9)
-                pdf.set_text_color(0, 0, 0)
-                
-                for _, row in df_rel_pauta.head(10).iterrows():
-                    data = row.get("data", "")
-                    hora = row.get("hora", "")
-                    orgao = row.get("orgao_sigla", "")
-                    props = row.get("proposicoes_relatoria", "")
-                    
-                    if props:
-                        pdf.set_font('Helvetica', 'B', 9)
-                        pdf.cell(0, 5, f"{data} {hora} - {orgao}", ln=True)
-                        pdf.set_font('Helvetica', '', 8)
-                        props_trunc = props[:150] + "..." if len(str(props)) > 150 else props
-                        pdf.multi_cell(0, 4, f"  {sanitize_text_pdf(str(props_trunc))}")
-                        pdf.ln(1)
+                if props:
+                    pdf.set_font('Helvetica', 'B', 9)
+                    pdf.cell(0, 5, f"{idx}. {data} {hora} - {orgao}", ln=True)
+                    pdf.set_font('Helvetica', '', 8)
+                    props_trunc = str(props)[:200] + "..." if len(str(props)) > 200 else str(props)
+                    pdf.multi_cell(0, 4, f"   {sanitize_text_pdf(props_trunc)}")
+                    pdf.ln(1)
+    
+    pdf.ln(4)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.set_line_width(0.3)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(6)
     
     # ============================================================
-    # RICS PENDENTES (alertas)
+    # RICS PENDENTES
     # ============================================================
     if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
-        df_rics_urgentes = df_rics[df_rics["RIC_StatusResposta"].isin(["Aguardando resposta", "Fora do prazo"])]
+        df_fora = df_rics[df_rics["RIC_StatusResposta"] == "Fora do prazo"]
+        df_aguard = df_rics[df_rics["RIC_StatusResposta"] == "Aguardando resposta"]
         
-        if not df_rics_urgentes.empty:
-            pdf.add_page()
-            pdf.set_font('Helvetica', 'B', 14)
+        if not df_fora.empty or not df_aguard.empty:
+            pdf.set_font('Helvetica', 'B', 12)
             pdf.set_text_color(0, 51, 102)
-            pdf.cell(0, 10, "RICS PENDENTES - ATENCAO", ln=True)
+            pdf.cell(0, 8, "RICs Pendentes - Atencao", ln=True)
             pdf.ln(2)
             
             # Fora do prazo
-            df_fora = df_rics[df_rics["RIC_StatusResposta"] == "Fora do prazo"]
             if not df_fora.empty:
-                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_font('Helvetica', 'B', 10)
                 pdf.set_fill_color(220, 53, 69)
                 pdf.set_text_color(255, 255, 255)
                 pdf.cell(0, 7, f"  FORA DO PRAZO ({len(df_fora)})", ln=True, fill=True)
@@ -3004,16 +3030,15 @@ def gerar_relatorio_semanal(
                 pdf.set_font('Helvetica', '', 9)
                 pdf.set_text_color(0, 0, 0)
                 
-                for _, row in df_fora.head(5).iterrows():
-                    ric = row.get("Proposicao", row.get("siglaTipo", "") + " " + str(row.get("numero", "")) + "/" + str(row.get("ano", "")))
-                    ministerio = row.get("RIC_Ministerio", "Não identificado")
-                    pdf.cell(0, 5, f"- {sanitize_text_pdf(str(ric))} | {sanitize_text_pdf(str(ministerio))}", ln=True)
+                for idx, (_, row) in enumerate(df_fora.head(10).iterrows(), 1):
+                    ric = row.get("Proposicao", f"{row.get('siglaTipo', '')} {row.get('numero', '')}/{row.get('ano', '')}")
+                    ministerio = row.get("RIC_Ministerio", "Nao identificado")
+                    pdf.cell(0, 5, f"{idx}. {sanitize_text_pdf(str(ric))} - {sanitize_text_pdf(str(ministerio))}", ln=True)
+                pdf.ln(2)
             
-            # Aguardando
-            df_aguard = df_rics[df_rics["RIC_StatusResposta"] == "Aguardando resposta"]
+            # Aguardando resposta
             if not df_aguard.empty:
-                pdf.ln(3)
-                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_font('Helvetica', 'B', 10)
                 pdf.set_fill_color(255, 193, 7)
                 pdf.set_text_color(0, 0, 0)
                 pdf.cell(0, 7, f"  AGUARDANDO RESPOSTA ({len(df_aguard)})", ln=True, fill=True)
@@ -3021,17 +3046,11 @@ def gerar_relatorio_semanal(
                 
                 pdf.set_font('Helvetica', '', 9)
                 
-                for _, row in df_aguard.head(5).iterrows():
-                    ric = row.get("Proposicao", row.get("siglaTipo", "") + " " + str(row.get("numero", "")) + "/" + str(row.get("ano", "")))
-                    ministerio = row.get("RIC_Ministerio", "Não identificado")
+                for idx, (_, row) in enumerate(df_aguard.head(10).iterrows(), 1):
+                    ric = row.get("Proposicao", f"{row.get('siglaTipo', '')} {row.get('numero', '')}/{row.get('ano', '')}")
+                    ministerio = row.get("RIC_Ministerio", "Nao identificado")
                     dias = row.get("RIC_DiasRestantes", "?")
-                    pdf.cell(0, 5, f"- {sanitize_text_pdf(str(ric))} | {sanitize_text_pdf(str(ministerio))} | {dias} dias", ln=True)
-    
-    # Rodapé
-    pdf.ln(10)
-    pdf.set_font('Helvetica', 'I', 8)
-    pdf.set_text_color(150, 150, 150)
-    pdf.cell(0, 5, "Relatorio gerado automaticamente pelo Monitor Legislativo", ln=True, align='C')
+                    pdf.cell(0, 5, f"{idx}. {sanitize_text_pdf(str(ric))} - {sanitize_text_pdf(str(ministerio))} ({dias} dias)", ln=True)
     
     output = BytesIO()
     pdf.output(output)
@@ -3041,62 +3060,45 @@ def gerar_relatorio_semanal(
 def gerar_analise_estrategica(props_autoria: list, tipos_count: dict, df_pauta: pd.DataFrame, df_rics: pd.DataFrame) -> str:
     """
     Gera um texto de análise estratégica baseado nos dados disponíveis.
+    (Mantida para compatibilidade, mas não é mais usada no PDF principal)
     """
     paragrafos = []
-    hoje = datetime.date.today()
+    hoje = get_brasilia_now().date()
     
-    # Introdução
     paragrafos.append(f"Analise referente a semana de {hoje.strftime('%d/%m/%Y')}.")
     
-    # Análise da pauta
     if not df_pauta.empty:
         total_eventos = len(df_pauta)
-        
         tem_autoria = "tem_autoria_deputada" in df_pauta.columns
         tem_relatoria = "tem_relatoria_deputada" in df_pauta.columns
-        
         autoria_count = len(df_pauta[df_pauta["tem_autoria_deputada"] == True]) if tem_autoria else 0
         relatoria_count = len(df_pauta[df_pauta["tem_relatoria_deputada"] == True]) if tem_relatoria else 0
         
         if autoria_count > 0 or relatoria_count > 0:
-            paragrafos.append(f"\nPAUTA DA SEMANA: Foram identificados {total_eventos} eventos na pauta legislativa. ")
-            
+            paragrafos.append(f"\nPAUTA: {total_eventos} eventos identificados. ")
             if autoria_count > 0:
-                paragrafos.append(f"A Deputada possui {autoria_count} materia(s) de sua autoria em votacao, o que demanda atencao prioritaria para acompanhamento e eventual articulacao. ")
-            
+                paragrafos.append(f"{autoria_count} materia(s) de autoria em votacao. ")
             if relatoria_count > 0:
-                paragrafos.append(f"Alem disso, ha {relatoria_count} materia(s) onde a Deputada e relatora, exigindo preparacao de parecer e posicionamento. ")
+                paragrafos.append(f"{relatoria_count} materia(s) de relatoria. ")
         else:
-            paragrafos.append(f"\nPAUTA DA SEMANA: Foram mapeados {total_eventos} eventos, mas nao ha materias de autoria ou relatoria da Deputada em pauta nesta semana.")
+            paragrafos.append(f"\nPAUTA: {total_eventos} eventos, sem materias de autoria/relatoria.")
     else:
-        paragrafos.append("\nPAUTA DA SEMANA: Dados da pauta nao carregados. Recomenda-se atualizar a aba 2 para obter informacoes completas.")
+        paragrafos.append("\nPAUTA: Nao ha materias na pauta da semana.")
     
-    # Análise dos RICs
     if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
         fora_prazo = len(df_rics[df_rics["RIC_StatusResposta"] == "Fora do prazo"])
         aguardando = len(df_rics[df_rics["RIC_StatusResposta"] == "Aguardando resposta"])
         
-        paragrafos.append(f"\nREQUERIMENTOS DE INFORMACAO (RICs): ")
-        
         if fora_prazo > 0:
-            paragrafos.append(f"ALERTA: Ha {fora_prazo} RIC(s) com prazo vencido sem resposta do Poder Executivo. Recomenda-se avaliar medidas de cobranca ou encaminhamento ao Ministerio Publico. ")
-        
+            paragrafos.append(f"\nALERTA: {fora_prazo} RIC(s) fora do prazo. ")
         if aguardando > 0:
-            paragrafos.append(f"Ha {aguardando} RIC(s) aguardando resposta dentro do prazo. Manter monitoramento para garantir cumprimento. ")
-        
-        if fora_prazo == 0 and aguardando == 0:
-            paragrafos.append("Todos os RICs estao com situacao regular.")
+            paragrafos.append(f"{aguardando} RIC(s) aguardando resposta. ")
     
-    # Análise de produção legislativa
     if props_autoria and tipos_count:
         total = len(props_autoria)
         pls = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)
         pareceres = tipos_count.get('PRL', 0)
-        
-        paragrafos.append(f"\nPRODUCAO LEGISLATIVA: O acervo da Deputada conta com {total} proposicoes de autoria, incluindo {pls} Projeto(s) de Lei e {pareceres} Parecer(es) de relatoria. ")
-    
-    # Conclusão
-    paragrafos.append("\n\nRECOMENDACOES: Priorizar o acompanhamento das materias em pauta e RICs pendentes. Manter comunicacao ativa com lideranca e partidos aliados para articulacao em votacoes estrategicas.")
+        paragrafos.append(f"\nPRODUCAO: {total} proposicoes, {pls} PL(s), {pareceres} parecer(es).")
     
     return "".join(paragrafos)
 
