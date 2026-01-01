@@ -2822,6 +2822,285 @@ def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos
     return s_raw
 
 
+def gerar_relatorio_semanal(
+    nome_deputada: str,
+    partido: str,
+    uf: str,
+    props_autoria: list,
+    tipos_count: dict,
+    df_pauta: pd.DataFrame,
+    df_rics: pd.DataFrame
+) -> bytes:
+    """
+    Gera um relatório PDF consolidado com análise estratégica da semana.
+    """
+    from fpdf import FPDF
+    
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    
+    # ============================================================
+    # CABEÇALHO
+    # ============================================================
+    pdf.set_font('Helvetica', 'B', 18)
+    pdf.set_text_color(0, 51, 102)
+    pdf.cell(0, 12, "RELATORIO SEMANAL - MONITOR LEGISLATIVO", ln=True, align='C')
+    
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 10, sanitize_text_pdf(f"Dep. {nome_deputada} ({partido}/{uf})"), ln=True, align='C')
+    
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y as %H:%M')}", ln=True, align='C')
+    
+    pdf.ln(8)
+    pdf.set_draw_color(0, 51, 102)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(8)
+    
+    # ============================================================
+    # ANÁLISE ESTRATÉGICA (texto gerado automaticamente)
+    # ============================================================
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_text_color(0, 51, 102)
+    pdf.cell(0, 10, "ANALISE ESTRATEGICA DA SEMANA", ln=True)
+    pdf.ln(2)
+    
+    # Gerar texto de análise baseado nos dados
+    analise_texto = gerar_analise_estrategica(props_autoria, tipos_count, df_pauta, df_rics)
+    
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(0, 0, 0)
+    pdf.multi_cell(0, 5, sanitize_text_pdf(analise_texto))
+    pdf.ln(5)
+    
+    # ============================================================
+    # RESUMO EM NÚMEROS
+    # ============================================================
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_text_color(0, 51, 102)
+    pdf.cell(0, 10, "RESUMO EM NUMEROS", ln=True)
+    pdf.ln(2)
+    
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(0, 0, 0)
+    
+    # Proposições de autoria
+    total_props = len(props_autoria) if props_autoria else 0
+    rics_total = tipos_count.get('RIC', 0) if tipos_count else 0
+    pls_total = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0) if tipos_count else 0
+    pareceres_total = tipos_count.get('PRL', 0) if tipos_count else 0
+    
+    pdf.cell(0, 6, f"- Total de proposicoes de autoria: {total_props}", ln=True)
+    pdf.cell(0, 6, f"- Requerimentos de Informacao (RIC): {rics_total}", ln=True)
+    pdf.cell(0, 6, f"- Projetos de Lei (PL + PLP): {pls_total}", ln=True)
+    pdf.cell(0, 6, f"- Pareceres (PRL): {pareceres_total}", ln=True)
+    
+    # Pauta da semana
+    if not df_pauta.empty:
+        df_autoria_pauta = df_pauta[df_pauta.get("tem_autoria_deputada", False) == True] if "tem_autoria_deputada" in df_pauta.columns else pd.DataFrame()
+        df_relatoria_pauta = df_pauta[df_pauta.get("tem_relatoria_deputada", False) == True] if "tem_relatoria_deputada" in df_pauta.columns else pd.DataFrame()
+        pdf.cell(0, 6, f"- Materias de autoria na pauta: {len(df_autoria_pauta)}", ln=True)
+        pdf.cell(0, 6, f"- Materias de relatoria na pauta: {len(df_relatoria_pauta)}", ln=True)
+    
+    # RICs
+    if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
+        rics_pendentes = len(df_rics[df_rics["RIC_StatusResposta"].isin(["Aguardando resposta", "Fora do prazo", "Em tramitação na Câmara"])])
+        rics_respondidos = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Respondido", na=False)])
+        pdf.cell(0, 6, f"- RICs pendentes de resposta: {rics_pendentes}", ln=True)
+        pdf.cell(0, 6, f"- RICs respondidos: {rics_respondidos}", ln=True)
+    
+    pdf.ln(5)
+    
+    # ============================================================
+    # AGENDA DA SEMANA (se houver pauta)
+    # ============================================================
+    if not df_pauta.empty:
+        pdf.add_page()
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 10, "AGENDA DA SEMANA - MATERIAS NA PAUTA", ln=True)
+        pdf.ln(2)
+        
+        # Autoria na pauta
+        if "tem_autoria_deputada" in df_pauta.columns:
+            df_aut_pauta = df_pauta[df_pauta["tem_autoria_deputada"] == True]
+            if not df_aut_pauta.empty:
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_fill_color(40, 167, 69)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(0, 7, f"  AUTORIA ({len(df_aut_pauta)} materias)", ln=True, fill=True)
+                pdf.ln(2)
+                
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                
+                for _, row in df_aut_pauta.head(10).iterrows():
+                    data = row.get("data", "")
+                    hora = row.get("hora", "")
+                    orgao = row.get("orgao_sigla", "")
+                    props = row.get("proposicoes_autoria", "")
+                    
+                    if props:
+                        pdf.set_font('Helvetica', 'B', 9)
+                        pdf.cell(0, 5, f"{data} {hora} - {orgao}", ln=True)
+                        pdf.set_font('Helvetica', '', 8)
+                        props_trunc = props[:150] + "..." if len(str(props)) > 150 else props
+                        pdf.multi_cell(0, 4, f"  {sanitize_text_pdf(str(props_trunc))}")
+                        pdf.ln(1)
+        
+        # Relatoria na pauta
+        if "tem_relatoria_deputada" in df_pauta.columns:
+            df_rel_pauta = df_pauta[df_pauta["tem_relatoria_deputada"] == True]
+            if not df_rel_pauta.empty:
+                pdf.ln(3)
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_fill_color(0, 123, 255)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(0, 7, f"  RELATORIA ({len(df_rel_pauta)} materias)", ln=True, fill=True)
+                pdf.ln(2)
+                
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                
+                for _, row in df_rel_pauta.head(10).iterrows():
+                    data = row.get("data", "")
+                    hora = row.get("hora", "")
+                    orgao = row.get("orgao_sigla", "")
+                    props = row.get("proposicoes_relatoria", "")
+                    
+                    if props:
+                        pdf.set_font('Helvetica', 'B', 9)
+                        pdf.cell(0, 5, f"{data} {hora} - {orgao}", ln=True)
+                        pdf.set_font('Helvetica', '', 8)
+                        props_trunc = props[:150] + "..." if len(str(props)) > 150 else props
+                        pdf.multi_cell(0, 4, f"  {sanitize_text_pdf(str(props_trunc))}")
+                        pdf.ln(1)
+    
+    # ============================================================
+    # RICS PENDENTES (alertas)
+    # ============================================================
+    if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
+        df_rics_urgentes = df_rics[df_rics["RIC_StatusResposta"].isin(["Aguardando resposta", "Fora do prazo"])]
+        
+        if not df_rics_urgentes.empty:
+            pdf.add_page()
+            pdf.set_font('Helvetica', 'B', 14)
+            pdf.set_text_color(0, 51, 102)
+            pdf.cell(0, 10, "RICS PENDENTES - ATENCAO", ln=True)
+            pdf.ln(2)
+            
+            # Fora do prazo
+            df_fora = df_rics[df_rics["RIC_StatusResposta"] == "Fora do prazo"]
+            if not df_fora.empty:
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_fill_color(220, 53, 69)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(0, 7, f"  FORA DO PRAZO ({len(df_fora)})", ln=True, fill=True)
+                pdf.ln(2)
+                
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                
+                for _, row in df_fora.head(5).iterrows():
+                    ric = row.get("Proposicao", row.get("siglaTipo", "") + " " + str(row.get("numero", "")) + "/" + str(row.get("ano", "")))
+                    ministerio = row.get("RIC_Ministerio", "Não identificado")
+                    pdf.cell(0, 5, f"- {sanitize_text_pdf(str(ric))} | {sanitize_text_pdf(str(ministerio))}", ln=True)
+            
+            # Aguardando
+            df_aguard = df_rics[df_rics["RIC_StatusResposta"] == "Aguardando resposta"]
+            if not df_aguard.empty:
+                pdf.ln(3)
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_fill_color(255, 193, 7)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 7, f"  AGUARDANDO RESPOSTA ({len(df_aguard)})", ln=True, fill=True)
+                pdf.ln(2)
+                
+                pdf.set_font('Helvetica', '', 9)
+                
+                for _, row in df_aguard.head(5).iterrows():
+                    ric = row.get("Proposicao", row.get("siglaTipo", "") + " " + str(row.get("numero", "")) + "/" + str(row.get("ano", "")))
+                    ministerio = row.get("RIC_Ministerio", "Não identificado")
+                    dias = row.get("RIC_DiasRestantes", "?")
+                    pdf.cell(0, 5, f"- {sanitize_text_pdf(str(ric))} | {sanitize_text_pdf(str(ministerio))} | {dias} dias", ln=True)
+    
+    # Rodapé
+    pdf.ln(10)
+    pdf.set_font('Helvetica', 'I', 8)
+    pdf.set_text_color(150, 150, 150)
+    pdf.cell(0, 5, "Relatorio gerado automaticamente pelo Monitor Legislativo", ln=True, align='C')
+    
+    output = BytesIO()
+    pdf.output(output)
+    return output.getvalue()
+
+
+def gerar_analise_estrategica(props_autoria: list, tipos_count: dict, df_pauta: pd.DataFrame, df_rics: pd.DataFrame) -> str:
+    """
+    Gera um texto de análise estratégica baseado nos dados disponíveis.
+    """
+    paragrafos = []
+    hoje = datetime.date.today()
+    
+    # Introdução
+    paragrafos.append(f"Analise referente a semana de {hoje.strftime('%d/%m/%Y')}.")
+    
+    # Análise da pauta
+    if not df_pauta.empty:
+        total_eventos = len(df_pauta)
+        
+        tem_autoria = "tem_autoria_deputada" in df_pauta.columns
+        tem_relatoria = "tem_relatoria_deputada" in df_pauta.columns
+        
+        autoria_count = len(df_pauta[df_pauta["tem_autoria_deputada"] == True]) if tem_autoria else 0
+        relatoria_count = len(df_pauta[df_pauta["tem_relatoria_deputada"] == True]) if tem_relatoria else 0
+        
+        if autoria_count > 0 or relatoria_count > 0:
+            paragrafos.append(f"\nPAUTA DA SEMANA: Foram identificados {total_eventos} eventos na pauta legislativa. ")
+            
+            if autoria_count > 0:
+                paragrafos.append(f"A Deputada possui {autoria_count} materia(s) de sua autoria em votacao, o que demanda atencao prioritaria para acompanhamento e eventual articulacao. ")
+            
+            if relatoria_count > 0:
+                paragrafos.append(f"Alem disso, ha {relatoria_count} materia(s) onde a Deputada e relatora, exigindo preparacao de parecer e posicionamento. ")
+        else:
+            paragrafos.append(f"\nPAUTA DA SEMANA: Foram mapeados {total_eventos} eventos, mas nao ha materias de autoria ou relatoria da Deputada em pauta nesta semana.")
+    else:
+        paragrafos.append("\nPAUTA DA SEMANA: Dados da pauta nao carregados. Recomenda-se atualizar a aba 2 para obter informacoes completas.")
+    
+    # Análise dos RICs
+    if not df_rics.empty and "RIC_StatusResposta" in df_rics.columns:
+        fora_prazo = len(df_rics[df_rics["RIC_StatusResposta"] == "Fora do prazo"])
+        aguardando = len(df_rics[df_rics["RIC_StatusResposta"] == "Aguardando resposta"])
+        
+        paragrafos.append(f"\nREQUERIMENTOS DE INFORMACAO (RICs): ")
+        
+        if fora_prazo > 0:
+            paragrafos.append(f"ALERTA: Ha {fora_prazo} RIC(s) com prazo vencido sem resposta do Poder Executivo. Recomenda-se avaliar medidas de cobranca ou encaminhamento ao Ministerio Publico. ")
+        
+        if aguardando > 0:
+            paragrafos.append(f"Ha {aguardando} RIC(s) aguardando resposta dentro do prazo. Manter monitoramento para garantir cumprimento. ")
+        
+        if fora_prazo == 0 and aguardando == 0:
+            paragrafos.append("Todos os RICs estao com situacao regular.")
+    
+    # Análise de produção legislativa
+    if props_autoria and tipos_count:
+        total = len(props_autoria)
+        pls = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)
+        pareceres = tipos_count.get('PRL', 0)
+        
+        paragrafos.append(f"\nPRODUCAO LEGISLATIVA: O acervo da Deputada conta com {total} proposicoes de autoria, incluindo {pls} Projeto(s) de Lei e {pareceres} Parecer(es) de relatoria. ")
+    
+    # Conclusão
+    paragrafos.append("\n\nRECOMENDACOES: Priorizar o acompanhamento das materias em pauta e RICs pendentes. Manter comunicacao ativa com lideranca e partidos aliados para articulacao em votacoes estrategicas.")
+    
+    return "".join(paragrafos)
+
+
 def merge_status_options(dynamic_opts: list[str]) -> list[str]:
     base = [s for s in STATUS_PREDEFINIDOS if s and str(s).strip()]
     dyn = [s for s in dynamic_opts if s and str(s).strip()]
@@ -4433,6 +4712,19 @@ def render_grafico_orgao(df: pd.DataFrame):
 # UI
 # ============================================================
 
+def mostrar_ultima_atualizacao(chave: str):
+    """Mostra a última atualização de uma seção específica."""
+    if "ultima_atualizacao" in st.session_state:
+        timestamp = st.session_state["ultima_atualizacao"].get(chave)
+        if timestamp:
+            st.caption(f"🕐 Última atualização: {timestamp.strftime('%d/%m/%Y %H:%M')}")
+
+def registrar_atualizacao(chave: str):
+    """Registra o timestamp de atualização de uma seção."""
+    if "ultima_atualizacao" not in st.session_state:
+        st.session_state["ultima_atualizacao"] = {}
+    st.session_state["ultima_atualizacao"][chave] = datetime.datetime.now()
+
 def main():
     st.markdown("""
     <style>
@@ -4460,8 +4752,44 @@ def main():
     .stButton > button {
         min-width: 120px;
     }
+    
+    /* Rolagem lateral nas abas para telas menores */
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto;
+        overflow-y: hidden;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        padding-bottom: 5px;
+    }
+    
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+        height: 6px;
+    }
+    
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+        background-color: #ccc;
+        border-radius: 3px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
     </style>
     """, unsafe_allow_html=True)
+    
+    # ============================================================
+    # SISTEMA DE ÚLTIMA ATUALIZAÇÃO
+    # ============================================================
+    if "ultima_atualizacao" not in st.session_state:
+        st.session_state["ultima_atualizacao"] = {
+            "pauta": None,
+            "proposicoes": None,
+            "materias": None,
+            "rics": None,
+            "comissoes": None
+        }
 
     # ============================================================
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
@@ -4482,7 +4810,7 @@ def main():
     # CARD FIXO DA DEPUTADA (aparece em todas as abas)
     # ============================================================
     with st.container():
-        col_dep_foto, col_dep_info = st.columns([1, 5])
+        col_dep_foto, col_dep_info, col_dep_acoes = st.columns([1, 4, 1])
         with col_dep_foto:
             try:
                 st.image(f"https://www.camara.leg.br/internet/deputado/bandep/{id_deputada}.jpg", width=100)
@@ -4492,6 +4820,22 @@ def main():
             st.markdown(f"**{nome_deputada}**")
             st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
             st.markdown(f"[🔗 Perfil na Câmara](https://www.camara.leg.br/deputados/{id_deputada})")
+        with col_dep_acoes:
+            if st.button("🔄 Atualizar tudo", use_container_width=True, help="Limpa cache e recarrega todos os dados"):
+                # Limpar todos os caches
+                st.cache_data.clear()
+                # Limpar session state de dados
+                keys_to_clear = [
+                    "df_pauta", "df_comissoes", "df_rics_completo", 
+                    "df_autoria_status", "props_autoria_api"
+                ]
+                for k in keys_to_clear:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                # Resetar timestamps
+                st.session_state["ultima_atualizacao"] = {}
+                st.success("✅ Cache limpo! Recarregue as abas para atualizar os dados.")
+                st.rerun()
     
     with st.expander("📋 Minibiografia", expanded=False):
         st.markdown("""
@@ -4543,7 +4887,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         # HEADER SIMPLES (sem foto)
         # ============================================================
         st.markdown(f"### {nome_deputada}")
-        st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada} | **ID:** `{id_deputada}`")
+        st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
         st.markdown(f"🕐 **Última atualização:** {get_brasilia_now().strftime('%d/%m/%Y às %H:%M:%S')}")
         
         st.markdown("---")
@@ -4760,6 +5104,68 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.markdown("---")
         
         # ============================================================
+        # RELATÓRIO DA SEMANA (PDF consolidado)
+        # ============================================================
+        st.markdown("### 📄 Relatório da Semana")
+        st.caption("Gere um relatório consolidado em PDF com todos os dados do monitoramento e análise estratégica.")
+        
+        col_rel1, col_rel2 = st.columns([2, 1])
+        
+        with col_rel1:
+            # Verificar dados disponíveis
+            df_pauta = st.session_state.get("df_scan_tab2", pd.DataFrame())
+            df_rics = st.session_state.get("df_rics_completo", pd.DataFrame())
+            
+            dados_disponiveis = []
+            if not df_pauta.empty:
+                dados_disponiveis.append("✅ Pauta da semana")
+            else:
+                dados_disponiveis.append("⚠️ Pauta (carregue na aba 2)")
+            
+            if props_autoria:
+                dados_disponiveis.append(f"✅ {len(props_autoria)} proposições de autoria")
+            else:
+                dados_disponiveis.append("⚠️ Proposições de autoria não carregadas")
+            
+            if not df_rics.empty:
+                dados_disponiveis.append(f"✅ {len(df_rics)} RICs")
+            else:
+                dados_disponiveis.append("⚠️ RICs (carregue na aba 7)")
+            
+            st.caption("**Dados disponíveis:**")
+            for item in dados_disponiveis:
+                st.caption(item)
+        
+        with col_rel2:
+            if st.button("📥 Gerar Relatório PDF", use_container_width=True, type="primary", key="btn_gerar_relatorio"):
+                with st.spinner("Gerando relatório..."):
+                    try:
+                        # Gerar o relatório
+                        pdf_bytes = gerar_relatorio_semanal(
+                            nome_deputada=nome_deputada,
+                            partido=partido_deputada,
+                            uf=uf_deputada,
+                            props_autoria=props_autoria,
+                            tipos_count=tipos_count if 'tipos_count' in dir() else {},
+                            df_pauta=df_pauta,
+                            df_rics=df_rics
+                        )
+                        
+                        # Disponibilizar download
+                        st.download_button(
+                            "⬇️ Baixar Relatório PDF",
+                            data=pdf_bytes,
+                            file_name=f"relatorio_semanal_{datetime.date.today().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            key="download_relatorio_semanal"
+                        )
+                        st.success("✅ Relatório gerado com sucesso!")
+                    except Exception as e:
+                        st.error(f"Erro ao gerar relatório: {e}")
+        
+        st.markdown("---")
+        
+        # ============================================================
         # GLOSSÁRIO (em expander, opcional)
         # ============================================================
         with st.expander("📚 Glossário e Ajuda do Sistema", expanded=False):
@@ -4858,8 +5264,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 )
             st.session_state["df_scan_tab2"] = df
             st.session_state["dt_range_tab2_saved"] = (dt_inicio_t2, dt_fim_t2)
+            registrar_atualizacao("pauta")
             st.success(f"✅ {len(df)} registros carregados")
             st.rerun()
+        
+        # Mostrar última atualização
+        mostrar_ultima_atualizacao("pauta")
         
         df = st.session_state.get("df_scan_tab2", pd.DataFrame())
         dt_range_saved = st.session_state.get("dt_range_tab2_saved", (dt_inicio_t2, dt_fim_t2))
@@ -4989,8 +5399,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 )
             st.session_state["df_scan_tab3"] = df
             st.session_state["dt_range_tab3_saved"] = (dt_inicio_t3, dt_fim_t3)
+            registrar_atualizacao("palavras_chave")
             st.success(f"✅ {len(df)} registros carregados")
             st.rerun()
+        
+        # Mostrar última atualização
+        mostrar_ultima_atualizacao("palavras_chave")
         
         df = st.session_state.get("df_scan_tab3", pd.DataFrame())
         dt_range_saved = st.session_state.get("dt_range_tab3_saved", (dt_inicio_t3, dt_fim_t3))
@@ -5140,8 +5554,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 )
             st.session_state["df_scan_tab4"] = df
             st.session_state["dt_range_tab4_saved"] = (dt_inicio_t4, dt_fim_t4)
+            registrar_atualizacao("comissoes")
             st.success(f"✅ {len(df)} registros carregados")
             st.rerun()
+        
+        # Mostrar última atualização
+        mostrar_ultima_atualizacao("comissoes")
         
         df = st.session_state.get("df_scan_tab4", pd.DataFrame())
         dt_range_saved = st.session_state.get("dt_range_tab4_saved", (dt_inicio_t4, dt_fim_t4))
@@ -5711,6 +6129,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         df_rics_enriquecido = enrich_with_status(df_rics_base, status_map_rics)
                         
                         st.session_state["df_rics_completo"] = df_rics_enriquecido
+                        registrar_atualizacao("rics")
                         st.success(f"✅ {len(df_rics_enriquecido)} RICs carregados com sucesso!")
         
         with col_info_ric:
@@ -5718,6 +6137,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             💡 **Dica:** Clique em "Carregar/Atualizar RICs" para buscar todos os Requerimentos de Informação 
             da Deputada e extrair automaticamente os prazos de resposta das tramitações.
             """)
+        
+        # Mostrar última atualização
+        mostrar_ultima_atualizacao("rics")
         
         df_rics = st.session_state.get("df_rics_completo", pd.DataFrame())
         
