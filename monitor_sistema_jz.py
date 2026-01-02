@@ -6750,6 +6750,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 fetch_lista_proposicoes_autoria.clear()
                 build_status_map.clear()
                 st.session_state.pop("df_status_last", None)
+                st.session_state.pop("df_todas_enriquecido_tab5", None)  # Limpar cache do chat também
+                st.session_state.pop("df_chat_tab5", None)
                 st.success("✅ Cache limpo!")
 
         # Carrega proposições
@@ -6845,14 +6847,30 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             st.session_state["filtro_busca_tab5"] = q  # Salvar também o filtro usado
             
             # Também salvar o DataFrame COMPLETO COM STATUS para quando não houver filtro
-            # Precisamos enriquecer todas as proposições com status
-            if "df_todas_enriquecido_tab5" not in st.session_state or len(st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())) != len(df_aut):
-                # Enriquecer todas as proposições (uma vez só, com cache)
-                df_aut_completo = df_aut.copy()
-                df_aut_completo = df_aut_completo.rename(
-                    columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
-                )
-                st.session_state["df_todas_enriquecido_tab5"] = df_aut_completo
+            # IMPORTANTE: Precisamos enriquecer TODAS as proposições com Situação e Órgão
+            df_existente = st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())
+            precisa_recriar = (
+                df_existente.empty or 
+                len(df_existente) != len(df_aut) or
+                "Situação atual" not in df_existente.columns  # Força recriação se não tem colunas
+            )
+            
+            if precisa_recriar:
+                with st.spinner("Preparando base completa para Chat IA (primeira vez)..."):
+                    # Enriquecer TODAS as proposições com status
+                    df_aut_completo = df_aut.copy()
+                    ids_todas = df_aut_completo["id"].astype(str).tolist()
+                    
+                    # Buscar status de todas (pode demorar um pouco na primeira vez, mas fica em cache)
+                    status_map_todas = build_status_map(ids_todas)
+                    df_aut_enriquecido = enrich_with_status(df_aut_completo, status_map_todas)
+                    
+                    # Renomear colunas
+                    df_aut_enriquecido = df_aut_enriquecido.rename(
+                        columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+                    )
+                    
+                    st.session_state["df_todas_enriquecido_tab5"] = df_aut_enriquecido
             
             sel = st.dataframe(
                 df_tbl[show_cols_r],
