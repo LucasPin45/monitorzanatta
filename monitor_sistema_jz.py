@@ -15,6 +15,7 @@
 # - Campo "Parado há (dias)" calculado
 # - Relator com alerta de adversário (PT, PSOL, PCdoB, PSB, PV, Rede)
 # - RIC: extração de prazo de resposta, ministério, status respondido
+# - Chat IA com busca de inteiro teor das proposições
 # ============================================================
 
 import datetime
@@ -33,6 +34,17 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Backend não-interativo
+
+# Tentar importar biblioteca de PDF (opcional)
+try:
+    from pypdf import PdfReader
+    PDF_AVAILABLE = True
+except ImportError:
+    try:
+        from PyPDF2 import PdfReader
+        PDF_AVAILABLE = True
+    except ImportError:
+        PDF_AVAILABLE = False
 
 # ============================================================
 # MÓDULO CHAT IA (INLINE)
@@ -60,7 +72,7 @@ PERFIL POLÍTICO DA DEPUTADA (use para contextualizar análises):
 - A FAVOR: Família tradicional, liberdade econômica, agronegócio, direito às armas, pró-vida
 - Quando a deputada apresenta PDL para SUSTAR algo, ela é CONTRA aquilo que está sustando
 - Quando apresenta PL alterando lei, analise SE ela está fortalecendo ou enfraquecendo o órgão/política
-- Use linguagem que reflita as posições da deputada (ex: "resistência ao CONANDA", não "impacto no CONANDA")
+- Use linguagem que reflita as posições da deputada (ex: "combate ao CONANDA", não "impacto no CONANDA")
 
 REGRAS FUNDAMENTAIS (NUNCA VIOLAR):
 1. NUNCA invente números de proposições (PL, RIC, etc.), datas, prazos, órgãos ou status.
@@ -70,13 +82,25 @@ REGRAS FUNDAMENTAIS (NUNCA VIOLAR):
 5. Use linguagem formal, técnica e institucional adequada ao ambiente parlamentar.
 6. Contextualize as proposições considerando a POSIÇÃO POLÍTICA da deputada.
 
-FORMATO DE RESPOSTA PADRÃO:
-Suas respostas devem conter (quando aplicável):
-- **Resumo**: Síntese em 2-3 frases (contextualizada politicamente)
-- **Situação atual**: O que está acontecendo agora
+REGRA DE LINKS (MUITO IMPORTANTE):
+- SEMPRE inclua links clicáveis para cada proposição mencionada
+- Formato do link: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
+- Exemplo: [PDL 25/2025](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=2482261)
+- Use o ID numérico da proposição (coluna "id" ou "ID" dos dados) para montar o link
+- Nunca cite uma proposição sem o link correspondente
+
+FORMATO DE RESPOSTA DETALHADA:
+Quando listar proposições, use este formato para CADA UMA:
+
+### [SIGLA NÚMERO/ANO](link) - Título curto
+- **O que faz**: Explicação clara do objetivo da proposição (1-2 frases)
+- **Por que importa**: Relevância política para a deputada
+- **Situação**: Status atual de tramitação
+- **Órgão**: Onde está tramitando
+
+Após listar todas, inclua:
 - **Próximo passo**: Ação prática recomendada
 - **Riscos/Alertas**: Pontos de atenção
-- **Fontes**: IDs e dados consultados
 
 PERSONA ATUAL: {persona}
 
@@ -101,16 +125,29 @@ CHAT_CONTEXTOS_ABA = {
 # --- Templates de Saídas Prontas ---
 CHAT_TEMPLATE_BRIEFING = """Gere um BRIEFING DE 30 SEGUNDOS.
 REGRAS: Máximo 5 frases. Foco em: O que é, por que importa, o que fazer AGORA. Tom direto.
+IMPORTANTE: Inclua link clicável para cada proposição: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
 DADOS: {dados}
 Gere o briefing:"""
 
 CHAT_TEMPLATE_ANALISE = """Gere uma ANÁLISE TÉCNICA detalhada.
-ESTRUTURA: 1. OBJETO 2. CONTEXTO 3. MÉRITO 4. TRAMITAÇÃO 5. POSICIONAMENTO SUGERIDO 6. FONTES
+ESTRUTURA OBRIGATÓRIA para cada proposição identificada:
+### [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID) - Título
+- **O que faz**: Descrição clara do objetivo
+- **Por que importa**: Relevância política para a deputada
+- **Situação atual**: Status de tramitação
+- **Órgão**: Onde está
+
+Após todas as proposições:
+- **Análise consolidada**: Visão geral estratégica
+- **Próximo passo**: Ação recomendada
+- **Riscos**: Pontos de atenção
+
 DADOS: {dados}
 Gere a análise:"""
 
 CHAT_TEMPLATE_ESTRATEGIA = """Gere orientações de ESTRATÉGIA REGIMENTAL.
 FOCO: Ações práticas, instrumentos disponíveis, timing, articulação. NÃO cite artigos do RICD textualmente.
+IMPORTANTE: Inclua link para cada proposição mencionada.
 DADOS: {dados}
 Gere a estratégia:"""
 
@@ -121,21 +158,25 @@ Gere as perguntas:"""
 
 CHAT_TEMPLATE_CHECKLIST = """Gere um CHECKLIST DE PROVIDÊNCIAS.
 FORMATO: Lista numerada com O QUE fazer, QUEM deve fazer, PRAZO sugerido. Ordenar por prioridade.
+IMPORTANTE: Inclua link para cada proposição mencionada.
 DADOS: {dados}
 Gere o checklist:"""
 
 CHAT_TEMPLATE_RESUMO = """Gere um RESUMO DA SEMANA.
 ESTRUTURA: 1. DESTAQUES 2. MOVIMENTAÇÕES 3. PENDÊNCIAS 4. PRÓXIMA SEMANA 5. ALERTAS
+IMPORTANTE: Inclua link clicável para cada proposição mencionada.
 DADOS: {dados}
 Gere o resumo:"""
 
 CHAT_TEMPLATE_COBRANCA = """Gere texto de COBRANÇA/FOLLOW-UP sobre RICs pendentes.
 FORMATO: Tom formal mas firme. Identificar atrasados, órgão, prazo, sugerir ação.
+IMPORTANTE: Inclua link para cada RIC: [RIC NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
 DADOS: {dados}
 Gere o texto:"""
 
 CHAT_TEMPLATE_ACAO_RIC = """Analise RICs e sugira AÇÕES RECOMENDADAS.
 OPÇÕES: Reiterar RIC, Novo RIC específico, Convocar ministro, Audiência pública, Acionar TCU, Elaborar PL, Arquivar.
+IMPORTANTE: Inclua link para cada RIC analisado.
 DADOS: {dados}
 Analise e recomende:"""
 
@@ -183,7 +224,8 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
     contexto_partes = [
         f"Aba: {meta['tab_descricao']}",
         f"Total de registros visíveis: {meta['total_registros']}",
-        f"Data da consulta: {meta['data_consulta']}"
+        f"Data da consulta: {meta['data_consulta']}",
+        f"IMPORTANTE: Use o ID para montar links: https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID"
     ]
     
     if filtros:
@@ -205,7 +247,7 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
         # Pegar TODAS as linhas (até max_rows) para dar contexto completo
         df_amostra = df_filtrado.head(max_rows)
         
-        # Selecionar colunas mais relevantes
+        # Selecionar colunas mais relevantes - ID SEMPRE PRIMEIRO
         colunas_prioridade = [
             "ID", "id", "Proposição", "Proposicao", "siglaTipo", "numero", "ano", 
             "Ementa", "ementa", "Situação atual", "Órgão (sigla)", "Data do status", 
@@ -218,12 +260,15 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
         
         df_resumo = df_amostra[colunas_disponiveis].copy()
         
-        # Truncar textos longos mas manter informação suficiente
+        # Truncar textos longos mas manter ementa mais completa (250 chars)
         for col in df_resumo.columns:
             if df_resumo[col].dtype == 'object':
-                df_resumo[col] = df_resumo[col].astype(str).str[:150]  # Aumentado de 120 para 150
+                if col.lower() in ['ementa', 'Ementa']:
+                    df_resumo[col] = df_resumo[col].astype(str).str[:250]  # Ementa mais completa
+                else:
+                    df_resumo[col] = df_resumo[col].astype(str).str[:150]
         
-        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=80)  # Aumentado de 60 para 80
+        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=100)  # Aumentado para 100
         
         # Se a base for grande, adicionar estatísticas
         if len(df_filtrado) > max_rows:
@@ -306,8 +351,158 @@ def chat_analisar_rics(df_rics: pd.DataFrame) -> str:
     
     return "\n".join(partes)
 
+# --- Funções para buscar Inteiro Teor ---
+def extrair_texto_pdf(url_pdf: str, max_chars: int = 4000) -> str:
+    """Tenta extrair texto de um PDF da Câmara."""
+    if not PDF_AVAILABLE:
+        return ""
+    
+    try:
+        response = requests.get(url_pdf, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        if response.status_code != 200:
+            return ""
+        
+        pdf_bytes = BytesIO(response.content)
+        reader = PdfReader(pdf_bytes)
+        
+        texto_completo = ""
+        for page in reader.pages[:5]:  # Máximo 5 páginas
+            texto_completo += page.extract_text() or ""
+            if len(texto_completo) > max_chars:
+                break
+        
+        # Limpar texto
+        texto_completo = re.sub(r'\s+', ' ', texto_completo).strip()
+        return texto_completo[:max_chars]
+    except Exception:
+        return ""
+
+def buscar_detalhes_proposicao_para_ia(id_proposicao: str) -> dict:
+    """
+    Busca todos os detalhes de uma proposição para enviar à IA.
+    Inclui: ementa completa, tramitações, autores, relator, e inteiro teor se possível.
+    """
+    pid = str(id_proposicao).strip()
+    if not pid:
+        return {}
+    
+    # Usar a função existente como base
+    dados = fetch_proposicao_completa(pid)
+    if not dados:
+        return {}
+    
+    resultado = {
+        "id": pid,
+        "sigla": dados.get("sigla", ""),
+        "numero": dados.get("numero", ""),
+        "ano": dados.get("ano", ""),
+        "ementa_completa": dados.get("ementa", ""),
+        "situacao": dados.get("status_descricaoSituacao", ""),
+        "orgao_atual": dados.get("status_siglaOrgao", ""),
+        "ultimo_andamento": dados.get("status_descricaoTramitacao", ""),
+        "data_status": dados.get("status_dataHora", "")[:10] if dados.get("status_dataHora") else "",
+        "despacho": dados.get("status_despacho", ""),
+        "relator": dados.get("relator", {}),
+        "url_inteiro_teor": dados.get("urlInteiroTeor", ""),
+        "link_tramitacao": f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}",
+        "texto_inteiro_teor": "",
+        "tramitacoes_resumo": "",
+    }
+    
+    # Resumir últimas tramitações
+    tramitacoes = dados.get("tramitacoes", [])
+    if tramitacoes:
+        tram_resumo = []
+        for i, t in enumerate(tramitacoes[:5]):  # Últimas 5
+            data = (t.get("dataHora") or t.get("data") or "")[:10]
+            orgao = t.get("siglaOrgao", "")
+            desc = t.get("descricaoTramitacao", "")[:100]
+            tram_resumo.append(f"  {data} [{orgao}]: {desc}")
+        resultado["tramitacoes_resumo"] = "\n".join(tram_resumo)
+    
+    # Tentar extrair texto do inteiro teor
+    url_teor = dados.get("urlInteiroTeor", "")
+    if url_teor and PDF_AVAILABLE:
+        texto_teor = extrair_texto_pdf(url_teor, max_chars=3000)
+        if texto_teor:
+            resultado["texto_inteiro_teor"] = texto_teor
+    
+    return resultado
+
+def formatar_proposicao_para_contexto(dados: dict) -> str:
+    """Formata os dados de uma proposição para incluir no contexto da IA."""
+    if not dados:
+        return ""
+    
+    sigla = dados.get("sigla", "")
+    numero = dados.get("numero", "")
+    ano = dados.get("ano", "")
+    pid = dados.get("id", "")
+    
+    partes = [
+        f"### {sigla} {numero}/{ano} (ID: {pid})",
+        f"**Link**: {dados.get('link_tramitacao', '')}",
+        f"**Ementa**: {dados.get('ementa_completa', '')}",
+        f"**Situação**: {dados.get('situacao', '')}",
+        f"**Órgão atual**: {dados.get('orgao_atual', '')}",
+        f"**Data do status**: {dados.get('data_status', '')}",
+    ]
+    
+    relator = dados.get("relator", {})
+    if relator and relator.get("nome"):
+        partes.append(f"**Relator**: {relator.get('nome')} ({relator.get('partido', '')}-{relator.get('uf', '')})")
+    
+    if dados.get("despacho"):
+        partes.append(f"**Despacho**: {dados.get('despacho')[:200]}")
+    
+    if dados.get("tramitacoes_resumo"):
+        partes.append(f"\n**Últimas tramitações**:\n{dados.get('tramitacoes_resumo')}")
+    
+    if dados.get("texto_inteiro_teor"):
+        partes.append(f"\n**TEXTO DO INTEIRO TEOR (trecho)**:\n{dados.get('texto_inteiro_teor')}")
+    elif dados.get("url_inteiro_teor"):
+        partes.append(f"\n**URL Inteiro Teor**: {dados.get('url_inteiro_teor')}")
+    
+    return "\n".join(partes)
+
+def enriquecer_contexto_com_detalhes(df_contexto: pd.DataFrame, max_proposicoes: int = 5) -> str:
+    """
+    Enriquece o contexto buscando detalhes completos das proposições.
+    Usado quando o usuário faz perguntas sobre proposições específicas.
+    """
+    if df_contexto is None or df_contexto.empty:
+        return ""
+    
+    # Identificar coluna de ID
+    id_col = None
+    for col in ["ID", "id", "Id"]:
+        if col in df_contexto.columns:
+            id_col = col
+            break
+    
+    if not id_col:
+        return ""
+    
+    # Pegar os primeiros IDs
+    ids = df_contexto[id_col].dropna().astype(str).head(max_proposicoes).tolist()
+    
+    if not ids:
+        return ""
+    
+    partes = ["\n\n=== DETALHES COMPLETOS DAS PROPOSIÇÕES ===\n"]
+    
+    for pid in ids:
+        dados = buscar_detalhes_proposicao_para_ia(pid)
+        if dados:
+            partes.append(formatar_proposicao_para_contexto(dados))
+            partes.append("\n---\n")
+    
+    return "\n".join(partes)
+
 # --- Chamada à API ---
-def chat_chamar_api(mensagens: list, system_prompt: str, max_tokens: int = 1500) -> tuple:
+def chat_chamar_api(mensagens: list, system_prompt: str, max_tokens: int = 4000) -> tuple:
     """Chama a API do Anthropic (Claude)."""
     api_key = get_api_key_chat()
     if not api_key:
@@ -418,6 +613,14 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
             st.session_state[history_key] = []
             st.rerun()
         
+        # Checkbox para buscar inteiro teor (mais lento, mais completo)
+        buscar_inteiro_teor = st.checkbox(
+            "🔍 Buscar inteiro teor das proposições (mais completo, mais lento)",
+            value=False,
+            key=f"chat_inteiro_teor_{tab_id}",
+            help="Ativa a busca do texto completo das proposições para análises mais detalhadas"
+        )
+        
         # Preparar contexto
         contexto = chat_get_context(tab_id, df_contexto, filtros, selecionado)
         contexto_formatado = chat_format_context(contexto)
@@ -429,6 +632,7 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
         # Processar botões
         prompt_auto = None
         nome_saida = None
+        precisa_detalhes = False  # Flag para buscar inteiro teor
         
         if btn_briefing:
             prompt_auto = CHAT_TEMPLATE_BRIEFING.format(dados=contexto_formatado)
@@ -445,6 +649,7 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
         elif btn_analise:
             prompt_auto = CHAT_TEMPLATE_ANALISE.format(dados=contexto_formatado)
             nome_saida = "📊 Análise técnica"
+            precisa_detalhes = True  # Análise técnica precisa de detalhes
         elif btn_estrategia:
             prompt_auto = CHAT_TEMPLATE_ESTRATEGIA.format(dados=contexto_formatado)
             nome_saida = "⚔️ Estratégia"
@@ -480,16 +685,30 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
             # IMPORTANTE: Adicionar o contexto dos dados ao system prompt
             system += f"\n\n{contexto_formatado}"
             
+            # Se checkbox marcado ou análise técnica, buscar detalhes completos (incluindo inteiro teor)
+            contexto_enriquecido = ""
+            if (buscar_inteiro_teor or precisa_detalhes) and df_contexto is not None and not df_contexto.empty:
+                with st.spinner("🔍 Buscando inteiro teor das proposições..."):
+                    contexto_enriquecido = enriquecer_contexto_com_detalhes(df_contexto, max_proposicoes=5)
+                if contexto_enriquecido:
+                    system += f"\n\n{contexto_enriquecido}"
+            
             # Preparar mensagens
             mensagens_api = []
             for msg in st.session_state[history_key][-8:]:
                 mensagens_api.append({"role": msg["role"], "content": msg["content"]})
             
             if prompt_auto:
+                # Se temos contexto enriquecido, adicionar ao prompt
+                if contexto_enriquecido:
+                    prompt_auto = prompt_auto.replace("{dados}", f"{contexto_formatado}\n\n{contexto_enriquecido}")
                 mensagens_api.append({"role": "user", "content": prompt_auto})
             elif user_input:
                 # Para perguntas livres, incluir o contexto junto com a pergunta
-                pergunta_com_contexto = f"Com base nos dados abaixo, responda: {user_input}\n\nDADOS ATUAIS:\n{contexto_formatado}"
+                dados_completos = contexto_formatado
+                if contexto_enriquecido:
+                    dados_completos += f"\n\n{contexto_enriquecido}"
+                pergunta_com_contexto = f"Com base nos dados abaixo, responda: {user_input}\n\nDADOS ATUAIS:\n{dados_completos}"
                 mensagens_api.append({"role": "user", "content": pergunta_com_contexto})
             
             # Chamar API
@@ -504,6 +723,8 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
         with st.expander("📊 Contexto atual (debug)", expanded=False):
             st.caption(f"**Registros no contexto:** {contexto.get('metadados', {}).get('total_registros', 0)}")
             st.caption(f"**Colunas:** {len(contexto.get('metadados', {}).get('colunas', []))}")
+            st.caption(f"**Busca inteiro teor:** {'✅ Ativada' if buscar_inteiro_teor else '❌ Desativada'}")
+            st.caption(f"**Biblioteca PDF:** {'✅ Disponível' if PDF_AVAILABLE else '❌ Não instalada'}")
             if contexto.get('metadados', {}).get('filtros_ativos'):
                 st.caption(f"**Filtros:** {contexto.get('metadados', {}).get('filtros_ativos')}")
             st.text_area("Dados enviados para IA:", value=contexto.get('tabela_compacta', '')[:2000], height=150, disabled=True, key=f"debug_contexto_{tab_id}")
