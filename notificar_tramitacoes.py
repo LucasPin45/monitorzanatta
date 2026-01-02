@@ -4,7 +4,7 @@
 notificar_tramitacoes.py
 ========================================
 Script para verificar novas tramitações e enviar notificações via Telegram
-Busca todas as proposições do último ano e compara com as últimas 24h
+Busca todas as proposições do último ano e compara com as últimas 48h
 Formato de mensagem: Monitor Parlamentar Informa
 """
 
@@ -84,8 +84,6 @@ def buscar_proposicoes_ultimo_ano(deputado_id):
             
         except requests.exceptions.HTTPError as e:
             print(f"❌ Erro HTTP ao buscar proposições (página {pagina}): {e}")
-            print(f"   Status code: {resp.status_code}")
-            print(f"   Response: {resp.text[:500]}")
             break
         except Exception as e:
             print(f"❌ Erro ao buscar proposições (página {pagina}): {e}")
@@ -98,19 +96,28 @@ def buscar_proposicoes_ultimo_ano(deputado_id):
 def buscar_ultima_tramitacao(proposicao_id):
     """Busca a última tramitação de uma proposição"""
     
+    # Endpoint simples sem parâmetros problemáticos
     url = f"{BASE_URL}/proposicoes/{proposicao_id}/tramitacoes"
-    params = {"ordem": "DESC", "ordenarPor": "dataHora", "itens": 1}
     
     try:
-        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
+        resp = requests.get(url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         
-        if data.get("dados"):
-            return data["dados"][0]
+        tramitacoes = data.get("dados", [])
+        
+        if tramitacoes:
+            # Ordenar por data e pegar a mais recente
+            tramitacoes_ordenadas = sorted(
+                tramitacoes,
+                key=lambda x: x.get("dataHora", ""),
+                reverse=True
+            )
+            return tramitacoes_ordenadas[0]
             
     except Exception as e:
-        print(f"⚠️ Erro ao buscar tramitação de {proposicao_id}: {e}")
+        # Silenciar erros individuais para não poluir o log
+        pass
     
     return None
 
@@ -132,24 +139,11 @@ def tramitacao_recente(tramitacao, horas=48):
         return data_tram >= data_corte
         
     except Exception as e:
-        print(f"⚠️ Erro ao comparar data: {e}")
         return False
 
 
 def formatar_mensagem(proposicao, tramitacao):
-    """
-    Formata mensagem no padrão:
-    
-    Monitor Parlamentar Informa:
-    
-    Houve nova movimentação!
-    
-    📄 PL 5737/2025 Altera a legislação...
-    
-    📅 29/12/2025 → Recebimento pelo(a) CDC.
-    
-    🔗 Ver tramitação completa
-    """
+    """Formata mensagem para o Telegram"""
     
     sigla = proposicao.get("siglaTipo", "")
     numero = proposicao.get("numero", "")
@@ -216,22 +210,7 @@ def enviar_telegram(mensagem):
         
     except Exception as e:
         print(f"❌ Erro ao enviar mensagem: {e}")
-        if hasattr(resp, 'text'):
-            print(f"   Response: {resp.text}")
         return False
-
-
-def enviar_teste_conexao():
-    """Envia mensagem de teste para verificar se o bot está funcionando"""
-    
-    mensagem = f"""🔔 <b>Monitor Parlamentar - Teste de Conexão</b>
-
-✅ Sistema funcionando corretamente!
-📅 Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
-
-O monitoramento das proposições da Deputada Júlia Zanatta está ativo."""
-    
-    return enviar_telegram(mensagem)
 
 
 # ============================================================
@@ -268,40 +247,56 @@ def main():
     
     # 2. Verificar tramitações recentes (últimas 48h)
     print("\n🔍 Verificando tramitações das últimas 48h...")
+    print("   (isso pode levar alguns minutos...)\n")
     
     props_com_novidade = []
+    erros = 0
     
     for i, prop in enumerate(proposicoes, 1):
-        print(f"[{i}/{len(proposicoes)}] {prop['siglaTipo']} {prop['numero']}/{prop['ano']}...", end=" ")
+        sigla_prop = f"{prop['siglaTipo']} {prop['numero']}/{prop['ano']}"
+        
+        # Mostrar progresso a cada 50 proposições
+        if i % 50 == 0 or i == 1:
+            print(f"📊 Progresso: {i}/{len(proposicoes)} proposições verificadas...")
         
         tramitacao = buscar_ultima_tramitacao(prop["id"])
         
-        if tramitacao and tramitacao_recente(tramitacao, horas=48):
-            print("✅ NOVA!")
+        if tramitacao is None:
+            erros += 1
+            continue
+        
+        if tramitacao_recente(tramitacao, horas=48):
+            print(f"   ✅ NOVA! {sigla_prop}")
             props_com_novidade.append({
                 "proposicao": prop,
                 "tramitacao": tramitacao
             })
-        else:
-            print("sem novidade")
         
-        time.sleep(0.3)  # Rate limit
+        time.sleep(0.2)  # Rate limit mais suave
     
-    # 3. Enviar notificações
-    print(f"\n📊 Total de proposições com movimentação: {len(props_com_novidade)}")
+    # 3. Resumo
+    print(f"\n{'=' * 60}")
+    print(f"📊 RESUMO:")
+    print(f"   Total verificadas: {len(proposicoes)}")
+    print(f"   Com novidades: {len(props_com_novidade)}")
+    print(f"   Erros de API: {erros}")
+    print(f"{'=' * 60}")
     
     if not props_com_novidade:
-        print("✅ Nenhuma novidade para notificar")
+        print("\n✅ Nenhuma novidade para notificar")
         return
     
+    # 4. Enviar notificações
     print(f"\n📤 Enviando {len(props_com_novidade)} notificação(ões)...\n")
     
+    enviadas = 0
     for item in props_com_novidade:
         mensagem = formatar_mensagem(item["proposicao"], item["tramitacao"])
-        enviar_telegram(mensagem)
+        if enviar_telegram(mensagem):
+            enviadas += 1
         time.sleep(1)  # Evitar flood no Telegram
     
-    print("\n✅ Processo concluído!")
+    print(f"\n✅ Processo concluído! {enviadas} mensagens enviadas.")
 
 
 if __name__ == "__main__":
