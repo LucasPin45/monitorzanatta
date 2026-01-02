@@ -131,7 +131,7 @@ DADOS: {dados}
 Analise e recomende:"""
 
 # --- Funções de Contexto ---
-def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 15) -> dict:
+def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 50) -> dict:
     """Extrai contexto estruturado de uma aba para enviar à IA."""
     filtros = filtros or {}
     selecionado = selecionado or {}
@@ -173,14 +173,14 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
     
     contexto_partes = [
         f"Aba: {meta['tab_descricao']}",
-        f"Total de registros: {meta['total_registros']}",
+        f"Total de registros visíveis: {meta['total_registros']}",
         f"Data da consulta: {meta['data_consulta']}"
     ]
     
     if filtros:
         filtros_str = ", ".join([f"{k}={v}" for k, v in filtros.items() if v])
         if filtros_str:
-            contexto_partes.append(f"Filtros ativos: {filtros_str}")
+            contexto_partes.append(f"Filtros aplicados: {filtros_str}")
     
     if selecionado:
         sel_str = ", ".join([f"{k}={v}" for k, v in selecionado.items() if v])
@@ -193,25 +193,30 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
     if dados_item_selecionado:
         tabela_compacta = dados_item_selecionado
     elif df_filtrado is not None and not df_filtrado.empty:
+        # Pegar TODAS as linhas (até max_rows) para dar contexto completo
         df_amostra = df_filtrado.head(max_rows)
+        
+        # Selecionar colunas mais relevantes
         colunas_prioridade = [
-            "id", "Proposição", "siglaTipo", "numero", "ano", "ementa",
-            "Situação atual", "Órgão (sigla)", "Data do status", "Parado (dias)",
-            "Relator(a)", "Tema", "RIC_Ministerio", "RIC_StatusResposta",
-            "RIC_DiasRestantes", "RIC_PrazoStr"
+            "ID", "id", "Proposição", "Proposicao", "siglaTipo", "numero", "ano", 
+            "Ementa", "ementa", "Situação atual", "Órgão (sigla)", "Data do status", 
+            "Parado (dias)", "Relator(a)", "Tema", "Último andamento",
+            "RIC_Ministerio", "RIC_StatusResposta", "RIC_DiasRestantes", "RIC_PrazoStr"
         ]
         colunas_disponiveis = [c for c in colunas_prioridade if c in df_amostra.columns]
         if not colunas_disponiveis:
-            colunas_disponiveis = list(df_amostra.columns)[:8]
+            colunas_disponiveis = list(df_amostra.columns)[:10]
         
         df_resumo = df_amostra[colunas_disponiveis].copy()
+        
+        # Truncar textos longos mas manter informação suficiente
         for col in df_resumo.columns:
             if df_resumo[col].dtype == 'object':
-                df_resumo[col] = df_resumo[col].astype(str).str[:80]
+                df_resumo[col] = df_resumo[col].astype(str).str[:120]
         
-        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=40)
+        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=60)
     else:
-        tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro."
+        tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro clicando no botão de carregar."
     
     return {"contexto_textual": contexto_textual, "tabela_compacta": tabela_compacta, "metadados": meta}
 
@@ -452,11 +457,14 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
                 with st.chat_message("user"):
                     st.markdown(f"[{nome_saida}]")
             
-            # Preparar system prompt
+            # Preparar system prompt COM O CONTEXTO DOS DADOS
             system = CHAT_SYSTEM_PROMPT_BASE.format(
                 persona=CHAT_PERSONAS.get(persona, CHAT_PERSONAS["Assessoria Legislativa"]),
                 contexto_aba=CHAT_CONTEXTOS_ABA.get(tab_id, "")
             )
+            
+            # IMPORTANTE: Adicionar o contexto dos dados ao system prompt
+            system += f"\n\n{contexto_formatado}"
             
             # Preparar mensagens
             mensagens_api = []
@@ -465,6 +473,10 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
             
             if prompt_auto:
                 mensagens_api.append({"role": "user", "content": prompt_auto})
+            elif user_input:
+                # Para perguntas livres, incluir o contexto junto com a pergunta
+                pergunta_com_contexto = f"Com base nos dados abaixo, responda: {user_input}\n\nDADOS ATUAIS:\n{contexto_formatado}"
+                mensagens_api.append({"role": "user", "content": pergunta_com_contexto})
             
             # Chamar API
             with st.chat_message("assistant"):
@@ -474,10 +486,13 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
             
             st.session_state[history_key].append({"role": "assistant", "content": resposta})
         
-        # Info do contexto
-        with st.expander("📊 Contexto atual", expanded=False):
-            st.caption(f"Registros: {contexto.get('metadados', {}).get('total_registros', 0)}")
-            st.caption(f"Colunas: {len(contexto.get('metadados', {}).get('colunas', []))}")
+        # Info do contexto (para debug)
+        with st.expander("📊 Contexto atual (debug)", expanded=False):
+            st.caption(f"**Registros no contexto:** {contexto.get('metadados', {}).get('total_registros', 0)}")
+            st.caption(f"**Colunas:** {len(contexto.get('metadados', {}).get('colunas', []))}")
+            if contexto.get('metadados', {}).get('filtros_ativos'):
+                st.caption(f"**Filtros:** {contexto.get('metadados', {}).get('filtros_ativos')}")
+            st.text_area("Dados enviados para IA:", value=contexto.get('tabela_compacta', '')[:2000], height=150, disabled=True)
 
 
 # ============================================================
@@ -6429,9 +6444,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
 
             df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
-            
-            # Salvar para o Chat IA
-            st.session_state["df_chat_tab5"] = df_rast_enriched.copy()
 
             st.caption(f"Resultados: {len(df_rast_enriched)} proposições")
 
@@ -6463,6 +6475,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             for c in show_cols_r:
                 if c not in df_tbl.columns:
                     df_tbl[c] = ""
+            
+            # IMPORTANTE: Salvar o DataFrame que VAI SER EXIBIDO para o Chat IA
+            # Isso garante que o chat recebe exatamente os mesmos dados da tabela
+            st.session_state["df_chat_tab5"] = df_tbl.copy()
+            st.session_state["filtro_busca_tab5"] = q  # Salvar também o filtro usado
             
             sel = st.dataframe(
                 df_tbl[show_cols_r],
@@ -6527,9 +6544,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         # Chat IA da aba 5
         st.markdown("---")
         df_chat_tab5 = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        filtro_busca = st.session_state.get("filtro_busca_tab5", "")
         # Garantir que selected_id existe
         sel_id_tab5 = selected_id if 'selected_id' in dir() and selected_id else None
-        render_chat_ia("tab5", df_chat_tab5, selecionado={"id": sel_id_tab5} if sel_id_tab5 else None)
+        render_chat_ia("tab5", df_chat_tab5, filtros={"busca": filtro_busca} if filtro_busca else None, selecionado={"id": sel_id_tab5} if sel_id_tab5 else None)
 
     # ============================================================
     # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
