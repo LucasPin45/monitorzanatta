@@ -121,22 +121,37 @@ PAUTAS CULTURAIS E INSTITUCIONAIS:
 - Articulação com bancadas conservadoras
 - Atenção especial a relatores de esquerda (PT, PSOL, PCdoB, PSB, PV, Rede)
 
-=== REGRAS FUNDAMENTAIS (NUNCA VIOLAR) ===
+=== REGRAS FUNDAMENTAIS (OBRIGATÓRIO - NUNCA VIOLAR) ===
 
-1. USE OS DADOS FORNECIDOS: Os dados estão no formato "• PROPOSIÇÃO (ID:XXX) | SITUAÇÃO | ÓRGÃO | EMENTA". Extraia as informações de cada linha.
-2. NUNCA diga "não consta" ou "dados incompletos" se você vê a informação na linha de dados. Cada "|" separa um campo.
-3. O formato é: PROPOSIÇÃO (ID) | SITUAÇÃO | ÓRGÃO | EMENTA
-4. Para RICs, o formato é: PROPOSIÇÃO (ID) | STATUS_RIC | DIAS_RESTANTES | MINISTÉRIO | EMENTA
-5. SEMPRE inclua links clicáveis: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
-6. Responda com viés CRÍTICO ao governo federal, alinhado à posição de OPOSIÇÃO da deputada.
+⚠️ REGRA MAIS IMPORTANTE: USE APENAS OS DADOS FORNECIDOS ABAIXO!
+- NÃO invente proposições que não estão na lista
+- NÃO diga "N/D" ou "dados não disponíveis" se a informação está na linha
+- COPIE EXATAMENTE a Situação e Órgão que aparecem nos dados
 
-COMO INTERPRETAR OS DADOS:
-- Cada linha começando com "•" é uma proposição
-- O ID está entre parênteses após a sigla: "PL 1234/2025 (ID:2345678)"
-- A SITUAÇÃO vem após o primeiro "|"
-- O ÓRGÃO vem após o segundo "|"
-- A EMENTA vem após o terceiro "|"
-- Se um campo mostra "N/D", significa que não há informação disponível
+FORMATO DOS DADOS QUE VOCÊ VAI RECEBER:
+• PL 4045/2023 (ID:2381193) | Aguardando Encaminhamento | CCP | Altera a Lei...
+
+COMO INTERPRETAR:
+- Parte 1: "PL 4045/2023" = PROPOSIÇÃO
+- Parte 2: "(ID:2381193)" = ID para o link
+- Parte 3: "Aguardando Encaminhamento" = SITUAÇÃO (use este valor!)
+- Parte 4: "CCP" = ÓRGÃO (use este valor!)
+- Parte 5: "Altera a Lei..." = EMENTA
+
+EXEMPLO CORRETO DE RESPOSTA:
+Se os dados mostram: "• PL 4045/2023 (ID:2381193) | Aguardando Encaminhamento | CCP | Altera a Lei..."
+Você deve responder:
+- **Situação**: Aguardando Encaminhamento
+- **Órgão**: CCP
+
+EXEMPLO ERRADO (NÃO FAÇA ISSO):
+- **Situação**: N/D ❌
+- **Situação**: Dados não disponíveis ❌
+- **Situação**: Não consta ❌
+
+LINK OBRIGATÓRIO: [PL 4045/2023](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=2381193)
+
+RESTRIÇÃO: Só mencione proposições que estão EXPLICITAMENTE listadas nos dados fornecidos. NÃO invente outras.
 
 === TOM DAS ANÁLISES ===
 - Técnico-jurídico
@@ -150,19 +165,23 @@ COMO INTERPRETAR OS DADOS:
 - Formato: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
 - Use o ID numérico da coluna "ID" ou "id" dos dados para montar o link
 
-=== FORMATO DE RESPOSTA ===
-Para cada proposição identificada, use:
+=== FORMATO DE RESPOSTA OBRIGATÓRIO ===
+Para cada proposição identificada NOS DADOS ACIMA, use:
 
 ### [SIGLA NÚMERO/ANO](link) - Título curto
-- **O que faz**: Explicação clara (use a EMENTA dos dados)
+- **O que faz**: (copie da EMENTA nos dados)
 - **Por que importa**: Relevância política para a deputada
-- **Situação**: Use o campo "Situação atual" dos dados
-- **Órgão**: Use o campo "Órgão (sigla)" dos dados
+- **Situação**: (COPIE EXATAMENTE do campo após primeiro "|" nos dados - NÃO escreva N/D se tem valor!)
+- **Órgão**: (COPIE EXATAMENTE do campo após segundo "|" nos dados - NÃO escreva N/D se tem valor!)
 
-Após listar todas:
+⚠️ LEMBRETES:
+- SÓ mencione proposições que estão listadas nos dados
+- COPIE a Situação e Órgão dos dados, não invente
+- Se os dados mostram "Aguardando Encaminhamento | CCP", escreva exatamente isso
+
+Após listar as proposições DOS DADOS:
 - **Análise estratégica**: Visão geral alinhada ao perfil da deputada
 - **Próximo passo**: Ação recomendada
-- **Alertas**: Pontos de atenção (relatores adversários, prazos, etc.)
 
 PERSONA ATUAL: {persona}
 
@@ -185,24 +204,30 @@ CHAT_CONTEXTOS_ABA = {
 }
 
 # --- Templates de Saídas Prontas ---
-CHAT_TEMPLATE_BRIEFING = """Gere um BRIEFING DE 30 SEGUNDOS.
+CHAT_TEMPLATE_BRIEFING = """Gere um BRIEFING DE 30 SEGUNDOS usando APENAS os dados fornecidos.
 REGRAS: Máximo 5 frases. Foco em: O que é, por que importa, o que fazer AGORA. Tom direto.
-IMPORTANTE: Inclua link clicável para cada proposição: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
+OBRIGATÓRIO: 
+- Inclua link clicável: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
+- COPIE a Situação e Órgão dos dados, não escreva "N/D" se os dados têm valores
 DADOS: {dados}
 Gere o briefing:"""
 
-CHAT_TEMPLATE_ANALISE = """Gere uma ANÁLISE TÉCNICA detalhada.
-ESTRUTURA OBRIGATÓRIA para cada proposição identificada:
+CHAT_TEMPLATE_ANALISE = """Gere uma ANÁLISE TÉCNICA detalhada usando APENAS as proposições listadas nos dados.
+⚠️ REGRAS OBRIGATÓRIAS:
+1. Só mencione proposições que estão nos dados
+2. COPIE a Situação e Órgão EXATAMENTE como aparecem após os "|" nos dados
+3. NÃO escreva "N/D" ou "dados não disponíveis" se a informação está nos dados
+
+ESTRUTURA para cada proposição:
 ### [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID) - Título
-- **O que faz**: Descrição clara do objetivo
-- **Por que importa**: Relevância política para a deputada
-- **Situação atual**: Status de tramitação
-- **Órgão**: Onde está
+- **O que faz**: (da EMENTA nos dados)
+- **Por que importa**: Relevância política
+- **Situação**: (COPIE do campo após primeiro "|" nos dados!)
+- **Órgão**: (COPIE do campo após segundo "|" nos dados!)
 
 Após todas as proposições:
 - **Análise consolidada**: Visão geral estratégica
 - **Próximo passo**: Ação recomendada
-- **Riscos**: Pontos de atenção
 
 DADOS: {dados}
 Gere a análise:"""
@@ -326,8 +351,11 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
         
         # Formatar TODAS as proposições - SEMPRE com situação e órgão
         linhas_formatadas = []
-        linhas_formatadas.append("=== LISTA COMPLETA DE PROPOSIÇÕES ===\n")
-        linhas_formatadas.append(f"Total: {len(df_filtrado)} proposições\n")
+        linhas_formatadas.append("╔═══════════════════════════════════════════════════════════════════╗")
+        linhas_formatadas.append("║  LISTA DE PROPOSIÇÕES - USE ESTES DADOS NA SUA RESPOSTA          ║")
+        linhas_formatadas.append("╚═══════════════════════════════════════════════════════════════════╝\n")
+        linhas_formatadas.append(f"⚠️ Total de proposições encontradas: {len(df_filtrado)}")
+        linhas_formatadas.append("⚠️ IMPORTANTE: Copie SITUAÇÃO e ÓRGÃO exatamente como aparecem abaixo!\n")
         
         # Verificar se são RICs
         eh_ric = "RIC_DiasRestantes" in df_filtrado.columns or "RIC_StatusResposta" in df_filtrado.columns
@@ -335,7 +363,8 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
         if eh_ric:
             linhas_formatadas.append("Formato: PROPOSIÇÃO (ID) | STATUS_RIC | DIAS_RESTANTES | MINISTÉRIO | EMENTA\n")
         else:
-            linhas_formatadas.append("Formato: PROPOSIÇÃO (ID) | SITUAÇÃO | ÓRGÃO | EMENTA\n")
+            linhas_formatadas.append("Formato: PROPOSIÇÃO (ID) | SITUAÇÃO | ÓRGÃO | EMENTA")
+            linhas_formatadas.append("         ↑ sigla/número    ↑ copie!   ↑ copie!\n")
         
         for idx, row in df_filtrado.iterrows():
             # Extrair campos de forma flexível
@@ -383,14 +412,21 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
 def chat_format_context(contexto: dict) -> str:
     """Formata o contexto para incluir no prompt."""
     return f"""
-=== DADOS DO MONITOR LEGISLATIVO ===
+╔══════════════════════════════════════════════════════════════════╗
+║  DADOS DO MONITOR LEGISLATIVO - USE ESTES DADOS NA SUA RESPOSTA  ║
+╚══════════════════════════════════════════════════════════════════╝
+
 {contexto.get("contexto_textual", "")}
 
 {contexto.get("tabela_compacta", "Nenhum dado disponível")}
 
-INSTRUÇÕES: Use os dados acima para responder. Cada proposição tem ID, Ementa, Situação e Órgão.
-Monte os links usando: https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID
-================================
+╔══════════════════════════════════════════════════════════════════╗
+║  INSTRUÇÕES OBRIGATÓRIAS:                                        ║
+║  1. Use APENAS as proposições listadas acima                     ║
+║  2. Copie a SITUAÇÃO e ÓRGÃO exatamente como aparecem            ║
+║  3. Monte links: camara.leg.br/proposicoesWeb/...?idProposicao=ID║
+║  4. NÃO invente proposições que não estão na lista               ║
+╚══════════════════════════════════════════════════════════════════╝
 """
 
 # --- Análise específica de RICs ---
