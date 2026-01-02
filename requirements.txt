@@ -7,3 +7,4 @@ fpdf2
 xlsxwriter
 reportlab
 matplotlib
+pypdf>=4.0.0
