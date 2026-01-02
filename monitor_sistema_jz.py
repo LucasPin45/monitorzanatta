@@ -123,11 +123,20 @@ PAUTAS CULTURAIS E INSTITUCIONAIS:
 
 === REGRAS FUNDAMENTAIS (NUNCA VIOLAR) ===
 
-1. USE OS DADOS FORNECIDOS: Os dados da tabela/contexto são a fonte primária. Se uma informação está nos dados, USE-A.
-2. NUNCA diga "não consta na base" se o dado está presente nos campos fornecidos (ID, Situação atual, Órgão, Ementa, etc.)
-3. Se um campo está vazio ou faltando nos dados, aí sim indique que não consta.
-4. SEMPRE inclua links clicáveis: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
-5. Responda com viés CRÍTICO ao governo federal, alinhado à posição de OPOSIÇÃO da deputada.
+1. USE OS DADOS FORNECIDOS: Os dados estão no formato "• PROPOSIÇÃO (ID:XXX) | SITUAÇÃO | ÓRGÃO | EMENTA". Extraia as informações de cada linha.
+2. NUNCA diga "não consta" ou "dados incompletos" se você vê a informação na linha de dados. Cada "|" separa um campo.
+3. O formato é: PROPOSIÇÃO (ID) | SITUAÇÃO | ÓRGÃO | EMENTA
+4. Para RICs, o formato é: PROPOSIÇÃO (ID) | STATUS_RIC | DIAS_RESTANTES | MINISTÉRIO | EMENTA
+5. SEMPRE inclua links clicáveis: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
+6. Responda com viés CRÍTICO ao governo federal, alinhado à posição de OPOSIÇÃO da deputada.
+
+COMO INTERPRETAR OS DADOS:
+- Cada linha começando com "•" é uma proposição
+- O ID está entre parênteses após a sigla: "PL 1234/2025 (ID:2345678)"
+- A SITUAÇÃO vem após o primeiro "|"
+- O ÓRGÃO vem após o segundo "|"
+- A EMENTA vem após o terceiro "|"
+- Se um campo mostra "N/D", significa que não há informação disponível
 
 === TOM DAS ANÁLISES ===
 - Técnico-jurídico
@@ -239,6 +248,9 @@ def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = Non
     filtros = filtros or {}
     selecionado = selecionado or {}
     
+    # Debug: listar colunas disponíveis
+    colunas_disponiveis = list(df_filtrado.columns) if df_filtrado is not None and not df_filtrado.empty else []
+    
     # Se há item selecionado mas df vazio, tentar buscar dados do item
     dados_item_selecionado = ""
     if selecionado.get("id") and (df_filtrado is None or df_filtrado.empty):
@@ -268,16 +280,22 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
         "tab_id": tab_id,
         "tab_descricao": CHAT_CONTEXTOS_ABA.get(tab_id, "Aba não identificada"),
         "total_registros": len(df_filtrado) if df_filtrado is not None and not df_filtrado.empty else (1 if dados_item_selecionado else 0),
-        "colunas": list(df_filtrado.columns) if df_filtrado is not None and not df_filtrado.empty else [],
+        "colunas": colunas_disponiveis,
         "filtros_ativos": filtros,
         "item_selecionado": selecionado,
         "data_consulta": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     }
     
+    # Verificar se tem colunas de status
+    tem_situacao = "Situação atual" in colunas_disponiveis
+    tem_orgao = "Órgão (sigla)" in colunas_disponiveis
+    
     contexto_partes = [
         f"Aba: {meta['tab_descricao']}",
         f"Total de registros visíveis: {meta['total_registros']}",
         f"Data da consulta: {meta['data_consulta']}",
+        f"Colunas com dados: {', '.join(colunas_disponiveis[:15])}",
+        f"Tem Situação: {'SIM' if tem_situacao else 'NÃO'} | Tem Órgão: {'SIM' if tem_orgao else 'NÃO'}",
         f"IMPORTANTE: Use o ID para montar links: https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID"
     ]
     
@@ -306,10 +324,18 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
                         return str(val).strip()
             return ""
         
-        # Formatar TODAS as proposições de forma compacta
+        # Formatar TODAS as proposições - SEMPRE com situação e órgão
         linhas_formatadas = []
         linhas_formatadas.append("=== LISTA COMPLETA DE PROPOSIÇÕES ===\n")
         linhas_formatadas.append(f"Total: {len(df_filtrado)} proposições\n")
+        
+        # Verificar se são RICs
+        eh_ric = "RIC_DiasRestantes" in df_filtrado.columns or "RIC_StatusResposta" in df_filtrado.columns
+        
+        if eh_ric:
+            linhas_formatadas.append("Formato: PROPOSIÇÃO (ID) | STATUS_RIC | DIAS_RESTANTES | MINISTÉRIO | EMENTA\n")
+        else:
+            linhas_formatadas.append("Formato: PROPOSIÇÃO (ID) | SITUAÇÃO | ÓRGÃO | EMENTA\n")
         
         for idx, row in df_filtrado.iterrows():
             # Extrair campos de forma flexível
@@ -326,34 +352,29 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
             if not proposicao and tipo and numero:
                 proposicao = f"{tipo} {numero}/{ano}"
             
-            # Formato compacto: uma linha por proposição
-            linha = f"• {proposicao} (ID:{prop_id}) | {situacao} | {orgao} | {ementa[:150]}"
+            # Se for RIC, incluir dados específicos
+            if eh_ric:
+                ric_status = get_val(row, "RIC_StatusResposta")
+                ric_dias = get_val(row, "RIC_DiasRestantes")
+                ric_ministerio = get_val(row, "RIC_Ministerio")
+                
+                ric_status_str = ric_status if ric_status else "N/D"
+                ric_dias_str = f"{ric_dias} dias" if ric_dias else "N/D"
+                ric_ministerio_str = ric_ministerio if ric_ministerio else "N/D"
+                ementa_curta = ementa[:80] if ementa else ""
+                
+                linha = f"• {proposicao} (ID:{prop_id}) | {ric_status_str} | {ric_dias_str} | {ric_ministerio_str} | {ementa_curta}"
+            else:
+                # SEMPRE incluir situação e órgão (mesmo que vazios)
+                situacao_str = situacao if situacao else "N/D"
+                orgao_str = orgao if orgao else "N/D"
+                ementa_curta = ementa[:100] if ementa else ""
+                
+                linha = f"• {proposicao} (ID:{prop_id}) | {situacao_str} | {orgao_str} | {ementa_curta}"
+            
             linhas_formatadas.append(linha)
         
         tabela_compacta = "\n".join(linhas_formatadas)
-        
-        # Se for grande demais, truncar mas manter todas as proposições pelo menos com ID e sigla
-        if len(tabela_compacta) > 50000:
-            linhas_formatadas = []
-            linhas_formatadas.append("=== LISTA RESUMIDA DE PROPOSIÇÕES ===\n")
-            linhas_formatadas.append(f"Total: {len(df_filtrado)} proposições\n")
-            
-            for idx, row in df_filtrado.iterrows():
-                prop_id = get_val(row, "ID", "id")
-                proposicao = get_val(row, "Proposição", "Proposicao")
-                ementa = get_val(row, "Ementa", "ementa")
-                tipo = get_val(row, "Tipo", "siglaTipo")
-                numero = get_val(row, "numero", "Número")
-                ano = get_val(row, "Ano", "ano")
-                
-                if not proposicao and tipo and numero:
-                    proposicao = f"{tipo} {numero}/{ano}"
-                
-                # Formato super compacto
-                linha = f"• {proposicao} (ID:{prop_id}) | {ementa[:80]}"
-                linhas_formatadas.append(linha)
-            
-            tabela_compacta = "\n".join(linhas_formatadas)
     else:
         tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro clicando no botão de carregar."
     
@@ -384,29 +405,53 @@ def chat_analisar_rics(df_rics: pd.DataFrame) -> str:
     atrasados = 0
     vencendo_7_dias = 0
     
+    # Listar RICs por status
+    rics_atrasados = []
+    rics_vencendo = []
+    
     if "RIC_StatusResposta" in df_rics.columns:
         aguardando = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Aguardando", case=False, na=False)])
         respondidos = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Respondido", case=False, na=False)])
-        atrasados = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Fora do prazo|Vencido", case=False, na=False)])
+        # Contar atrasados pelo status
+        atrasados_por_status = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Fora do prazo|Vencido|prazo vencido", case=False, na=False)])
     
+    # Contar atrasados pelos dias restantes (mais preciso)
     if "RIC_DiasRestantes" in df_rics.columns:
-        for _, row in df_rics.iterrows():
-            dias = row.get("RIC_DiasRestantes")
+        for idx, row in df_rics.iterrows():
+            # Acessar coluna corretamente
+            dias = row["RIC_DiasRestantes"] if "RIC_DiasRestantes" in row.index else None
             if pd.notna(dias):
                 try:
                     dias = int(dias)
+                    # Tentar vários nomes de coluna para proposição
+                    prop = ""
+                    for col in ["Proposição", "Proposicao"]:
+                        if col in row.index and pd.notna(row[col]):
+                            prop = str(row[col])
+                            break
+                    if not prop:
+                        prop_id = row.get("ID") if "ID" in row.index else row.get("id") if "id" in row.index else ""
+                        prop = f"RIC ID:{prop_id}"
+                    
                     if dias < 0:
-                        atrasados = max(atrasados, 1)
+                        rics_atrasados.append(f"{prop} ({abs(dias)} dias de atraso)")
                     elif 0 <= dias <= 7:
-                        vencendo_7_dias += 1
+                        rics_vencendo.append(f"{prop} ({dias} dias restantes)")
                 except (ValueError, TypeError):
                     pass
+    
+    atrasados = len(rics_atrasados)
+    vencendo_7_dias = len(rics_vencendo)
     
     alertas = []
     if atrasados > 0:
         alertas.append(f"🔴 {atrasados} RIC(s) com prazo VENCIDO")
+        for ric in rics_atrasados[:5]:  # Mostrar até 5
+            alertas.append(f"   - {ric}")
     if vencendo_7_dias > 0:
         alertas.append(f"🟠 {vencendo_7_dias} RIC(s) vencem nos próximos 7 dias")
+        for ric in rics_vencendo[:5]:  # Mostrar até 5
+            alertas.append(f"   - {ric}")
     
     partes = [
         f"ANÁLISE DOS RICs:",
@@ -802,8 +847,16 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
         # Info do contexto (para debug)
         with st.expander("📊 Contexto atual (debug)", expanded=False):
             total_regs = contexto.get('metadados', {}).get('total_registros', 0)
+            colunas = contexto.get('metadados', {}).get('colunas', [])
             st.caption(f"**Registros no contexto:** {total_regs}")
-            st.caption(f"**Colunas disponíveis:** {contexto.get('metadados', {}).get('colunas', [])[:10]}")
+            st.caption(f"**Colunas disponíveis:** {colunas}")
+            
+            # Verificar colunas críticas
+            tem_situacao = "Situação atual" in colunas
+            tem_orgao = "Órgão (sigla)" in colunas
+            st.caption(f"**Tem Situação atual:** {'✅' if tem_situacao else '❌'}")
+            st.caption(f"**Tem Órgão (sigla):** {'✅' if tem_orgao else '❌'}")
+            
             st.caption(f"**Busca inteiro teor:** {'✅ Ativada' if buscar_inteiro_teor else '❌ Desativada'}")
             st.caption(f"**Biblioteca PDF:** {'✅ Disponível' if PDF_AVAILABLE else '❌ Não instalada'}")
             if contexto.get('metadados', {}).get('filtros_ativos'):
@@ -7685,6 +7738,17 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.markdown("---")
         st.markdown("### 💬 Chat IA - Análise de RICs")
         df_chat_tab7 = st.session_state.get("df_rics_completo", pd.DataFrame())
+        
+        # Renomear colunas para consistência com o chat
+        if not df_chat_tab7.empty:
+            df_chat_tab7 = df_chat_tab7.rename(columns={
+                "Proposicao": "Proposição",
+                "ementa": "Ementa",
+                "id": "ID",
+                "ano": "Ano",
+                "siglaTipo": "Tipo"
+            })
+        
         render_chat_ia("tab7", df_chat_tab7, filtros=st.session_state.get("filtros_rics", {}), selecionado={"id": selected_ric_id} if 'selected_ric_id' in dir() and selected_ric_id else None)
         
         st.markdown("---")
