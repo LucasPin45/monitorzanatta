@@ -849,23 +849,40 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
             total_regs = contexto.get('metadados', {}).get('total_registros', 0)
             colunas = contexto.get('metadados', {}).get('colunas', [])
             st.caption(f"**Registros no contexto:** {total_regs}")
-            st.caption(f"**Colunas disponíveis:** {colunas}")
+            st.caption(f"**Colunas disponíveis:** {colunas[:12]}")
             
-            # Verificar colunas críticas
+            # Verificar colunas críticas e seus valores
             tem_situacao = "Situação atual" in colunas
             tem_orgao = "Órgão (sigla)" in colunas
-            st.caption(f"**Tem Situação atual:** {'✅' if tem_situacao else '❌'}")
-            st.caption(f"**Tem Órgão (sigla):** {'✅' if tem_orgao else '❌'}")
+            
+            # Mostrar status com contagem de valores não vazios
+            if df_contexto is not None and not df_contexto.empty:
+                if tem_situacao:
+                    vals_sit = df_contexto["Situação atual"].dropna().astype(str)
+                    n_sit = (vals_sit != "").sum()
+                    st.caption(f"**Situação atual:** {n_sit}/{total_regs} com dados")
+                    if n_sit > 0:
+                        st.caption(f"  Exemplos: {list(vals_sit[vals_sit != ''].head(3).values)}")
+                else:
+                    st.caption(f"**Situação atual:** ❌ Coluna não existe")
+                
+                if tem_orgao:
+                    vals_org = df_contexto["Órgão (sigla)"].dropna().astype(str)
+                    n_org = (vals_org != "").sum()
+                    st.caption(f"**Órgão (sigla):** {n_org}/{total_regs} com dados")
+                    if n_org > 0:
+                        st.caption(f"  Exemplos: {list(vals_org[vals_org != ''].head(3).values)}")
+                else:
+                    st.caption(f"**Órgão (sigla):** ❌ Coluna não existe")
             
             st.caption(f"**Busca inteiro teor:** {'✅ Ativada' if buscar_inteiro_teor else '❌ Desativada'}")
-            st.caption(f"**Biblioteca PDF:** {'✅ Disponível' if PDF_AVAILABLE else '❌ Não instalada'}")
-            if contexto.get('metadados', {}).get('filtros_ativos'):
-                st.caption(f"**Filtros:** {contexto.get('metadados', {}).get('filtros_ativos')}")
             
-            # Mostrar prévia maior do contexto
+            # Mostrar prévia do contexto
             dados_preview = contexto.get('tabela_compacta', '')
             st.caption(f"**Tamanho do contexto:** {len(dados_preview)} caracteres")
-            st.text_area("Dados enviados para IA (prévia):", value=dados_preview[:5000], height=200, disabled=True, key=f"debug_contexto_{tab_id}")
+            
+            # Mostrar as primeiras linhas formatadas
+            st.text_area("Dados enviados para IA (prévia):", value=dados_preview[:8000], height=300, disabled=True, key=f"debug_contexto_{tab_id}")
 
 
 # ============================================================
@@ -5940,8 +5957,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v25")
-    st.caption("Mensagens automatizadas via telegram e Chat com IA estão em fase de teste, não estando disponíveis plenamente.")
+    st.caption("v25 – com Chat IA")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -6806,7 +6822,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.session_state.pop("df_status_last", None)
                 st.session_state.pop("df_todas_enriquecido_tab5", None)  # Limpar cache do chat também
                 st.session_state.pop("df_chat_tab5", None)
-                st.success("✅ Cache limpo!")
+                st.success("✅ Cache limpo! Recarregando...")
+                st.rerun()  # Forçar recarga da página
 
         # Carrega proposições
         with st.spinner("Carregando proposições de autoria..."):
@@ -6860,6 +6877,14 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             with st.spinner("Carregando status das proposições..."):
                 ids_r = df_rast_lim["id"].astype(str).tolist()
                 status_map_r = build_status_map(ids_r)
+                
+                # DEBUG: Verificar se status_map tem dados
+                ids_com_situacao = sum(1 for k, v in status_map_r.items() if v.get("situacao"))
+                ids_com_orgao = sum(1 for k, v in status_map_r.items() if v.get("siglaOrgao"))
+                
+                if ids_com_situacao < len(ids_r) // 2:
+                    st.warning(f"⚠️ API retornou poucos dados: Situação em {ids_com_situacao}/{len(ids_r)}, Órgão em {ids_com_orgao}/{len(ids_r)}")
+                
                 df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
 
             df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
@@ -6894,6 +6919,15 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             for c in show_cols_r:
                 if c not in df_tbl.columns:
                     df_tbl[c] = ""
+            
+            # DEBUG: Verificar dados ANTES de salvar
+            _debug_situacao = df_tbl["Situação atual"].dropna().astype(str)
+            _debug_situacao_ok = (_debug_situacao != "").sum()
+            _debug_orgao = df_tbl["Órgão (sigla)"].dropna().astype(str)
+            _debug_orgao_ok = (_debug_orgao != "").sum()
+            
+            if _debug_situacao_ok == 0 or _debug_orgao_ok == 0:
+                st.warning(f"⚠️ DEBUG: Dados incompletos! Situação: {_debug_situacao_ok}/{len(df_tbl)}, Órgão: {_debug_orgao_ok}/{len(df_tbl)}")
             
             # IMPORTANTE: Salvar o DataFrame que VAI SER EXIBIDO para o Chat IA
             # Isso garante que o chat recebe exatamente os mesmos dados da tabela
@@ -6988,18 +7022,56 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        # Para o Chat IA, SEMPRE usar TODAS as proposições (não filtradas por ano)
-        # Isso permite que a IA encontre proposições de qualquer ano
-        # Se há filtro de busca na tabela, usar o resultado filtrado
-        # Se não há filtro, usar TODAS as proposições para o chat poder responder sobre qualquer uma
+        # Para o Chat IA, usar o DataFrame que está exibido na tabela
+        # Esse DataFrame já tem Situação atual e Órgão (sigla) corretos
         filtro_busca = st.session_state.get("filtro_busca_tab5", "")
+        df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
         
-        if filtro_busca:
-            # Se há busca, usar os resultados filtrados (que já buscou em todas)
-            df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        # DEBUG: Mostrar EXATAMENTE os dados que vão para a IA
+        if not df_para_chat.empty:
+            colunas = list(df_para_chat.columns)
+            tem_situacao = "Situação atual" in colunas
+            tem_orgao = "Órgão (sigla)" in colunas
+            
+            # Verificar se tem dados nas colunas
+            if tem_situacao:
+                situacao_valores = df_para_chat["Situação atual"].dropna().astype(str)
+                situacao_nao_vazio = situacao_valores[situacao_valores != ""].count()
+            else:
+                situacao_nao_vazio = 0
+                
+            if tem_orgao:
+                orgao_valores = df_para_chat["Órgão (sigla)"].dropna().astype(str)
+                orgao_nao_vazio = orgao_valores[orgao_valores != ""].count()
+            else:
+                orgao_nao_vazio = 0
+            
+            total = len(df_para_chat)
+            
+            if filtro_busca:
+                st.caption(f"💬 Chat: **{total}** proposições | Filtro: **{filtro_busca}**")
+            else:
+                st.caption(f"💬 Chat: **{total}** proposições (anos selecionados)")
+            
+            # Mostrar status dos dados
+            st.caption(f"📊 Dados disponíveis: Situação em **{situacao_nao_vazio}/{total}** | Órgão em **{orgao_nao_vazio}/{total}**")
+            
+            # Se dados estão vazios, mostrar alerta
+            if situacao_nao_vazio == 0 or orgao_nao_vazio == 0:
+                st.error("⚠️ **DADOS VAZIOS!** Clique em '🧹 Limpar cache' acima e aguarde recarregar.")
+            
+            # DEBUG: Mostrar amostra dos dados
+            with st.expander("🔍 Ver dados enviados para IA (debug)", expanded=False):
+                st.write("**Colunas disponíveis:**", colunas[:10])
+                st.write("**Amostra dos dados (primeiras 3 linhas):**")
+                if len(df_para_chat) > 0:
+                    for i, (idx, row) in enumerate(df_para_chat.head(3).iterrows()):
+                        prop = row.get("Proposição", "N/A")
+                        sit = row.get("Situação atual", "VAZIO")
+                        org = row.get("Órgão (sigla)", "VAZIO")
+                        st.write(f"  {i+1}. **{prop}** | Sit: `{sit}` | Órgão: `{org}`")
         else:
-            # Se não há busca, usar TODAS as proposições (não apenas os anos filtrados)
-            df_para_chat = st.session_state.get("df_todas_enriquecido_tab5", st.session_state.get("df_chat_tab5", pd.DataFrame()))
+            st.info("💡 Use o campo 'Filtrar proposições' acima para buscar.")
         
         # Garantir que selected_id existe
         sel_id_tab5 = selected_id if 'selected_id' in dir() and selected_id else None
