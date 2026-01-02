@@ -8,12 +8,7 @@ Verifica novas movimentações e notifica via Telegram
 
 Tipos monitorados: PL, PLP, PDL, RIC, REQ, PRL
 Período: Desde 2023 (início do mandato)
-Horário: 08:00 às 20:00
-
-Lógica de mensagens:
-- Primeira sem novidade (ou após novidade): mensagem completa
-- Próximas sem novidade: mensagem curta
-- Ao encontrar novidade: reseta o estado
+Horário: 08:00 às 20:00 (Brasília) - Segunda a Sexta
 """
 
 import os
@@ -21,7 +16,7 @@ import sys
 import json
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ============================================================
@@ -44,6 +39,9 @@ DATA_INICIO_MANDATO = "2023-02-01"
 # Arquivo para guardar estado entre execuções
 ESTADO_FILE = Path("estado_monitor.json")
 
+# Fuso horário de Brasília (UTC-3)
+FUSO_BRASILIA = timezone(timedelta(hours=-3))
+
 # ============================================================
 # GERENCIAMENTO DE ESTADO
 # ============================================================
@@ -59,7 +57,7 @@ def carregar_estado():
     except Exception as e:
         print(f"⚠️ Erro ao carregar estado: {e}")
     
-    return {"ultima_novidade": True}  # Começa como True para enviar msg completa
+    return {"ultima_novidade": True}
 
 
 def salvar_estado(teve_novidade):
@@ -77,10 +75,11 @@ def salvar_estado(teve_novidade):
 # FUNÇÕES AUXILIARES
 # ============================================================
 
-def obter_data_hora_formatada():
-    """Retorna data e hora formatadas para as mensagens"""
-    agora = datetime.now()
-    return agora.strftime("%d/%m/%Y às %H:%M")
+def obter_data_hora_brasilia():
+    """Retorna data e hora no fuso de Brasília"""
+    agora_utc = datetime.now(timezone.utc)
+    agora_brasilia = agora_utc.astimezone(FUSO_BRASILIA)
+    return agora_brasilia.strftime("%d/%m/%Y às %H:%M")
 
 
 def buscar_proposicoes_por_tipo(deputado_id, sigla_tipo):
@@ -180,7 +179,8 @@ def tramitacao_recente(tramitacao, horas=48):
     
     try:
         data_tram = tramitacao["dataHora"][:10]
-        data_corte = (datetime.now() - timedelta(hours=horas)).strftime("%Y-%m-%d")
+        agora_brasilia = datetime.now(FUSO_BRASILIA)
+        data_corte = (agora_brasilia - timedelta(hours=horas)).strftime("%Y-%m-%d")
         return data_tram >= data_corte
     except Exception:
         return False
@@ -210,7 +210,7 @@ def formatar_mensagem_novidade(proposicao, tramitacao):
     descricao = tramitacao.get("despacho", "") or tramitacao.get("descricaoTramitacao", "")
     link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={proposicao['id']}"
     
-    data_hora_varredura = obter_data_hora_formatada()
+    data_hora_varredura = obter_data_hora_brasilia()
     
     mensagem = f"""📢 <b>Monitor Parlamentar Informa:</b>
 
@@ -229,9 +229,9 @@ Houve nova movimentação!
 
 
 def formatar_mensagem_sem_novidades_completa():
-    """Formata mensagem completa quando não há novidades (primeira do ciclo)"""
+    """Formata mensagem completa quando não há novidades"""
     
-    data_hora = obter_data_hora_formatada()
+    data_hora = obter_data_hora_brasilia()
     
     mensagem = f"""🔍 <b>Monitor Parlamentar Informa:</b>
 
@@ -245,9 +245,9 @@ Mas continue atento! 👀
 
 
 def formatar_mensagem_sem_novidades_curta():
-    """Formata mensagem curta quando não há novidades (subsequentes)"""
+    """Formata mensagem curta quando não há novidades"""
     
-    data_hora = obter_data_hora_formatada()
+    data_hora = obter_data_hora_brasilia()
     
     mensagem = f"""🔍 Ainda sem novidades em matérias da Dep. Júlia Zanatta.
 
@@ -289,10 +289,12 @@ def enviar_telegram(mensagem):
 def main():
     """Verifica novas tramitações e notifica via Telegram"""
     
+    data_hora_brasilia = obter_data_hora_brasilia()
+    
     print("=" * 60)
     print("🔔 MONITOR DE TRAMITAÇÕES - DEPUTADA JÚLIA ZANATTA")
     print("=" * 60)
-    print(f"📅 Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    print(f"📅 Data/Hora (Brasília): {data_hora_brasilia}")
     print()
     
     # Verificar variáveis de ambiente
@@ -360,7 +362,6 @@ def main():
     
     # 4. Enviar notificações
     if props_com_novidade:
-        # TEM NOVIDADES - envia e reseta estado
         print(f"\n📤 Enviando {len(props_com_novidade)} notificação(ões)...\n")
         
         enviadas = 0
@@ -370,23 +371,20 @@ def main():
                 enviadas += 1
             time.sleep(1)
         
-        salvar_estado(True)  # Reseta - próxima sem novidade será completa
+        salvar_estado(True)
         print(f"\n✅ Processo concluído! {enviadas} mensagens enviadas.")
     
     else:
-        # SEM NOVIDADES - verifica se envia completa ou curta
         print("\n📤 Enviando mensagem de status...")
         
         if ultima_teve_novidade:
-            # Primeira sem novidade após uma com novidade (ou primeira do dia)
             print("   → Mensagem COMPLETA (primeira do ciclo)")
             enviar_telegram(formatar_mensagem_sem_novidades_completa())
         else:
-            # Já enviou completa antes, agora envia curta
             print("   → Mensagem CURTA (continuação)")
             enviar_telegram(formatar_mensagem_sem_novidades_curta())
         
-        salvar_estado(False)  # Marca que não teve novidade
+        salvar_estado(False)
         print("\n✅ Processo concluído!")
 
 
