@@ -6829,6 +6829,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         with st.spinner("Carregando proposições de autoria..."):
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
+        # Variáveis para o chat (definidas antes do if/else para estarem disponíveis depois)
+        df_chat_atual_tab5 = pd.DataFrame()
+        filtro_busca_atual = ""
+        
         if df_aut.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
         else:
@@ -6929,10 +6933,13 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if _debug_situacao_ok == 0 or _debug_orgao_ok == 0:
                 st.warning(f"⚠️ DEBUG: Dados incompletos! Situação: {_debug_situacao_ok}/{len(df_tbl)}, Órgão: {_debug_orgao_ok}/{len(df_tbl)}")
             
-            # IMPORTANTE: Salvar o DataFrame que VAI SER EXIBIDO para o Chat IA
-            # Isso garante que o chat recebe exatamente os mesmos dados da tabela
+            # IMPORTANTE: Variável local para passar DIRETAMENTE ao chat (não via session_state)
+            df_chat_atual_tab5 = df_tbl.copy()
+            filtro_busca_atual = q
+            
+            # Também salvar no session_state para backup
             st.session_state["df_chat_tab5"] = df_tbl.copy()
-            st.session_state["filtro_busca_tab5"] = q  # Salvar também o filtro usado
+            st.session_state["filtro_busca_tab5"] = q
             
             # Também salvar o DataFrame COMPLETO COM STATUS para quando não houver filtro
             # IMPORTANTE: Precisamos enriquecer TODAS as proposições com Situação e Órgão
@@ -7022,10 +7029,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        # Para o Chat IA, usar o DataFrame que está exibido na tabela
-        # Esse DataFrame já tem Situação atual e Órgão (sigla) corretos
-        filtro_busca = st.session_state.get("filtro_busca_tab5", "")
-        df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        # IMPORTANTE: Usar a variável local df_chat_atual_tab5 que foi definida acima
+        # Isso garante que o chat receba os dados FILTRADOS corretamente
+        
+        df_para_chat = df_chat_atual_tab5 if not df_chat_atual_tab5.empty else st.session_state.get("df_chat_tab5", pd.DataFrame())
+        filtro_busca = filtro_busca_atual if filtro_busca_atual else st.session_state.get("filtro_busca_tab5", "")
         
         # DEBUG: Mostrar EXATAMENTE os dados que vão para a IA
         if not df_para_chat.empty:
