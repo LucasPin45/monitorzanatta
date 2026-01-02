@@ -7065,13 +7065,58 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        # IMPORTANTE: Usar a variável local df_chat_atual_tab5 que foi definida acima
-        # Isso garante que o chat receba os dados FILTRADOS corretamente
+        # IMPORTANTE: Ler o filtro DIRETAMENTE do widget de busca (key="busca_tab5")
+        # Isso garante que o filtro esteja sempre sincronizado
         
-        df_para_chat = df_chat_atual_tab5 if not df_chat_atual_tab5.empty else st.session_state.get("df_chat_tab5", pd.DataFrame())
-        filtro_busca = filtro_busca_atual if filtro_busca_atual else st.session_state.get("filtro_busca_tab5", "")
+        filtro_busca = st.session_state.get("busca_tab5", "")
         
-        # DEBUG: Mostrar EXATAMENTE os dados que vão para a IA
+        # DEBUG: Mostrar filtro sendo usado
+        st.caption(f"🔎 Filtro atual: **'{filtro_busca}'**" if filtro_busca else "🔎 Sem filtro ativo")
+        
+        # Usar o DataFrame COMPLETO enriquecido (com Situação e Órgão)
+        df_para_chat = st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())
+        
+        if df_para_chat.empty:
+            df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        
+        if df_para_chat.empty and 'df_chat_atual_tab5' in dir() and not df_chat_atual_tab5.empty:
+            df_para_chat = df_chat_atual_tab5
+        
+        # DEBUG: Mostrar fonte dos dados
+        fonte = "df_todas_enriquecido_tab5" if not st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame()).empty else "df_chat_tab5"
+        st.caption(f"📁 Fonte: **{fonte}** ({len(df_para_chat)} registros)")
+        
+        # APLICAR FILTRO AQUI (antes do debug e antes do render_chat_ia)
+        if filtro_busca and not df_para_chat.empty:
+            busca = filtro_busca.strip().lower()
+            if busca:
+                # Aplicar filtro
+                def normalizar_busca(txt):
+                    if pd.isna(txt):
+                        return ""
+                    import unicodedata
+                    txt = str(txt).lower()
+                    txt = unicodedata.normalize('NFD', txt)
+                    txt = ''.join(c for c in txt if unicodedata.category(c) != 'Mn')
+                    return txt
+                
+                # Determinar colunas
+                col_prop = "Proposição" if "Proposição" in df_para_chat.columns else "Proposicao"
+                col_ementa = "Ementa" if "Ementa" in df_para_chat.columns else "ementa"
+                
+                df_para_chat = df_para_chat.copy()
+                df_para_chat["_busca_tmp"] = (
+                    df_para_chat[col_prop].fillna("").astype(str) + " " + 
+                    df_para_chat[col_ementa].fillna("").astype(str)
+                ).apply(normalizar_busca)
+                
+                busca_norm = normalizar_busca(busca)
+                df_para_chat = df_para_chat[df_para_chat["_busca_tmp"].str.contains(busca_norm, na=False)]
+                df_para_chat = df_para_chat.drop(columns=["_busca_tmp"], errors="ignore")
+                
+                st.caption(f"🔍 Chat filtrado por '{filtro_busca}': **{len(df_para_chat)}** proposições")
+        
+        # DEBUG info
         if not df_para_chat.empty:
             colunas = list(df_para_chat.columns)
             tem_situacao = "Situação atual" in colunas
