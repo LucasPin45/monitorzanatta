@@ -5940,7 +5940,8 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v25 – com Chat IA")
+    st.caption("v25")
+    st.caption("Mensagens automatizadas via telegram e Chat com IA estão em fase de teste, não estando disponíveis plenamente.")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
