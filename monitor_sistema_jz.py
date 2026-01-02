@@ -66,41 +66,94 @@ def is_chat_enabled() -> bool:
 # --- System Prompts ---
 CHAT_SYSTEM_PROMPT_BASE = """Você é um assistente legislativo especializado do Gabinete da Deputada Júlia Zanatta (PL-SC).
 
-PERFIL POLÍTICO DA DEPUTADA (use para contextualizar análises):
-- Deputada Federal pelo PL de Santa Catarina, alinhada ao conservadorismo e à direita
-- CONTRA: CONANDA, agendas progressistas, regulamentação estatal excessiva, globalismo
-- A FAVOR: Família tradicional, liberdade econômica, agronegócio, direito às armas, pró-vida
-- Quando a deputada apresenta PDL para SUSTAR algo, ela é CONTRA aquilo que está sustando
-- Quando apresenta PL alterando lei, analise SE ela está fortalecendo ou enfraquecendo o órgão/política
-- Use linguagem que reflita as posições da deputada (ex: "combate ao CONANDA", não "impacto no CONANDA")
+=== PERFIL POLÍTICO — DEPUTADA JÚLIA ZANATTA (PL-SC) ===
 
-REGRAS FUNDAMENTAIS (NUNCA VIOLAR):
-1. NUNCA invente números de proposições (PL, RIC, etc.), datas, prazos, órgãos ou status.
-2. Se uma informação não constar nos dados fornecidos, diga: "Não consta na base do Monitor."
-3. SEMPRE cite as fontes: IDs das proposições, colunas consultadas, datas dos dados.
-4. Responda APENAS com base nos dados do contexto fornecido.
-5. Use linguagem formal, técnica e institucional adequada ao ambiente parlamentar.
-6. Contextualize as proposições considerando a POSIÇÃO POLÍTICA da deputada.
+**Identificação:**
+- Nome: Júlia Zanatta
+- Partido: Partido Liberal (PL)
+- Estado: Santa Catarina (SC)
+- Campo ideológico: Direita / Conservadora / Liberal na economia
+- Posição política: Oposição ao governo federal (Lula/PT)
 
-REGRA DE LINKS (MUITO IMPORTANTE):
+**Contexto Geral:**
+Deputada federal alinhada ao campo conservador, defensora de liberdades individuais, Estado mínimo, responsabilidade fiscal e redução da carga tributária. Atua de forma crítica ao crescimento do Estado, à expansão regulatória e à criação de novos impostos, taxas ou contribuições. Tem forte atuação em pautas culturais, econômicas e de fiscalização do Poder Executivo.
+
+**Princípios e Valores Norteadores:**
+- Defesa do Estado mínimo e eficiente
+- Contra aumento de impostos, criação de tributos ou ampliação da arrecadação
+- Contra expansão do gasto público e políticas fiscalmente irresponsáveis
+- Defesa da livre iniciativa, do empreendedor e do produtor
+- Defesa da liberdade de expressão
+- Defesa da família, dos valores conservadores e da ordem constitucional
+- Fiscalização rigorosa do Executivo e dos Ministérios
+- Combate ao ativismo judicial e ao abuso do poder regulamentar
+- Respeito à legalidade estrita (princípio da reserva legal)
+
+**Principais Bandeiras Políticas:**
+
+ECONOMIA & TRIBUTAÇÃO:
+- Oposição firme a novos impostos, aumento de alíquotas, contribuições disfarçadas
+- Crítica à sanha arrecadatória do Estado
+- Defesa da redução da burocracia e do custo Brasil
+- Defesa do pequeno, médio e grande empreendedor
+- Defesa do agronegócio, da indústria e do comércio
+
+ESTADO & REGULAÇÃO:
+- Contra inchaço da máquina pública
+- Contra criação de programas estatais sem lastro fiscal
+- Contra regulamentações excessivas e intervenções estatais indevidas
+- Atenção especial a Portarias, Decretos, INs e atos infralegais que extrapolem a lei
+- Apoio a PDLs para sustar atos do Executivo que extrapolem poder regulamentar
+
+FISCALIZAÇÃO & CONTROLE:
+- Uso estratégico de RICs, convocação de ministros, audiências públicas, TCU
+- Foco em gasto público, programas com viés eleitoreiro, falta de transparência
+
+PAUTAS CULTURAIS E INSTITUCIONAIS:
+- Defesa da liberdade religiosa e de expressão
+- Crítica a políticas identitárias impostas pelo Estado
+- Oposição a pautas progressistas de engenharia social
+- Defesa da neutralidade ideológica do Estado
+
+**Postura Legislativa:**
+- Atuação combativa nas Comissões e no Plenário
+- Prioriza fiscalização, obstrução estratégica, votos em separado
+- Articulação com bancadas conservadoras
+- Atenção especial a relatores de esquerda (PT, PSOL, PCdoB, PSB, PV, Rede)
+
+=== REGRAS FUNDAMENTAIS (NUNCA VIOLAR) ===
+
+1. USE OS DADOS FORNECIDOS: Os dados da tabela/contexto são a fonte primária. Se uma informação está nos dados, USE-A.
+2. NUNCA diga "não consta na base" se o dado está presente nos campos fornecidos (ID, Situação atual, Órgão, Ementa, etc.)
+3. Se um campo está vazio ou faltando nos dados, aí sim indique que não consta.
+4. SEMPRE inclua links clicáveis: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
+5. Responda com viés CRÍTICO ao governo federal, alinhado à posição de OPOSIÇÃO da deputada.
+
+=== TOM DAS ANÁLISES ===
+- Técnico-jurídico
+- Estratégico
+- Crítico ao governo
+- Enquadrado na lógica de oposição
+- Claro, direto e orientado à tomada de decisão política
+
+=== REGRA DE LINKS ===
 - SEMPRE inclua links clicáveis para cada proposição mencionada
-- Formato do link: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
-- Exemplo: [PDL 25/2025](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=2482261)
-- Use o ID numérico da proposição (coluna "id" ou "ID" dos dados) para montar o link
-- Nunca cite uma proposição sem o link correspondente
+- Formato: [SIGLA NÚMERO/ANO](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID)
+- Use o ID numérico da coluna "ID" ou "id" dos dados para montar o link
 
-FORMATO DE RESPOSTA DETALHADA:
-Quando listar proposições, use este formato para CADA UMA:
+=== FORMATO DE RESPOSTA ===
+Para cada proposição identificada, use:
 
 ### [SIGLA NÚMERO/ANO](link) - Título curto
-- **O que faz**: Explicação clara do objetivo da proposição (1-2 frases)
+- **O que faz**: Explicação clara (use a EMENTA dos dados)
 - **Por que importa**: Relevância política para a deputada
-- **Situação**: Status atual de tramitação
-- **Órgão**: Onde está tramitando
+- **Situação**: Use o campo "Situação atual" dos dados
+- **Órgão**: Use o campo "Órgão (sigla)" dos dados
 
-Após listar todas, inclua:
-- **Próximo passo**: Ação prática recomendada
-- **Riscos/Alertas**: Pontos de atenção
+Após listar todas:
+- **Análise estratégica**: Visão geral alinhada ao perfil da deputada
+- **Próximo passo**: Ação recomendada
+- **Alertas**: Pontos de atenção (relatores adversários, prazos, etc.)
 
 PERSONA ATUAL: {persona}
 
@@ -108,9 +161,9 @@ CONTEXTO DA ABA: {contexto_aba}
 """
 
 CHAT_PERSONAS = {
-    "Deputada": "Responda como se estivesse assessorando diretamente a Deputada Júlia Zanatta. Seja direto, estratégico e focado em decisões políticas. Use linguagem alinhada às posições conservadoras da deputada.",
-    "Chefe de Gabinete": "Responda como se estivesse orientando a equipe do gabinete. Foque em gestão, prazos, distribuição de tarefas e coordenação. Mantenha alinhamento com as prioridades políticas.",
-    "Assessoria Legislativa": "Responda com foco técnico-legislativo. Detalhe procedimentos regimentais, prazos legais e aspectos jurídicos. Contextualize dentro da estratégia política da deputada."
+    "Deputada": "Responda como se estivesse assessorando diretamente a Deputada Júlia Zanatta. Seja direto, estratégico e focado em decisões políticas. Tom combativo e de oposição.",
+    "Chefe de Gabinete": "Responda como se estivesse orientando a equipe do gabinete. Foque em gestão, prazos, distribuição de tarefas e coordenação. Mantenha alinhamento com as prioridades políticas da deputada.",
+    "Assessoria Legislativa": "Responda com foco técnico-legislativo. Detalhe procedimentos regimentais, prazos legais e aspectos jurídicos. Sempre com viés crítico ao governo quando aplicável."
 }
 
 CHAT_CONTEXTOS_ABA = {
@@ -244,36 +297,61 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
     if dados_item_selecionado:
         tabela_compacta = dados_item_selecionado
     elif df_filtrado is not None and not df_filtrado.empty:
-        # Pegar TODAS as linhas (até max_rows) para dar contexto completo
+        # Pegar linhas para dar contexto
         df_amostra = df_filtrado.head(max_rows)
         
-        # Selecionar colunas mais relevantes - ID SEMPRE PRIMEIRO
-        colunas_prioridade = [
-            "ID", "id", "Proposição", "Proposicao", "siglaTipo", "numero", "ano", 
-            "Ementa", "ementa", "Situação atual", "Órgão (sigla)", "Data do status", 
-            "Parado (dias)", "Relator(a)", "Tema", "Último andamento",
-            "RIC_Ministerio", "RIC_StatusResposta", "RIC_DiasRestantes", "RIC_PrazoStr"
-        ]
-        colunas_disponiveis = [c for c in colunas_prioridade if c in df_amostra.columns]
-        if not colunas_disponiveis:
-            colunas_disponiveis = list(df_amostra.columns)[:10]
+        # Formatar cada linha de forma estruturada para a IA entender melhor
+        linhas_formatadas = []
+        linhas_formatadas.append("=== DADOS DAS PROPOSIÇÕES ===\n")
         
-        df_resumo = df_amostra[colunas_disponiveis].copy()
+        for idx, row in df_amostra.iterrows():
+            # Extrair campos de forma flexível
+            prop_id = row.get("ID") or row.get("id") or ""
+            proposicao = row.get("Proposição") or row.get("Proposicao") or ""
+            ementa = row.get("Ementa") or row.get("ementa") or ""
+            situacao = row.get("Situação atual") or ""
+            orgao = row.get("Órgão (sigla)") or row.get("Órgão") or ""
+            ano = row.get("Ano") or row.get("ano") or ""
+            tipo = row.get("Tipo") or row.get("siglaTipo") or ""
+            data_status = row.get("Data do status") or ""
+            ultimo_and = row.get("Último andamento") or ""
+            relator = row.get("Relator(a)") or ""
+            
+            # Construir sigla se não tiver proposição formatada
+            if not proposicao and tipo and row.get("numero"):
+                proposicao = f"{tipo} {row.get('numero')}/{ano}"
+            
+            linha = f"""
+📋 **{proposicao}** (ID: {prop_id})
+   - Ementa: {str(ementa)[:300]}
+   - Situação atual: {situacao}
+   - Órgão: {orgao}
+   - Data status: {data_status}
+   - Último andamento: {str(ultimo_and)[:150]}"""
+            
+            if relator:
+                linha += f"\n   - Relator(a): {relator}"
+            
+            # Campos de RIC se existirem
+            if row.get("RIC_Ministerio"):
+                linha += f"\n   - Ministério: {row.get('RIC_Ministerio')}"
+            if row.get("RIC_StatusResposta"):
+                linha += f"\n   - Status RIC: {row.get('RIC_StatusResposta')}"
+            if row.get("RIC_DiasRestantes"):
+                linha += f"\n   - Dias restantes: {row.get('RIC_DiasRestantes')}"
+            
+            linhas_formatadas.append(linha)
+            
+            # Limitar quantidade para não estourar contexto
+            if len(linhas_formatadas) > 30:
+                linhas_formatadas.append(f"\n... e mais {len(df_amostra) - 30} proposições")
+                break
         
-        # Truncar textos longos mas manter ementa mais completa (250 chars)
-        for col in df_resumo.columns:
-            if df_resumo[col].dtype == 'object':
-                if col.lower() in ['ementa', 'Ementa']:
-                    df_resumo[col] = df_resumo[col].astype(str).str[:250]  # Ementa mais completa
-                else:
-                    df_resumo[col] = df_resumo[col].astype(str).str[:150]
+        tabela_compacta = "\n".join(linhas_formatadas)
         
-        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=100)  # Aumentado para 100
-        
-        # Se a base for grande, adicionar estatísticas
+        # Se a base for grande, adicionar nota
         if len(df_filtrado) > max_rows:
-            tabela_compacta += f"\n\n[... e mais {len(df_filtrado) - max_rows} registros não exibidos ...]"
-            tabela_compacta += f"\n\nNOTA: Para buscar em toda a base, use termos específicos na pergunta."
+            tabela_compacta += f"\n\n[Total na base: {len(df_filtrado)} registros]"
     else:
         tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro clicando no botão de carregar."
     
@@ -282,14 +360,14 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
 def chat_format_context(contexto: dict) -> str:
     """Formata o contexto para incluir no prompt."""
     return f"""
-=== CONTEXTO DOS DADOS ===
+=== DADOS DO MONITOR LEGISLATIVO ===
 {contexto.get("contexto_textual", "")}
 
-AMOSTRA DOS DADOS:
 {contexto.get("tabela_compacta", "Nenhum dado disponível")}
 
-Colunas disponíveis: {', '.join(contexto.get('metadados', {}).get('colunas', [])[:15])}
-========================
+INSTRUÇÕES: Use os dados acima para responder. Cada proposição tem ID, Ementa, Situação e Órgão.
+Monte os links usando: https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=ID
+================================
 """
 
 # --- Análise específica de RICs ---
@@ -6759,8 +6837,15 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             st.session_state["df_chat_tab5"] = df_tbl.copy()
             st.session_state["filtro_busca_tab5"] = q  # Salvar também o filtro usado
             
-            # Também salvar TODAS as proposições (sem filtro) para o chat poder buscar
-            st.session_state["df_todas_proposicoes_tab5"] = df_aut.copy()
+            # Também salvar o DataFrame COMPLETO COM STATUS para quando não houver filtro
+            # Precisamos enriquecer todas as proposições com status
+            if "df_todas_enriquecido_tab5" not in st.session_state or len(st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())) != len(df_aut):
+                # Enriquecer todas as proposições (uma vez só, com cache)
+                df_aut_completo = df_aut.copy()
+                df_aut_completo = df_aut_completo.rename(
+                    columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+                )
+                st.session_state["df_todas_enriquecido_tab5"] = df_aut_completo
             
             sel = st.dataframe(
                 df_tbl[show_cols_r],
@@ -6824,14 +6909,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        # Se há filtro de busca, usar o resultado filtrado
-        # Se não há filtro, usar TODAS as proposições para o chat poder responder sobre qualquer uma
+        # SEMPRE usar o DataFrame com dados enriquecidos (que tem Situação atual, Órgão, etc)
+        # Se há filtro de busca, usar o resultado filtrado (que já está enriquecido)
+        # Se não há filtro, usar o DataFrame filtrado atual (que também está enriquecido)
         filtro_busca = st.session_state.get("filtro_busca_tab5", "")
-        if filtro_busca:
-            df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
-        else:
-            # Usar todas as proposições para o chat poder responder perguntas genéricas
-            df_para_chat = st.session_state.get("df_todas_proposicoes_tab5", st.session_state.get("df_chat_tab5", pd.DataFrame()))
+        df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
         
         # Garantir que selected_id existe
         sel_id_tab5 = selected_id if 'selected_id' in dir() and selected_id else None
