@@ -1,7 +1,6 @@
 # monitor_sistema_jz.py - v25
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 26: Versão estável SEM Chat IA
 # - Chat com IA nas abas 2-7 com contexto da aba
 # - Saídas prontas (briefings, análises, checklists)
 # - Modo especial para RICs com análise de prazos
@@ -15,7 +14,6 @@
 # - Campo "Parado há (dias)" calculado
 # - Relator com alerta de adversário (PT, PSOL, PCdoB, PSB, PV, Rede)
 # - RIC: extração de prazo de resposta, ministério, status respondido
-# - Chat IA com busca de inteiro teor das proposições
 # ============================================================
 
 import datetime
@@ -45,17 +43,6 @@ except ImportError:
         PDF_AVAILABLE = True
     except ImportError:
         PDF_AVAILABLE = False
-
-# ============================================================
-# MÓDULO CHAT IA — REMOVIDO (stub seguro)
-# ============================================================
-# Mantém assinatura para não quebrar chamadas antigas (caso reste alguma).
-
-    return
-
-def is_chat_enabled():
-    return False
-
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
@@ -1308,7 +1295,6 @@ def sanitize_text_pdf(text: str) -> str:
     return result
 
 
-
 # ============================================================
 # FUNÇÕES AUXILIARES PARA PDF - VERSÃO 21
 # ============================================================
@@ -1916,7 +1902,6 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         # Propagar o erro para debug - NÃO fazer fallback para CSV
         import traceback
         raise Exception(f"Erro ao gerar PDF: {str(e)} | Traceback: {traceback.format_exc()}")
-
 
 
 def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
@@ -5129,7 +5114,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v25 – com Chat IA")
+    st.caption("v26 – versão estável (sem IA)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -5704,12 +5689,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         if prop_selecionada:
                             selected_id_tab2 = opcoes_props[prop_selecionada]
                             exibir_detalhes_proposicao(selected_id_tab2, key_prefix="tab2")
-        
-        # Chat IA da aba 2
-        st.markdown("---")
-        df_chat_tab2 = st.session_state.get("df_scan_tab2", pd.DataFrame())
-
-    # ============================================================
+# ============================================================
     # ABA 3 - PALAVRAS-CHAVE
     # ============================================================
     with tab3:
@@ -5864,12 +5844,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             mime=pdf_mime,
                             key="download_kw_pdf"
                         )
-        
-        # Chat IA da aba 3
-        st.markdown("---")
-        df_chat_tab3 = st.session_state.get("df_scan_tab3", pd.DataFrame())
-
-    # ============================================================
+# ============================================================
     # ABA 4 - COMISSÕES ESTRATÉGICAS
     # ============================================================
     with tab4:
@@ -5964,12 +5939,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         mime=pdf_mime,
                         key="download_com_pdf"
                     )
-        
-        # Chat IA da aba 4
-        st.markdown("---")
-        df_chat_tab4 = st.session_state.get("df_scan_tab4", pd.DataFrame())
-
-    # ============================================================
+# ============================================================
     # ABA 5 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
     # ============================================================
     with tab5:
@@ -6035,7 +6005,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             )
 
             # Se há busca textual, buscar em TODAS as proposições (ignora filtro de ano)
-            # Isso garante que o Chat IA também tenha acesso a todas
+            # Isso garante acesso à base completa
             if q.strip():
                 qn = normalize_text(q)
                 df_busca_completa = df_aut.copy()  # Usar df_aut completo, não df_base filtrado
@@ -6120,7 +6090,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             )
             
             if precisa_recriar:
-                with st.spinner("Preparando base completa para Chat IA (primeira vez)..."):
+                with st.spinner("Preparando base completa (primeira vez)..."):
                     # Enriquecer TODAS as proposições com status
                     df_aut_completo = df_aut.copy()
                     ids_todas = df_aut_completo["id"].astype(str).tolist()
@@ -6195,8 +6165,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.info("Clique em uma proposição acima para ver detalhes completos.")
             else:
                 exibir_detalhes_proposicao(selected_id, key_prefix="tab5")
-        
-        # Chat IA da aba 5
         st.markdown("---")
         # IMPORTANTE: Ler o filtro DIRETAMENTE do widget de busca (key="busca_tab5")
         # Isso garante que o filtro esteja sempre sincronizado
@@ -6219,7 +6187,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         fonte = "df_todas_enriquecido_tab5" if not st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame()).empty else "df_chat_tab5"
         st.caption(f"📁 Fonte: **{fonte}** ({len(df_para_chat)} registros)")
         
-        # APLICAR FILTRO AQUI (antes do debug e antes do render_chat_ia)
         if filtro_busca and not df_para_chat.empty:
             busca = filtro_busca.strip().lower()
             if busca:
@@ -6473,8 +6440,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 # Garantir coluna de dias parado para cálculos
                 if "Parado (dias)" in df_fil.columns and "Parado há (dias)" not in df_fil.columns:
                     df_fil["Parado há (dias)"] = df_fil["Parado (dias)"]
-                
-                # Salvar para o Chat IA
                 st.session_state["df_chat_tab6"] = df_fil.copy()
 
                 st.markdown("---")
@@ -6633,12 +6598,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         )
                     except Exception as e:
                         st.error(f"Erro ao gerar PDF: {e}")
-        
-        # Chat IA da aba 6
-        st.markdown("---")
-        df_chat_tab6 = st.session_state.get("df_chat_tab6", pd.DataFrame())
-
-    # ============================================================
+# ============================================================
     # ABA 7 - RICs (REQUERIMENTOS DE INFORMAÇÃO)
     # ============================================================
     with tab7:
@@ -7026,13 +6986,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         else:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
-        
-        # Chat IA da aba 7 (RICs) - com modo especializado
-        st.markdown("---")
-        st.markdown("### 💬 Chat IA - Análise de RICs")
-        df_chat_tab7 = st.session_state.get("df_rics_completo", pd.DataFrame())
-        
-        # Renomear colunas para consistência com o chat
+# Renomear colunas para consistência com o chat
         if not df_chat_tab7.empty:
             df_chat_tab7 = df_chat_tab7.rename(columns={
                 "Proposicao": "Proposição",
