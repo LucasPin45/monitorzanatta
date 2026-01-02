@@ -692,7 +692,9 @@ MINISTERIOS_CANONICOS = {
         "justiça", "justica", "segurança pública", "seguranca publica",
         "polícia federal", "policia federal", "pf", "lewandowski",
         "ministério da justiça", "ministerio da justica", "mjsp",
-        "de justiça e segurança pública", "justiça e segurança"
+        "de justiça e segurança pública", "justiça e segurança",
+        "diretor-geral da pf", "diretor geral da pf", "diretor da pf",
+        "javali", "javalis", "caça de javalis", "controle de fauna"
     ],
     
     # Ministério do Meio Ambiente e Mudança do Clima
@@ -789,9 +791,32 @@ MINISTERIOS_CANONICOS = {
         "ministério do empreendedorismo", "empresa de pequeno porte"
     ],
     
-    # Casa Civil
+    # Casa Civil da Presidência da República
     "Casa Civil": [
-        "casa civil", "rui costa", "planalto"
+        "casa civil", "rui costa", "planalto", "ministro-chefe da casa civil",
+        "ministro chefe da casa civil", "agenda presidencial", "agendas da presidência",
+        "agendas presidenciais", "secretaria extraordinária", "secretaria extraordinaria",
+        "reconstrução do rs", "reconstrucao do rs", "rio grande do sul",
+        "primeira-dama", "primeira dama", "rosângela da silva", "rosangela da silva", 
+        "janja", "cop-30", "cop30", "cop 30", "contrato internacional", 
+        "coordenação interministerial", "oei", "olimpíadas", "olimpiadas"
+    ],
+    
+    # Secretaria de Comunicação Social (SECOM)
+    "Secretaria de Comunicação Social (SECOM)": [
+        "secom", "secretaria de comunicação social", "secretaria de comunicacao social",
+        "comunicação social", "comunicacao social", "publicidade", "verbas publicitárias",
+        "verbas publicitarias", "influenciadores digitais", "influenciador digital",
+        "veículos de comunicação", "veiculos de comunicacao", "repasses a veículos",
+        "publicidade do governo", "publicidade institucional", "publicidade federal",
+        "despesas com publicidade", "banco do brasil publicidade", "caixa publicidade"
+    ],
+    
+    # Secretaria de Relações Institucionais (SRI)
+    "Secretaria de Relações Institucionais (SRI)": [
+        "sri", "secretaria de relações institucionais", "secretaria de relacoes institucionais",
+        "relações institucionais", "relacoes institucionais", "gleisi hoffmann",
+        "gleisi", "emendas parlamentares", "articulação política", "articulacao politica"
     ],
     
     # Secretaria-Geral da Presidência
