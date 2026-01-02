@@ -131,7 +131,7 @@ DADOS: {dados}
 Analise e recomende:"""
 
 # --- Funções de Contexto ---
-def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 50) -> dict:
+def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 200) -> dict:
     """Extrai contexto estruturado de uma aba para enviar à IA."""
     filtros = filtros or {}
     selecionado = selecionado or {}
@@ -212,9 +212,14 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
         # Truncar textos longos mas manter informação suficiente
         for col in df_resumo.columns:
             if df_resumo[col].dtype == 'object':
-                df_resumo[col] = df_resumo[col].astype(str).str[:120]
+                df_resumo[col] = df_resumo[col].astype(str).str[:150]  # Aumentado de 120 para 150
         
-        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=60)
+        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=80)  # Aumentado de 60 para 80
+        
+        # Se a base for grande, adicionar estatísticas
+        if len(df_filtrado) > max_rows:
+            tabela_compacta += f"\n\n[... e mais {len(df_filtrado) - max_rows} registros não exibidos ...]"
+            tabela_compacta += f"\n\nNOTA: Para buscar em toda a base, use termos específicos na pergunta."
     else:
         tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro clicando no botão de carregar."
     
@@ -6463,16 +6468,21 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             q = st.text_input(
                 "Filtrar proposições",
                 value="",
-                placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda'",
-                help="Busque por sigla/número/ano ou palavras na ementa",
+                placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda' | 'oab'",
+                help="Busque por sigla/número/ano ou palavras na ementa. A busca textual procura em TODAS as proposições, ignorando filtros de ano.",
                 key="busca_tab5"
             )
 
-            df_rast = df_base.copy()
+            # Se há busca textual, buscar em TODAS as proposições (ignora filtro de ano)
+            # Isso garante que o Chat IA também tenha acesso a todas
             if q.strip():
                 qn = normalize_text(q)
-                df_rast["_search"] = (df_rast["Proposicao"].fillna("").astype(str) + " " + df_rast["ementa"].fillna("").astype(str)).apply(normalize_text)
-                df_rast = df_rast[df_rast["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
+                df_busca_completa = df_aut.copy()  # Usar df_aut completo, não df_base filtrado
+                df_busca_completa["_search"] = (df_busca_completa["Proposicao"].fillna("").astype(str) + " " + df_busca_completa["ementa"].fillna("").astype(str)).apply(normalize_text)
+                df_rast = df_busca_completa[df_busca_completa["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
+                st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições")
+            else:
+                df_rast = df_base.copy()
 
             df_rast_lim = df_rast.head(400).copy()
             
@@ -6518,6 +6528,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             # Isso garante que o chat recebe exatamente os mesmos dados da tabela
             st.session_state["df_chat_tab5"] = df_tbl.copy()
             st.session_state["filtro_busca_tab5"] = q  # Salvar também o filtro usado
+            
+            # Também salvar TODAS as proposições (sem filtro) para o chat poder buscar
+            st.session_state["df_todas_proposicoes_tab5"] = df_aut.copy()
             
             sel = st.dataframe(
                 df_tbl[show_cols_r],
@@ -6581,11 +6594,18 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        df_chat_tab5 = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        # Se há filtro de busca, usar o resultado filtrado
+        # Se não há filtro, usar TODAS as proposições para o chat poder responder sobre qualquer uma
         filtro_busca = st.session_state.get("filtro_busca_tab5", "")
+        if filtro_busca:
+            df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        else:
+            # Usar todas as proposições para o chat poder responder perguntas genéricas
+            df_para_chat = st.session_state.get("df_todas_proposicoes_tab5", st.session_state.get("df_chat_tab5", pd.DataFrame()))
+        
         # Garantir que selected_id existe
         sel_id_tab5 = selected_id if 'selected_id' in dir() and selected_id else None
-        render_chat_ia("tab5", df_chat_tab5, filtros={"busca": filtro_busca} if filtro_busca else None, selecionado={"id": sel_id_tab5} if sel_id_tab5 else None)
+        render_chat_ia("tab5", df_para_chat, filtros={"busca": filtro_busca} if filtro_busca else None, selecionado={"id": sel_id_tab5} if sel_id_tab5 else None)
 
     # ============================================================
     # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
