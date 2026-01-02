@@ -234,7 +234,7 @@ DADOS: {dados}
 Analise e recomende:"""
 
 # --- Funções de Contexto ---
-def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 200) -> dict:
+def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 500) -> dict:
     """Extrai contexto estruturado de uma aba para enviar à IA."""
     filtros = filtros or {}
     selecionado = selecionado or {}
@@ -297,61 +297,63 @@ DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
     if dados_item_selecionado:
         tabela_compacta = dados_item_selecionado
     elif df_filtrado is not None and not df_filtrado.empty:
-        # Pegar linhas para dar contexto
-        df_amostra = df_filtrado.head(max_rows)
+        # Função auxiliar para extrair valor de uma linha de forma segura
+        def get_val(row, *cols):
+            for col in cols:
+                if col in row.index:
+                    val = row[col]
+                    if pd.notna(val) and str(val).strip():
+                        return str(val).strip()
+            return ""
         
-        # Formatar cada linha de forma estruturada para a IA entender melhor
+        # Formatar TODAS as proposições de forma compacta
         linhas_formatadas = []
-        linhas_formatadas.append("=== DADOS DAS PROPOSIÇÕES ===\n")
+        linhas_formatadas.append("=== LISTA COMPLETA DE PROPOSIÇÕES ===\n")
+        linhas_formatadas.append(f"Total: {len(df_filtrado)} proposições\n")
         
-        for idx, row in df_amostra.iterrows():
+        for idx, row in df_filtrado.iterrows():
             # Extrair campos de forma flexível
-            prop_id = row.get("ID") or row.get("id") or ""
-            proposicao = row.get("Proposição") or row.get("Proposicao") or ""
-            ementa = row.get("Ementa") or row.get("ementa") or ""
-            situacao = row.get("Situação atual") or ""
-            orgao = row.get("Órgão (sigla)") or row.get("Órgão") or ""
-            ano = row.get("Ano") or row.get("ano") or ""
-            tipo = row.get("Tipo") or row.get("siglaTipo") or ""
-            data_status = row.get("Data do status") or ""
-            ultimo_and = row.get("Último andamento") or ""
-            relator = row.get("Relator(a)") or ""
+            prop_id = get_val(row, "ID", "id")
+            proposicao = get_val(row, "Proposição", "Proposicao")
+            ementa = get_val(row, "Ementa", "ementa")
+            situacao = get_val(row, "Situação atual", "Situacao atual")
+            orgao = get_val(row, "Órgão (sigla)", "Orgao (sigla)", "Órgão")
+            ano = get_val(row, "Ano", "ano")
+            tipo = get_val(row, "Tipo", "siglaTipo")
+            numero = get_val(row, "numero", "Número")
             
             # Construir sigla se não tiver proposição formatada
-            if not proposicao and tipo and row.get("numero"):
-                proposicao = f"{tipo} {row.get('numero')}/{ano}"
+            if not proposicao and tipo and numero:
+                proposicao = f"{tipo} {numero}/{ano}"
             
-            linha = f"""
-📋 **{proposicao}** (ID: {prop_id})
-   - Ementa: {str(ementa)[:300]}
-   - Situação atual: {situacao}
-   - Órgão: {orgao}
-   - Data status: {data_status}
-   - Último andamento: {str(ultimo_and)[:150]}"""
-            
-            if relator:
-                linha += f"\n   - Relator(a): {relator}"
-            
-            # Campos de RIC se existirem
-            if row.get("RIC_Ministerio"):
-                linha += f"\n   - Ministério: {row.get('RIC_Ministerio')}"
-            if row.get("RIC_StatusResposta"):
-                linha += f"\n   - Status RIC: {row.get('RIC_StatusResposta')}"
-            if row.get("RIC_DiasRestantes"):
-                linha += f"\n   - Dias restantes: {row.get('RIC_DiasRestantes')}"
-            
+            # Formato compacto: uma linha por proposição
+            linha = f"• {proposicao} (ID:{prop_id}) | {situacao} | {orgao} | {ementa[:150]}"
             linhas_formatadas.append(linha)
-            
-            # Limitar quantidade para não estourar contexto
-            if len(linhas_formatadas) > 30:
-                linhas_formatadas.append(f"\n... e mais {len(df_amostra) - 30} proposições")
-                break
         
         tabela_compacta = "\n".join(linhas_formatadas)
         
-        # Se a base for grande, adicionar nota
-        if len(df_filtrado) > max_rows:
-            tabela_compacta += f"\n\n[Total na base: {len(df_filtrado)} registros]"
+        # Se for grande demais, truncar mas manter todas as proposições pelo menos com ID e sigla
+        if len(tabela_compacta) > 50000:
+            linhas_formatadas = []
+            linhas_formatadas.append("=== LISTA RESUMIDA DE PROPOSIÇÕES ===\n")
+            linhas_formatadas.append(f"Total: {len(df_filtrado)} proposições\n")
+            
+            for idx, row in df_filtrado.iterrows():
+                prop_id = get_val(row, "ID", "id")
+                proposicao = get_val(row, "Proposição", "Proposicao")
+                ementa = get_val(row, "Ementa", "ementa")
+                tipo = get_val(row, "Tipo", "siglaTipo")
+                numero = get_val(row, "numero", "Número")
+                ano = get_val(row, "Ano", "ano")
+                
+                if not proposicao and tipo and numero:
+                    proposicao = f"{tipo} {numero}/{ano}"
+                
+                # Formato super compacto
+                linha = f"• {proposicao} (ID:{prop_id}) | {ementa[:80]}"
+                linhas_formatadas.append(linha)
+            
+            tabela_compacta = "\n".join(linhas_formatadas)
     else:
         tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro clicando no botão de carregar."
     
@@ -799,13 +801,18 @@ def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None,
         
         # Info do contexto (para debug)
         with st.expander("📊 Contexto atual (debug)", expanded=False):
-            st.caption(f"**Registros no contexto:** {contexto.get('metadados', {}).get('total_registros', 0)}")
-            st.caption(f"**Colunas:** {len(contexto.get('metadados', {}).get('colunas', []))}")
+            total_regs = contexto.get('metadados', {}).get('total_registros', 0)
+            st.caption(f"**Registros no contexto:** {total_regs}")
+            st.caption(f"**Colunas disponíveis:** {contexto.get('metadados', {}).get('colunas', [])[:10]}")
             st.caption(f"**Busca inteiro teor:** {'✅ Ativada' if buscar_inteiro_teor else '❌ Desativada'}")
             st.caption(f"**Biblioteca PDF:** {'✅ Disponível' if PDF_AVAILABLE else '❌ Não instalada'}")
             if contexto.get('metadados', {}).get('filtros_ativos'):
                 st.caption(f"**Filtros:** {contexto.get('metadados', {}).get('filtros_ativos')}")
-            st.text_area("Dados enviados para IA:", value=contexto.get('tabela_compacta', '')[:2000], height=150, disabled=True, key=f"debug_contexto_{tab_id}")
+            
+            # Mostrar prévia maior do contexto
+            dados_preview = contexto.get('tabela_compacta', '')
+            st.caption(f"**Tamanho do contexto:** {len(dados_preview)} caracteres")
+            st.text_area("Dados enviados para IA (prévia):", value=dados_preview[:5000], height=200, disabled=True, key=f"debug_contexto_{tab_id}")
 
 
 # ============================================================
@@ -6909,11 +6916,18 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        # SEMPRE usar o DataFrame com dados enriquecidos (que tem Situação atual, Órgão, etc)
-        # Se há filtro de busca, usar o resultado filtrado (que já está enriquecido)
-        # Se não há filtro, usar o DataFrame filtrado atual (que também está enriquecido)
+        # Para o Chat IA, SEMPRE usar TODAS as proposições (não filtradas por ano)
+        # Isso permite que a IA encontre proposições de qualquer ano
+        # Se há filtro de busca na tabela, usar o resultado filtrado
+        # Se não há filtro, usar TODAS as proposições para o chat poder responder sobre qualquer uma
         filtro_busca = st.session_state.get("filtro_busca_tab5", "")
-        df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        
+        if filtro_busca:
+            # Se há busca, usar os resultados filtrados (que já buscou em todas)
+            df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        else:
+            # Se não há busca, usar TODAS as proposições (não apenas os anos filtrados)
+            df_para_chat = st.session_state.get("df_todas_enriquecido_tab5", st.session_state.get("df_chat_tab5", pd.DataFrame()))
         
         # Garantir que selected_id existe
         sel_id_tab5 = selected_id if 'selected_id' in dir() and selected_id else None
