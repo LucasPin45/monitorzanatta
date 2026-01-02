@@ -1,8 +1,12 @@
-# monitor_sistema_jz.py - v23
+# monitor_sistema_jz.py - v25
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# VERSÃO 23: Notificações Telegram + correções de layout
-# - Notificações via Telegram para novidades em tramitações
+# VERSÃO 25: Chat IA integrado em todas as abas
+# - Chat com IA nas abas 2-7 com contexto da aba
+# - Saídas prontas (briefings, análises, checklists)
+# - Modo especial para RICs com análise de prazos
+# - Controles anti-alucinação
+# - Convite para grupo Telegram na aba inicial
 # - Layout wide fixo (sem redimensionamento ao clicar)
 # - CSS estabilizado para evitar "pulos" na interface
 # - Links clicáveis no PDF
@@ -10,10 +14,6 @@
 # - Ordenação por data mais recente primeiro
 # - Campo "Parado há (dias)" calculado
 # - Relator com alerta de adversário (PT, PSOL, PCdoB, PSB, PV, Rede)
-# - Link clicável para página do relator
-# - Fallback para situação vazia
-# - Agrupamento por situação com cabeçalho
-# - Cabeçalho informativo com fonte e critério
 # - RIC: extração de prazo de resposta, ministério, status respondido
 # ============================================================
 
@@ -33,6 +33,423 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Backend não-interativo
+
+# ============================================================
+# MÓDULO CHAT IA (INLINE)
+# ============================================================
+# Código do chat_ia.py integrado diretamente para facilitar deploy
+
+# --- Configuração da API ---
+def get_api_key_chat() -> str:
+    """Obtém a chave da API do Anthropic via st.secrets."""
+    try:
+        return st.secrets.get("anthropic", {}).get("api_key", "")
+    except Exception:
+        return ""
+
+def is_chat_enabled() -> bool:
+    """Verifica se o chat está habilitado (API key configurada)."""
+    return bool(get_api_key_chat())
+
+# --- System Prompts ---
+CHAT_SYSTEM_PROMPT_BASE = """Você é um assistente legislativo especializado do Gabinete da Deputada Júlia Zanatta (PL-SC).
+
+REGRAS FUNDAMENTAIS (NUNCA VIOLAR):
+1. NUNCA invente números de proposições (PL, RIC, etc.), datas, prazos, órgãos ou status.
+2. Se uma informação não constar nos dados fornecidos, diga: "Não consta na base do Monitor."
+3. SEMPRE cite as fontes: IDs das proposições, colunas consultadas, datas dos dados.
+4. Responda APENAS com base nos dados do contexto fornecido.
+5. Use linguagem formal, técnica e institucional adequada ao ambiente parlamentar.
+
+FORMATO DE RESPOSTA PADRÃO:
+Suas respostas devem conter (quando aplicável):
+- **Resumo**: Síntese em 2-3 frases
+- **Situação atual**: O que está acontecendo agora
+- **Próximo passo**: Ação prática recomendada
+- **Riscos/Alertas**: Pontos de atenção
+- **Fontes**: IDs e dados consultados
+
+PERSONA ATUAL: {persona}
+
+CONTEXTO DA ABA: {contexto_aba}
+"""
+
+CHAT_PERSONAS = {
+    "Deputada": "Responda como se estivesse assessorando diretamente a Deputada Júlia Zanatta. Seja direto, estratégico e focado em decisões políticas.",
+    "Chefe de Gabinete": "Responda como se estivesse orientando a equipe do gabinete. Foque em gestão, prazos, distribuição de tarefas e coordenação.",
+    "Assessoria Legislativa": "Responda com foco técnico-legislativo. Detalhe procedimentos regimentais, prazos legais e aspectos jurídicos."
+}
+
+CHAT_CONTEXTOS_ABA = {
+    "tab2": "Autoria & Relatoria na Pauta - Proposições de autoria da deputada ou onde ela é relatora que estão na pauta de votações.",
+    "tab3": "Palavras-chave na Pauta - Proposições de interesse temático identificadas por palavras-chave configuradas.",
+    "tab4": "Comissões Estratégicas - Eventos e pautas das comissões prioritárias (CDC, CCOM, CE, CREDN, CCJC).",
+    "tab5": "Buscar Proposição - Busca livre por qualquer proposição da Câmara dos Deputados.",
+    "tab6": "Matérias por Situação - Visão geral das proposições de autoria organizadas por situação atual.",
+    "tab7": "RICs (Requerimentos de Informação) - Fiscalização do Executivo com controle de prazos de resposta."
+}
+
+# --- Templates de Saídas Prontas ---
+CHAT_TEMPLATE_BRIEFING = """Gere um BRIEFING DE 30 SEGUNDOS.
+REGRAS: Máximo 5 frases. Foco em: O que é, por que importa, o que fazer AGORA. Tom direto.
+DADOS: {dados}
+Gere o briefing:"""
+
+CHAT_TEMPLATE_ANALISE = """Gere uma ANÁLISE TÉCNICA detalhada.
+ESTRUTURA: 1. OBJETO 2. CONTEXTO 3. MÉRITO 4. TRAMITAÇÃO 5. POSICIONAMENTO SUGERIDO 6. FONTES
+DADOS: {dados}
+Gere a análise:"""
+
+CHAT_TEMPLATE_ESTRATEGIA = """Gere orientações de ESTRATÉGIA REGIMENTAL.
+FOCO: Ações práticas, instrumentos disponíveis, timing, articulação. NÃO cite artigos do RICD textualmente.
+DADOS: {dados}
+Gere a estratégia:"""
+
+CHAT_TEMPLATE_PERGUNTAS = """Gere 2 a 4 PERGUNTAS PARA DEBATE.
+CRITÉRIOS: Objetivas, provocativas, úteis para discurso, exponham contradições.
+DADOS: {dados}
+Gere as perguntas:"""
+
+CHAT_TEMPLATE_CHECKLIST = """Gere um CHECKLIST DE PROVIDÊNCIAS.
+FORMATO: Lista numerada com O QUE fazer, QUEM deve fazer, PRAZO sugerido. Ordenar por prioridade.
+DADOS: {dados}
+Gere o checklist:"""
+
+CHAT_TEMPLATE_RESUMO = """Gere um RESUMO DA SEMANA.
+ESTRUTURA: 1. DESTAQUES 2. MOVIMENTAÇÕES 3. PENDÊNCIAS 4. PRÓXIMA SEMANA 5. ALERTAS
+DADOS: {dados}
+Gere o resumo:"""
+
+CHAT_TEMPLATE_COBRANCA = """Gere texto de COBRANÇA/FOLLOW-UP sobre RICs pendentes.
+FORMATO: Tom formal mas firme. Identificar atrasados, órgão, prazo, sugerir ação.
+DADOS: {dados}
+Gere o texto:"""
+
+CHAT_TEMPLATE_ACAO_RIC = """Analise RICs e sugira AÇÕES RECOMENDADAS.
+OPÇÕES: Reiterar RIC, Novo RIC específico, Convocar ministro, Audiência pública, Acionar TCU, Elaborar PL, Arquivar.
+DADOS: {dados}
+Analise e recomende:"""
+
+# --- Funções de Contexto ---
+def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = None, selecionado: dict = None, max_rows: int = 15) -> dict:
+    """Extrai contexto estruturado de uma aba para enviar à IA."""
+    filtros = filtros or {}
+    selecionado = selecionado or {}
+    
+    meta = {
+        "tab_id": tab_id,
+        "tab_descricao": CHAT_CONTEXTOS_ABA.get(tab_id, "Aba não identificada"),
+        "total_registros": len(df_filtrado) if df_filtrado is not None else 0,
+        "colunas": list(df_filtrado.columns) if df_filtrado is not None and not df_filtrado.empty else [],
+        "filtros_ativos": filtros,
+        "item_selecionado": selecionado,
+        "data_consulta": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    }
+    
+    contexto_partes = [
+        f"Aba: {meta['tab_descricao']}",
+        f"Total de registros: {meta['total_registros']}",
+        f"Data da consulta: {meta['data_consulta']}"
+    ]
+    
+    if filtros:
+        filtros_str = ", ".join([f"{k}={v}" for k, v in filtros.items() if v])
+        if filtros_str:
+            contexto_partes.append(f"Filtros ativos: {filtros_str}")
+    
+    if selecionado:
+        sel_str = ", ".join([f"{k}={v}" for k, v in selecionado.items() if v])
+        if sel_str:
+            contexto_partes.append(f"Item selecionado: {sel_str}")
+    
+    contexto_textual = "\n".join(contexto_partes)
+    
+    tabela_compacta = ""
+    if df_filtrado is not None and not df_filtrado.empty:
+        df_amostra = df_filtrado.head(max_rows)
+        colunas_prioridade = [
+            "id", "Proposição", "siglaTipo", "numero", "ano", "ementa",
+            "Situação atual", "Órgão (sigla)", "Data do status", "Parado (dias)",
+            "Relator(a)", "Tema", "RIC_Ministerio", "RIC_StatusResposta",
+            "RIC_DiasRestantes", "RIC_PrazoStr"
+        ]
+        colunas_disponiveis = [c for c in colunas_prioridade if c in df_amostra.columns]
+        if not colunas_disponiveis:
+            colunas_disponiveis = list(df_amostra.columns)[:8]
+        
+        df_resumo = df_amostra[colunas_disponiveis].copy()
+        for col in df_resumo.columns:
+            if df_resumo[col].dtype == 'object':
+                df_resumo[col] = df_resumo[col].astype(str).str[:80]
+        
+        tabela_compacta = df_resumo.to_string(index=False, max_colwidth=40)
+    
+    return {"contexto_textual": contexto_textual, "tabela_compacta": tabela_compacta, "metadados": meta}
+
+def chat_format_context(contexto: dict) -> str:
+    """Formata o contexto para incluir no prompt."""
+    return f"""
+=== CONTEXTO DOS DADOS ===
+{contexto.get("contexto_textual", "")}
+
+AMOSTRA DOS DADOS:
+{contexto.get("tabela_compacta", "Nenhum dado disponível")}
+
+Colunas disponíveis: {', '.join(contexto.get('metadados', {}).get('colunas', [])[:15])}
+========================
+"""
+
+# --- Análise específica de RICs ---
+def chat_analisar_rics(df_rics: pd.DataFrame) -> str:
+    """Gera contexto textual específico para RICs."""
+    if df_rics is None or df_rics.empty:
+        return "Nenhum RIC carregado."
+    
+    total = len(df_rics)
+    aguardando = 0
+    respondidos = 0
+    atrasados = 0
+    vencendo_7_dias = 0
+    
+    if "RIC_StatusResposta" in df_rics.columns:
+        aguardando = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Aguardando", case=False, na=False)])
+        respondidos = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Respondido", case=False, na=False)])
+        atrasados = len(df_rics[df_rics["RIC_StatusResposta"].str.contains("Fora do prazo|Vencido", case=False, na=False)])
+    
+    if "RIC_DiasRestantes" in df_rics.columns:
+        for _, row in df_rics.iterrows():
+            dias = row.get("RIC_DiasRestantes")
+            if pd.notna(dias):
+                try:
+                    dias = int(dias)
+                    if dias < 0:
+                        atrasados = max(atrasados, 1)
+                    elif 0 <= dias <= 7:
+                        vencendo_7_dias += 1
+                except (ValueError, TypeError):
+                    pass
+    
+    alertas = []
+    if atrasados > 0:
+        alertas.append(f"🔴 {atrasados} RIC(s) com prazo VENCIDO")
+    if vencendo_7_dias > 0:
+        alertas.append(f"🟠 {vencendo_7_dias} RIC(s) vencem nos próximos 7 dias")
+    
+    partes = [
+        f"ANÁLISE DOS RICs:",
+        f"- Total: {total}",
+        f"- Aguardando resposta: {aguardando}",
+        f"- Respondidos: {respondidos}",
+        f"- Atrasados: {atrasados}",
+        f"- Vencendo em 7 dias: {vencendo_7_dias}",
+    ]
+    
+    if alertas:
+        partes.append("\nALERTAS:")
+        partes.extend([f"  {a}" for a in alertas])
+    
+    # Por ministério
+    if "RIC_Ministerio" in df_rics.columns:
+        partes.append("\nPOR MINISTÉRIO (top 5):")
+        for ministerio in df_rics["RIC_Ministerio"].value_counts().head(5).index:
+            if ministerio and str(ministerio).strip():
+                qtd = len(df_rics[df_rics["RIC_Ministerio"] == ministerio])
+                partes.append(f"  - {ministerio}: {qtd}")
+    
+    return "\n".join(partes)
+
+# --- Chamada à API ---
+def chat_chamar_api(mensagens: list, system_prompt: str, max_tokens: int = 1500) -> tuple:
+    """Chama a API do Anthropic (Claude)."""
+    api_key = get_api_key_chat()
+    if not api_key:
+        return "❌ API não configurada. Adicione a chave em Settings > Secrets.", False
+    
+    try:
+        headers = {
+            "x-api-key": api_key,
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+        
+        payload = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": max_tokens,
+            "system": system_prompt,
+            "messages": mensagens
+        }
+        
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            texto = ""
+            for bloco in data.get("content", []):
+                if bloco.get("type") == "text":
+                    texto += bloco.get("text", "")
+            return texto, True
+        else:
+            return f"❌ Erro na API: {response.status_code} - {response.text[:200]}", False
+            
+    except Exception as e:
+        return f"❌ Erro ao chamar API: {str(e)}", False
+
+# --- Componente de Chat ---
+def render_chat_ia(tab_id: str, df_contexto: pd.DataFrame, filtros: dict = None, selecionado: dict = None):
+    """Renderiza o componente de chat em uma aba."""
+    
+    # Verificar se API está configurada
+    if not is_chat_enabled():
+        with st.expander("💬 Chat IA (configurar)", expanded=False):
+            st.warning("Chat IA indisponível - Configure a chave da API Anthropic em Settings > Secrets")
+            st.code('[anthropic]\napi_key = "sua-chave-aqui"', language="toml")
+        return
+    
+    # Chaves de session_state
+    history_key = f"chat_history_{tab_id}"
+    if history_key not in st.session_state:
+        st.session_state[history_key] = []
+    
+    # Container do chat
+    with st.expander("💬 Chat IA", expanded=False):
+        # Seletor de modo e persona
+        col_modo, col_persona = st.columns(2)
+        
+        with col_modo:
+            modo = st.selectbox(
+                "Modo",
+                options=["Base", "RICs"] if tab_id == "tab7" else ["Base"],
+                index=0,
+                key=f"chat_modo_{tab_id}",
+                help="Base: responde só com dados. RICs: especializado em requerimentos."
+            )
+        
+        with col_persona:
+            persona = st.selectbox(
+                "Persona",
+                options=list(CHAT_PERSONAS.keys()),
+                index=2,
+                key=f"chat_persona_{tab_id}"
+            )
+        
+        # Botões de saídas prontas
+        st.markdown("**Saídas prontas:**")
+        
+        if tab_id == "tab7":
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                btn_briefing = st.button("📋 Briefing", key=f"chat_brief_{tab_id}", use_container_width=True)
+            with c2:
+                btn_cobranca = st.button("📨 Cobrança", key=f"chat_cobr_{tab_id}", use_container_width=True)
+            with c3:
+                btn_acao = st.button("🎯 Ação", key=f"chat_acao_{tab_id}", use_container_width=True)
+            with c4:
+                btn_checklist = st.button("✅ Checklist", key=f"chat_check_{tab_id}", use_container_width=True)
+            
+            btn_analise = btn_estrategia = btn_perguntas = False
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                btn_briefing = st.button("📋 Briefing", key=f"chat_brief_{tab_id}", use_container_width=True)
+            with c2:
+                btn_analise = st.button("📊 Análise", key=f"chat_anal_{tab_id}", use_container_width=True)
+            with c3:
+                btn_estrategia = st.button("⚔️ Estratégia", key=f"chat_estr_{tab_id}", use_container_width=True)
+            with c4:
+                btn_checklist = st.button("✅ Checklist", key=f"chat_check_{tab_id}", use_container_width=True)
+            
+            btn_cobranca = btn_acao = False
+        
+        # Botão limpar
+        if st.button("🗑️ Limpar conversa", key=f"chat_limpar_{tab_id}"):
+            st.session_state[history_key] = []
+            st.rerun()
+        
+        # Preparar contexto
+        contexto = chat_get_context(tab_id, df_contexto, filtros, selecionado)
+        contexto_formatado = chat_format_context(contexto)
+        
+        # Adicionar contexto de RICs se aplicável
+        if tab_id == "tab7" and df_contexto is not None:
+            contexto_formatado += "\n\n" + chat_analisar_rics(df_contexto)
+        
+        # Processar botões
+        prompt_auto = None
+        nome_saida = None
+        
+        if btn_briefing:
+            prompt_auto = CHAT_TEMPLATE_BRIEFING.format(dados=contexto_formatado)
+            nome_saida = "📋 Briefing 30s"
+        elif btn_checklist:
+            prompt_auto = CHAT_TEMPLATE_CHECKLIST.format(dados=contexto_formatado)
+            nome_saida = "✅ Checklist"
+        elif btn_cobranca:
+            prompt_auto = CHAT_TEMPLATE_COBRANCA.format(dados=contexto_formatado)
+            nome_saida = "📨 Cobrança"
+        elif btn_acao:
+            prompt_auto = CHAT_TEMPLATE_ACAO_RIC.format(dados=contexto_formatado)
+            nome_saida = "🎯 Ação recomendada"
+        elif btn_analise:
+            prompt_auto = CHAT_TEMPLATE_ANALISE.format(dados=contexto_formatado)
+            nome_saida = "📊 Análise técnica"
+        elif btn_estrategia:
+            prompt_auto = CHAT_TEMPLATE_ESTRATEGIA.format(dados=contexto_formatado)
+            nome_saida = "⚔️ Estratégia"
+        
+        # Exibir histórico
+        for msg in st.session_state[history_key]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        
+        # Input do usuário
+        user_input = st.chat_input("Pergunte sobre os dados...", key=f"chat_input_{tab_id}")
+        
+        # Processar input
+        input_final = prompt_auto or user_input
+        
+        if input_final:
+            # Adicionar mensagem ao histórico
+            if user_input:
+                st.session_state[history_key].append({"role": "user", "content": user_input})
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+            elif nome_saida:
+                st.session_state[history_key].append({"role": "user", "content": f"[{nome_saida}]"})
+                with st.chat_message("user"):
+                    st.markdown(f"[{nome_saida}]")
+            
+            # Preparar system prompt
+            system = CHAT_SYSTEM_PROMPT_BASE.format(
+                persona=CHAT_PERSONAS.get(persona, CHAT_PERSONAS["Assessoria Legislativa"]),
+                contexto_aba=CHAT_CONTEXTOS_ABA.get(tab_id, "")
+            )
+            
+            # Preparar mensagens
+            mensagens_api = []
+            for msg in st.session_state[history_key][-8:]:
+                mensagens_api.append({"role": msg["role"], "content": msg["content"]})
+            
+            if prompt_auto:
+                mensagens_api.append({"role": "user", "content": prompt_auto})
+            
+            # Chamar API
+            with st.chat_message("assistant"):
+                with st.spinner("Analisando..."):
+                    resposta, sucesso = chat_chamar_api(mensagens_api, system)
+                    st.markdown(resposta)
+            
+            st.session_state[history_key].append({"role": "assistant", "content": resposta})
+        
+        # Info do contexto
+        with st.expander("📊 Contexto atual", expanded=False):
+            st.caption(f"Registros: {contexto.get('metadados', {}).get('total_registros', 0)}")
+            st.caption(f"Colunas: {len(contexto.get('metadados', {}).get('colunas', []))}")
+
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
@@ -5068,7 +5485,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v23")
+    st.caption("v25 – com Chat IA")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -5132,15 +5549,14 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     # ABAS REORGANIZADAS (7 abas)
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
         "4️⃣ Comissões estratégicas",
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
-        "7️⃣ RICs (Requerimentos de Informação)",
-        "🔔 Notificações"
+        "7️⃣ RICs (Requerimentos de Informação)"
     ])
 
     # ============================================================
@@ -5373,6 +5789,34 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.success(f"👆 Clique na aba **{destino}** acima para acessar")
                 # Limpa após mostrar
                 st.session_state["aba_destino"] = None
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # CARD DO TELEGRAM (convite para grupo)
+        # ============================================================
+        st.markdown("### 📱 Receba Atualizações no Telegram")
+        
+        col_tg1, col_tg2 = st.columns([3, 1])
+        
+        with col_tg1:
+            st.info("""
+            🔔 **Entre no grupo do Monitor Parlamentar no Telegram!**
+            
+            Receba notificações automáticas sobre:
+            - Novas tramitações de proposições da Dep. Júlia Zanatta
+            - Movimentações em projetos de lei
+            - Atualizações em requerimentos de informação (RICs)
+            """)
+        
+        with col_tg2:
+            st.markdown("")  # Espaçador
+            st.link_button(
+                "📲 Entrar no Grupo",
+                url="https://t.me/+LJUCm1ZwxoJkNDkx",
+                type="primary",
+                use_container_width=True
+            )
         
         st.markdown("---")
         
@@ -5616,6 +6060,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         if prop_selecionada:
                             selected_id_tab2 = opcoes_props[prop_selecionada]
                             exibir_detalhes_proposicao(selected_id_tab2, key_prefix="tab2")
+        
+        # Chat IA da aba 2
+        st.markdown("---")
+        df_chat_tab2 = st.session_state.get("df_scan_tab2", pd.DataFrame())
+        render_chat_ia("tab2", df_chat_tab2, filtros={"periodo": st.session_state.get("dt_range_tab2_saved", None)})
 
     # ============================================================
     # ABA 3 - PALAVRAS-CHAVE
@@ -5772,6 +6221,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             mime=pdf_mime,
                             key="download_kw_pdf"
                         )
+        
+        # Chat IA da aba 3
+        st.markdown("---")
+        df_chat_tab3 = st.session_state.get("df_scan_tab3", pd.DataFrame())
+        render_chat_ia("tab3", df_chat_tab3, filtros={"palavras_chave": st.session_state.get("palavras_t3", "")})
 
     # ============================================================
     # ABA 4 - COMISSÕES ESTRATÉGICAS
@@ -5868,6 +6322,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         mime=pdf_mime,
                         key="download_com_pdf"
                     )
+        
+        # Chat IA da aba 4
+        st.markdown("---")
+        df_chat_tab4 = st.session_state.get("df_scan_tab4", pd.DataFrame())
+        render_chat_ia("tab4", df_chat_tab4, filtros={"comissoes": st.session_state.get("comissoes_t4", "")})
 
     # ============================================================
     # ABA 5 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
@@ -6032,6 +6491,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.info("Clique em uma proposição acima para ver detalhes completos.")
             else:
                 exibir_detalhes_proposicao(selected_id, key_prefix="tab5")
+        
+        # Chat IA da aba 5
+        st.markdown("---")
+        df_chat_tab5 = st.session_state.get("df_autoria_tab5", pd.DataFrame())
+        render_chat_ia("tab5", df_chat_tab5, filtros=st.session_state.get("filtros_tab5", {}), selecionado={"id": selected_id} if selected_id else None)
 
     # ============================================================
     # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
@@ -6365,6 +6829,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         )
                     except Exception as e:
                         st.error(f"Erro ao gerar PDF: {e}")
+        
+        # Chat IA da aba 6
+        st.markdown("---")
+        df_chat_tab6 = st.session_state.get("df_autoria_status", pd.DataFrame())
+        render_chat_ia("tab6", df_chat_tab6, filtros=st.session_state.get("filtros_tab6", {}))
 
     # ============================================================
     # ABA 7 - RICs (REQUERIMENTOS DE INFORMAÇÃO)
@@ -6755,322 +7224,14 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         else:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
         
+        # Chat IA da aba 7 (RICs) - com modo especializado
+        st.markdown("---")
+        st.markdown("### 💬 Chat IA - Análise de RICs")
+        df_chat_tab7 = st.session_state.get("df_rics_completo", pd.DataFrame())
+        render_chat_ia("tab7", df_chat_tab7, filtros=st.session_state.get("filtros_rics", {}), selecionado={"id": selected_ric_id} if 'selected_ric_id' in dir() and selected_ric_id else None)
+        
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
-
-    # ============================================================
-    # ABA 8 - NOTIFICAÇÕES TELEGRAM (SIMPLIFICADO)
-    # ============================================================
-    with tab8:
-        st.subheader("🔔 Receber Notificações no Telegram")
-        
-        st.markdown("""
-        Receba alertas no seu Telegram quando houver movimentação nas proposições da deputada!
-        """)
-        
-        # Token do bot vem dos secrets (não exposto ao usuário)
-        telegram_token = st.secrets.get("telegram", {}).get("bot_token", "")
-        
-        if not telegram_token:
-            st.warning("""
-            ⚠️ **Configuração pendente pelo administrador**
-            
-            O bot do Telegram ainda não foi configurado. 
-            Peça ao administrador para adicionar nas configurações (Secrets):
-            ```
-            [telegram]
-            bot_token = "SEU_TOKEN_AQUI"
-            ```
-            """)
-        else:
-            # Interface simplificada para o usuário
-            st.success("✅ Bot do Telegram configurado: **@MoniParBot**")
-            
-            st.markdown("---")
-            
-            # Passo 1: Iniciar conversa com o bot
-            st.markdown("### 📱 Passo 1: Conecte seu Telegram")
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.markdown("""
-                1. Abra o Telegram e procure por **@userinfobot**
-                2. Envie qualquer mensagem para ele
-                3. Copie o número do seu **Id** (ex: `123456789`)
-                4. Cole abaixo:
-                """)
-                
-                telegram_chat_id = st.text_input(
-                    "🆔 Seu ID do Telegram",
-                    value=st.session_state.get("telegram_chat_id", ""),
-                    placeholder="Ex: 123456789",
-                    help="Obtenha seu ID conversando com @userinfobot no Telegram",
-                    key="input_telegram_chat_id_simple"
-                )
-                if telegram_chat_id:
-                    st.session_state["telegram_chat_id"] = telegram_chat_id
-            
-            with col2:
-                st.markdown("**Links rápidos:**")
-                st.markdown("🤖 [Abrir @MoniParBot](https://t.me/MoniParBot)")
-                st.markdown("🆔 [Obter meu ID](https://t.me/userinfobot)")
-            
-            # Botão de teste
-            if telegram_chat_id:
-                col_test, col_result = st.columns([1, 2])
-                with col_test:
-                    if st.button("📤 Enviar mensagem de teste", key="btn_test_simple"):
-                        with st.spinner("Enviando..."):
-                            resultado = telegram_testar_conexao(telegram_token, telegram_chat_id)
-                            if resultado.get("ok"):
-                                st.success("✅ Mensagem enviada! Verifique seu Telegram.")
-                            else:
-                                st.error(f"❌ Erro: {resultado.get('error')}")
-                                st.info("Verifique se você iniciou conversa com @MoniParBot")
-            
-            st.markdown("---")
-            
-            # Passo 2: Escolher o que monitorar
-            st.markdown("### 📋 Passo 2: O que você quer acompanhar?")
-            
-            monitorar_autoria = st.checkbox(
-                "📝 Proposições de **autoria** da Dep. Júlia Zanatta",
-                value=st.session_state.get("notif_autoria", True),
-                key="chk_notif_autoria"
-            )
-            st.session_state["notif_autoria"] = monitorar_autoria
-            
-            monitorar_relatoria = st.checkbox(
-                "📋 Proposições onde ela é **relatora**",
-                value=st.session_state.get("notif_relatoria", True),
-                key="chk_notif_relatoria"
-            )
-            st.session_state["notif_relatoria"] = monitorar_relatoria
-            
-            monitorar_rics = st.checkbox(
-                "📨 **RICs** (Requerimentos de Informação)",
-                value=st.session_state.get("notif_rics", True),
-                key="chk_notif_rics"
-            )
-            st.session_state["notif_rics"] = monitorar_rics
-            
-            # Opção de proposições específicas
-            with st.expander("➕ Adicionar proposições específicas"):
-                ids_extras = st.text_area(
-                    "IDs adicionais (um por linha)",
-                    value=st.session_state.get("notif_ids_extras", ""),
-                    height=80,
-                    placeholder="2369900\n541857",
-                    key="input_ids_extras"
-                )
-                if ids_extras:
-                    st.session_state["notif_ids_extras"] = ids_extras
-            
-            st.markdown("---")
-            
-            # Passo 3: Verificar novidades
-            st.markdown("### 🔍 Passo 3: Verificar novidades agora")
-            
-            col_periodo, col_btn = st.columns([1, 1])
-            
-            with col_periodo:
-                periodo_horas = st.select_slider(
-                    "Período de verificação",
-                    options=[6, 12, 24, 48, 72, 168],
-                    value=24,
-                    format_func=lambda x: f"Últimas {x}h" if x < 168 else "Última semana",
-                    key="slider_periodo_notif"
-                )
-            
-            with col_btn:
-                st.markdown("")  # Espaçamento
-                st.markdown("")
-                btn_verificar = st.button(
-                    "🔔 Verificar e Notificar",
-                    type="primary",
-                    key="btn_verificar_principal",
-                    use_container_width=True
-                )
-            
-            if btn_verificar:
-                if not telegram_chat_id:
-                    st.error("❌ Informe seu ID do Telegram primeiro!")
-                else:
-                    # Coletar IDs para monitorar - TODAS as proposições do último ano
-                    ids_monitorar = set()
-                    
-                    with st.spinner("Coletando proposições para monitorar..."):
-                        # Buscar proposições de autoria do último ano com paginação
-                        if monitorar_autoria:
-                            try:
-                                um_ano_atras = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
-                                pagina = 1
-                                total_autoria = 0
-                                
-                                while pagina <= 20:  # Máximo 20 páginas (2000 proposições)
-                                    url = f"{BASE_URL}/proposicoes"
-                                    params = {
-                                        "idDeputadoAutor": id_deputada,
-                                        "dataApresentacaoInicio": um_ano_atras,
-                                        "itens": 100,
-                                        "pagina": pagina,
-                                        "ordem": "DESC",
-                                        "ordenarPor": "id"
-                                    }
-                                    resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
-                                    if resp.status_code != 200:
-                                        break
-                                    
-                                    dados = resp.json().get("dados", [])
-                                    if not dados:
-                                        break
-                                    
-                                    for p in dados:
-                                        if p.get("id"):
-                                            ids_monitorar.add(str(p["id"]))
-                                    
-                                    total_autoria += len(dados)
-                                    
-                                    if len(dados) < 100:
-                                        break
-                                    pagina += 1
-                                    time.sleep(0.1)
-                                
-                                st.info(f"📝 {total_autoria} proposições de autoria (último ano)")
-                            except Exception as e:
-                                st.warning(f"Erro ao buscar autoria: {e}")
-                        
-                        # Relatoria
-                        if monitorar_relatoria:
-                            try:
-                                url = f"{BASE_URL}/proposicoes"
-                                params = {
-                                    "idDeputadoRelator": id_deputada,
-                                    "itens": 100,
-                                    "ordem": "DESC",
-                                    "ordenarPor": "id"
-                                }
-                                resp = requests.get(url, params=params, headers=HEADERS, timeout=30)
-                                if resp.status_code == 200:
-                                    dados = resp.json().get("dados", [])
-                                    ids_rel = {str(p.get("id")) for p in dados if p.get("id")}
-                                    ids_monitorar.update(ids_rel)
-                                    st.info(f"📋 {len(ids_rel)} proposições como relatora")
-                            except:
-                                pass
-                        
-                        # IDs extras
-                        if ids_extras:
-                            for linha in ids_extras.strip().split("\n"):
-                                id_limpo = linha.strip()
-                                if id_limpo.isdigit():
-                                    ids_monitorar.add(id_limpo)
-                    
-                    if not ids_monitorar:
-                        st.warning("Nenhuma proposição encontrada para monitorar.")
-                    else:
-                        # Verificar TODAS as proposições encontradas
-                        ids_lista = list(ids_monitorar)
-                        
-                        st.info(f"🔍 Verificando **{len(ids_lista)} proposições** do último ano...")
-                        
-                        # Barra de progresso
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        # Data de corte como string YYYY-MM-DD
-                        data_corte_str = (get_brasilia_now() - datetime.timedelta(hours=periodo_horas)).strftime("%Y-%m-%d")
-                        st.caption(f"📆 Buscando tramitações desde: {data_corte_str}")
-                        
-                        with st.spinner(f"Verificando tramitações das últimas {periodo_horas} horas..."):
-                            # Fazer verificação com progresso
-                            notificacoes = 0
-                            erros = []
-                            props_com_novidade = []
-                            
-                            for i, id_prop in enumerate(ids_lista):
-                                progress_bar.progress((i + 1) / len(ids_lista))
-                                if (i + 1) % 50 == 0:
-                                    status_text.text(f"Verificando {i+1}/{len(ids_lista)}...")
-                                
-                                try:
-                                    # Busca tramitações da proposição
-                                    url = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
-                                    resp = requests.get(url, headers=HEADERS, timeout=10)
-                                    if resp.status_code != 200:
-                                        continue
-                                    
-                                    data = resp.json()
-                                    tramitacoes = data.get("dados", [])
-                                    
-                                    # Filtra tramitações novas (comparação simples de strings)
-                                    tramitacoes_novas = []
-                                    for tram in tramitacoes[:5]:  # Só verifica as 5 mais recentes
-                                        data_hora = tram.get("dataHora", "")
-                                        if data_hora and len(data_hora) >= 10:
-                                            data_tram_str = data_hora[:10]  # YYYY-MM-DD
-                                            # Comparação simples de strings (funciona porque é formato ISO)
-                                            if data_tram_str >= data_corte_str:
-                                                tramitacoes_novas.append(tram)
-                                    
-                                    if tramitacoes_novas:
-                                        # Busca dados da proposição
-                                        info = fetch_proposicao_info(id_prop)
-                                        if info:
-                                            proposicao = {
-                                                "id": id_prop,
-                                                "sigla": info.get("siglaTipo", "") or info.get("sigla", ""),
-                                                "numero": info.get("numero", ""),
-                                                "ano": info.get("ano", ""),
-                                                "ementa": (info.get("ementa", "") or "")[:200]
-                                            }
-                                            
-                                            # Formata e envia mensagem
-                                            msg = formatar_notificacao_tramitacao(proposicao, tramitacoes_novas)
-                                            resultado = telegram_enviar_mensagem(telegram_token, telegram_chat_id, msg)
-                                            
-                                            if resultado.get("ok"):
-                                                notificacoes += 1
-                                                props_com_novidade.append(f"{proposicao['sigla']} {proposicao['numero']}/{proposicao['ano']}")
-                                            
-                                            time.sleep(0.3)  # Evitar rate limit
-                                
-                                except Exception as e:
-                                    erros.append(str(e))
-                            
-                            progress_bar.empty()
-                            status_text.empty()
-                            
-                            if notificacoes > 0:
-                                st.success(f"✅ **{notificacoes} notificação(ões) enviada(s)!** Verifique seu Telegram.")
-                                with st.expander("📋 Proposições notificadas"):
-                                    for p in props_com_novidade:
-                                        st.write(f"• {p}")
-                            else:
-                                st.info("ℹ️ Nenhuma novidade no período selecionado.")
-                                st.caption("💡 Isso é normal em períodos de recesso parlamentar (fim de ano, carnaval, etc.)")
-                            
-                            if erros:
-                                with st.expander(f"⚠️ {len(erros)} erros ocorreram"):
-                                    for erro in erros[:5]:
-                                        st.warning(erro)
-            
-            st.markdown("---")
-            
-            # Dica de automação simplificada
-            with st.expander("💡 Quer receber notificações automáticas?"):
-                st.markdown("""
-                **Opção 1: Verificação diária manual**
-                - Acesse esta aba uma vez por dia e clique em "Verificar e Notificar"
-                
-                **Opção 2: Automação gratuita (para o administrador)**
-                - Configure um agendador externo (GitHub Actions) para verificar automaticamente
-                - Fale com o administrador do sistema para configurar
-                
-                **Opção 3: Crie um lembrete**
-                - Configure um alarme diário no celular para verificar o sistema
-                """)
 
     st.markdown("---")
 
