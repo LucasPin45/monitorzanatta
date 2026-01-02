@@ -2,8 +2,15 @@ name: Notificar Tramitações
 
 on:
   schedule:
-    # Executa a cada 2 horas
-    - cron: '0 */2 * * *'
+    # Horários de Brasília (UTC-3) → converter para UTC
+    # 08:00 BRT = 11:00 UTC
+    # 10:00 BRT = 13:00 UTC
+    # 12:00 BRT = 15:00 UTC
+    # 14:00 BRT = 17:00 UTC
+    # 16:00 BRT = 19:00 UTC
+    # 18:00 BRT = 21:00 UTC
+    # 20:00 BRT = 23:00 UTC
+    - cron: '0 11,13,15,17,19,21,23 * * *'
   
   workflow_dispatch:  # Permite executar manualmente
 
@@ -24,9 +31,25 @@ jobs:
         run: |
           pip install requests
       
+      # Restaurar estado da última execução
+      - name: Restaurar estado
+        uses: actions/cache@v4
+        with:
+          path: estado_monitor.json
+          key: estado-monitor-${{ github.run_id }}
+          restore-keys: |
+            estado-monitor-
+      
       - name: Executar script de notificação
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python notificar_tramitacoes.py
+      
+      # Salvar estado para próxima execução
+      - name: Salvar estado
+        uses: actions/cache@v4
+        with:
+          path: estado_monitor.json
+          key: estado-monitor-${{ github.run_id }}
