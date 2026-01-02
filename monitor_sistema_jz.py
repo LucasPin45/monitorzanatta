@@ -136,10 +136,35 @@ def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = Non
     filtros = filtros or {}
     selecionado = selecionado or {}
     
+    # Se há item selecionado mas df vazio, tentar buscar dados do item
+    dados_item_selecionado = ""
+    if selecionado.get("id") and (df_filtrado is None or df_filtrado.empty):
+        try:
+            id_sel = str(selecionado["id"])
+            # Buscar dados da proposição selecionada
+            dados_prop = fetch_proposicao_completa(id_sel)
+            if dados_prop:
+                dados_item_selecionado = f"""
+DADOS DA PROPOSIÇÃO SELECIONADA (ID {id_sel}):
+- Tipo: {dados_prop.get('sigla', 'N/A')}
+- Número/Ano: {dados_prop.get('numero', 'N/A')}/{dados_prop.get('ano', 'N/A')}
+- Ementa: {dados_prop.get('ementa', 'N/A')[:300]}
+- Situação: {dados_prop.get('status_descricaoSituacao', 'N/A')}
+- Órgão atual: {dados_prop.get('status_siglaOrgao', 'N/A')}
+- Último andamento: {dados_prop.get('status_descricaoTramitacao', 'N/A')[:200]}
+- Data status: {dados_prop.get('status_dataHora', 'N/A')[:10] if dados_prop.get('status_dataHora') else 'N/A'}
+"""
+                # Relator
+                relator = dados_prop.get('relator', {})
+                if relator and relator.get('nome'):
+                    dados_item_selecionado += f"- Relator(a): {relator.get('nome', '')} ({relator.get('partido', '')}-{relator.get('uf', '')})\n"
+        except Exception:
+            pass
+    
     meta = {
         "tab_id": tab_id,
         "tab_descricao": CHAT_CONTEXTOS_ABA.get(tab_id, "Aba não identificada"),
-        "total_registros": len(df_filtrado) if df_filtrado is not None else 0,
+        "total_registros": len(df_filtrado) if df_filtrado is not None and not df_filtrado.empty else (1 if dados_item_selecionado else 0),
         "colunas": list(df_filtrado.columns) if df_filtrado is not None and not df_filtrado.empty else [],
         "filtros_ativos": filtros,
         "item_selecionado": selecionado,
@@ -164,8 +189,10 @@ def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = Non
     
     contexto_textual = "\n".join(contexto_partes)
     
-    tabela_compacta = ""
-    if df_filtrado is not None and not df_filtrado.empty:
+    # Se temos dados do item selecionado, usar isso
+    if dados_item_selecionado:
+        tabela_compacta = dados_item_selecionado
+    elif df_filtrado is not None and not df_filtrado.empty:
         df_amostra = df_filtrado.head(max_rows)
         colunas_prioridade = [
             "id", "Proposição", "siglaTipo", "numero", "ano", "ementa",
@@ -183,6 +210,8 @@ def chat_get_context(tab_id: str, df_filtrado: pd.DataFrame, filtros: dict = Non
                 df_resumo[col] = df_resumo[col].astype(str).str[:80]
         
         tabela_compacta = df_resumo.to_string(index=False, max_colwidth=40)
+    else:
+        tabela_compacta = "Nenhum dado disponível. Carregue os dados da aba primeiro."
     
     return {"contexto_textual": contexto_textual, "tabela_compacta": tabela_compacta, "metadados": meta}
 
@@ -6400,6 +6429,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
 
             df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
+            
+            # Salvar para o Chat IA
+            st.session_state["df_chat_tab5"] = df_rast_enriched.copy()
 
             st.caption(f"Resultados: {len(df_rast_enriched)} proposições")
 
@@ -6494,8 +6526,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 5
         st.markdown("---")
-        df_chat_tab5 = st.session_state.get("df_autoria_tab5", pd.DataFrame())
-        render_chat_ia("tab5", df_chat_tab5, filtros=st.session_state.get("filtros_tab5", {}), selecionado={"id": selected_id} if selected_id else None)
+        df_chat_tab5 = st.session_state.get("df_chat_tab5", pd.DataFrame())
+        # Garantir que selected_id existe
+        sel_id_tab5 = selected_id if 'selected_id' in dir() and selected_id else None
+        render_chat_ia("tab5", df_chat_tab5, selecionado={"id": sel_id_tab5} if sel_id_tab5 else None)
 
     # ============================================================
     # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
@@ -6672,6 +6706,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 # Garantir coluna de dias parado para cálculos
                 if "Parado (dias)" in df_fil.columns and "Parado há (dias)" not in df_fil.columns:
                     df_fil["Parado há (dias)"] = df_fil["Parado (dias)"]
+                
+                # Salvar para o Chat IA
+                st.session_state["df_chat_tab6"] = df_fil.copy()
 
                 st.markdown("---")
                 
@@ -6832,8 +6869,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         # Chat IA da aba 6
         st.markdown("---")
-        df_chat_tab6 = st.session_state.get("df_autoria_status", pd.DataFrame())
-        render_chat_ia("tab6", df_chat_tab6, filtros=st.session_state.get("filtros_tab6", {}))
+        df_chat_tab6 = st.session_state.get("df_chat_tab6", pd.DataFrame())
+        render_chat_ia("tab6", df_chat_tab6)
 
     # ============================================================
     # ABA 7 - RICs (REQUERIMENTOS DE INFORMAÇÃO)
