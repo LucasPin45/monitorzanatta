@@ -5,7 +5,7 @@ notificar_tramitacoes.py
 ========================================
 Script para verificar novas tramitações e enviar notificações via Telegram
 Busca todas as proposições do último ano e compara com as últimas 24h
-Formato de mensagem: Monitor Parlamentar Informa (sem emojis)
+Formato de mensagem: Monitor Parlamentar Informa
 """
 
 import os
@@ -32,10 +32,12 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 def buscar_proposicoes_ultimo_ano(deputado_id):
     """Busca TODAS as proposições do último ano (autoria)"""
     
+    # Usar data de ontem como fim para evitar problemas com fuso horário
+    data_fim = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     data_inicio = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-    data_hoje = datetime.now().strftime("%Y-%m-%d")
     
     print(f"🔍 Buscando proposições desde: {data_inicio}")
+    print(f"📅 Até: {data_fim}")
     
     proposicoes = []
     pagina = 1
@@ -45,7 +47,7 @@ def buscar_proposicoes_ultimo_ano(deputado_id):
         params = {
             "idDeputadoAutor": deputado_id,
             "dataInicio": data_inicio,
-            "dataFim": data_hoje,
+            "dataFim": data_fim,
             "ordem": "DESC",
             "ordenarPor": "id",
             "pagina": pagina,
@@ -54,6 +56,13 @@ def buscar_proposicoes_ultimo_ano(deputado_id):
         
         try:
             resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+            
+            # Se der erro 400, tentar sem dataFim
+            if resp.status_code == 400:
+                print(f"⚠️ Erro 400 na API, tentando sem dataFim...")
+                params.pop("dataFim", None)
+                resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+            
             resp.raise_for_status()
             data = resp.json()
             
@@ -61,6 +70,7 @@ def buscar_proposicoes_ultimo_ano(deputado_id):
                 break
                 
             proposicoes.extend(data["dados"])
+            print(f"   Página {pagina}: {len(data['dados'])} proposições")
             
             # Verificar se há mais páginas
             links = data.get("links", [])
@@ -72,6 +82,11 @@ def buscar_proposicoes_ultimo_ano(deputado_id):
             pagina += 1
             time.sleep(0.3)  # Rate limit
             
+        except requests.exceptions.HTTPError as e:
+            print(f"❌ Erro HTTP ao buscar proposições (página {pagina}): {e}")
+            print(f"   Status code: {resp.status_code}")
+            print(f"   Response: {resp.text[:500]}")
+            break
         except Exception as e:
             print(f"❌ Erro ao buscar proposições (página {pagina}): {e}")
             break
@@ -100,8 +115,8 @@ def buscar_ultima_tramitacao(proposicao_id):
     return None
 
 
-def tramitacao_recente(tramitacao, horas=24):
-    """Verifica se a tramitação é das últimas X horas"""
+def tramitacao_recente(tramitacao, horas=48):
+    """Verifica se a tramitação é das últimas X horas (padrão 48h para maior cobertura)"""
     
     if not tramitacao or not tramitacao.get("dataHora"):
         return False
@@ -110,7 +125,7 @@ def tramitacao_recente(tramitacao, horas=24):
         # Data da tramitação (formato: "2025-12-29T14:57:00")
         data_tram = tramitacao["dataHora"][:10]  # Pega só YYYY-MM-DD
         
-        # Data de corte (24h atrás)
+        # Data de corte (48h atrás)
         data_corte = (datetime.now() - timedelta(hours=horas)).strftime("%Y-%m-%d")
         
         # Comparação simples de strings
@@ -163,11 +178,12 @@ def formatar_mensagem(proposicao, tramitacao):
     link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={proposicao['id']}"
     
     # Montar mensagem
-    mensagem = f"""Monitor Parlamentar Informa:
+    mensagem = f"""📢 <b>Monitor Parlamentar Informa:</b>
 
 Houve nova movimentação!
 
-📄 {sigla} {numero}/{ano} {ementa}
+📄 <b>{sigla} {numero}/{ano}</b>
+{ementa}
 
 📅 {data_formatada} → {descricao}
 
@@ -200,7 +216,22 @@ def enviar_telegram(mensagem):
         
     except Exception as e:
         print(f"❌ Erro ao enviar mensagem: {e}")
+        if hasattr(resp, 'text'):
+            print(f"   Response: {resp.text}")
         return False
+
+
+def enviar_teste_conexao():
+    """Envia mensagem de teste para verificar se o bot está funcionando"""
+    
+    mensagem = f"""🔔 <b>Monitor Parlamentar - Teste de Conexão</b>
+
+✅ Sistema funcionando corretamente!
+📅 Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+
+O monitoramento das proposições da Deputada Júlia Zanatta está ativo."""
+    
+    return enviar_telegram(mensagem)
 
 
 # ============================================================
@@ -216,6 +247,18 @@ def main():
     print(f"📅 Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     print()
     
+    # Verificar variáveis de ambiente
+    if not TELEGRAM_BOT_TOKEN:
+        print("❌ ERRO: TELEGRAM_BOT_TOKEN não configurado!")
+        sys.exit(1)
+    if not TELEGRAM_CHAT_ID:
+        print("❌ ERRO: TELEGRAM_CHAT_ID não configurado!")
+        sys.exit(1)
+    
+    print(f"✅ Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
+    print(f"✅ Chat ID: {TELEGRAM_CHAT_ID}")
+    print()
+    
     # 1. Buscar proposições do último ano
     proposicoes = buscar_proposicoes_ultimo_ano(DEPUTADA_ID)
     
@@ -223,8 +266,8 @@ def main():
         print("⚠️ Nenhuma proposição encontrada")
         return
     
-    # 2. Verificar tramitações recentes (últimas 24h)
-    print("\n🔍 Verificando tramitações das últimas 24h...")
+    # 2. Verificar tramitações recentes (últimas 48h)
+    print("\n🔍 Verificando tramitações das últimas 48h...")
     
     props_com_novidade = []
     
@@ -233,7 +276,7 @@ def main():
         
         tramitacao = buscar_ultima_tramitacao(prop["id"])
         
-        if tramitacao and tramitacao_recente(tramitacao, horas=24):
+        if tramitacao and tramitacao_recente(tramitacao, horas=48):
             print("✅ NOVA!")
             props_com_novidade.append({
                 "proposicao": prop,
