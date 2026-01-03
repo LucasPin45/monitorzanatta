@@ -1,7 +1,6 @@
 # monitor_sistema_jz.py - v25
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
-# - Chat com IA nas abas 2-7 com contexto da aba
 # - Saídas prontas (briefings, análises, checklists)
 # - Modo especial para RICs com análise de prazos
 # - Controles anti-alucinação
@@ -5114,7 +5113,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v26 – versão estável (sem IA)")
+    st.caption("v26")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -5960,7 +5959,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 build_status_map.clear()
                 st.session_state.pop("df_status_last", None)
                 st.session_state.pop("df_todas_enriquecido_tab5", None)  # Limpar cache do chat também
-                st.session_state.pop("df_chat_tab5", None)
                 st.success("✅ Cache limpo! Recarregando...")
                 st.rerun()  # Forçar recarga da página
 
@@ -5969,7 +5967,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
         # Variáveis para o chat (definidas antes do if/else para estarem disponíveis depois)
-        df_chat_atual_tab5 = pd.DataFrame()
         filtro_busca_atual = ""
         
         if df_aut.empty:
@@ -6073,11 +6070,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.warning(f"⚠️ DEBUG: Dados incompletos! Situação: {_debug_situacao_ok}/{len(df_tbl)}, Órgão: {_debug_orgao_ok}/{len(df_tbl)}")
             
             # IMPORTANTE: Variável local para passar DIRETAMENTE ao chat (não via session_state)
-            df_chat_atual_tab5 = df_tbl.copy()
             filtro_busca_atual = q
             
             # Também salvar no session_state para backup
-            st.session_state["df_chat_tab5"] = df_tbl.copy()
             st.session_state["filtro_busca_tab5"] = q
             
             # Também salvar o DataFrame COMPLETO COM STATUS para quando não houver filtro
@@ -6178,13 +6173,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         df_para_chat = st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())
         
         if df_para_chat.empty:
-            df_para_chat = st.session_state.get("df_chat_tab5", pd.DataFrame())
         
-        if df_para_chat.empty and 'df_chat_atual_tab5' in dir() and not df_chat_atual_tab5.empty:
-            df_para_chat = df_chat_atual_tab5
-        
+            pass
         # DEBUG: Mostrar fonte dos dados
-        fonte = "df_todas_enriquecido_tab5" if not st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame()).empty else "df_chat_tab5"
         st.caption(f"📁 Fonte: **{fonte}** ({len(df_para_chat)} registros)")
         
         if filtro_busca and not df_para_chat.empty:
@@ -6214,7 +6205,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 df_para_chat = df_para_chat[df_para_chat["_busca_tmp"].str.contains(busca_norm, na=False)]
                 df_para_chat = df_para_chat.drop(columns=["_busca_tmp"], errors="ignore")
                 
-                st.caption(f"🔍 Chat filtrado por '{filtro_busca}': **{len(df_para_chat)}** proposições")
         
         # DEBUG info
         if not df_para_chat.empty:
@@ -6238,10 +6228,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             total = len(df_para_chat)
             
             if filtro_busca:
-                st.caption(f"💬 Chat: **{total}** proposições | Filtro: **{filtro_busca}**")
-            else:
-                st.caption(f"💬 Chat: **{total}** proposições (anos selecionados)")
             
+                pass
+            
+            else:
+            
+                pass
             # Mostrar status dos dados
             st.caption(f"📊 Dados disponíveis: Situação em **{situacao_nao_vazio}/{total}** | Órgão em **{orgao_nao_vazio}/{total}**")
             
@@ -6250,15 +6242,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.error("⚠️ **DADOS VAZIOS!** Clique em '🧹 Limpar cache' acima e aguarde recarregar.")
             
             # DEBUG: Mostrar amostra dos dados
-            with st.expander("🔍 Ver dados enviados para IA (debug)", expanded=False):
-                st.write("**Colunas disponíveis:**", colunas[:10])
-                st.write("**Amostra dos dados (primeiras 3 linhas):**")
-                if len(df_para_chat) > 0:
-                    for i, (idx, row) in enumerate(df_para_chat.head(3).iterrows()):
-                        prop = row.get("Proposição", "N/A")
-                        sit = row.get("Situação atual", "VAZIO")
-                        org = row.get("Órgão (sigla)", "VAZIO")
-                        st.write(f"  {i+1}. **{prop}** | Sit: `{sit}` | Órgão: `{org}`")
         else:
             st.info("💡 Use o campo 'Filtrar proposições' acima para buscar.")
         
@@ -6440,7 +6423,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 # Garantir coluna de dias parado para cálculos
                 if "Parado (dias)" in df_fil.columns and "Parado há (dias)" not in df_fil.columns:
                     df_fil["Parado há (dias)"] = df_fil["Parado (dias)"]
-                st.session_state["df_chat_tab6"] = df_fil.copy()
 
                 st.markdown("---")
                 
@@ -6986,16 +6968,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         else:
             st.info("👆 Clique em **Carregar/Atualizar RICs** para começar.")
-# Renomear colunas para consistência com o chat
-        if not df_chat_tab7.empty:
-            df_chat_tab7 = df_chat_tab7.rename(columns={
-                "Proposicao": "Proposição",
-                "ementa": "Ementa",
-                "id": "ID",
-                "ano": "Ano",
-                "siglaTipo": "Tipo"
-            })
-        
 
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
