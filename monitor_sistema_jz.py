@@ -1412,11 +1412,9 @@ def _categorizar_situacao_para_ordenacao(situacao: str) -> tuple:
     # 1. Pronta para Pauta
     if 'pronta' in s and 'pauta' in s:
         return (1, "Pronta para Pauta", situacao)
-    
-    # 2. Aguardando Parecer de Relator(a)
-    if 'aguardando parecer' in s and 'relator' in s:
-        return (2, "Aguardando Parecer de Relator(a)", situacao)
-    
+    # 2. Aguardando Parecer
+    if 'aguardando parecer' in s:
+        return (2, "Aguardando Parecer", situacao)
     # 3. Aguardando Designação de Relator(a) (incluindo devolução)
     if ('aguardando design' in s and 'relator' in s) or ('devolucao de relator' in s) or ('devolução de relator' in s):
         return (3, "Aguardando Designacao de Relator(a)", situacao)
@@ -3743,6 +3741,71 @@ def safe_get(url, params=None):
 # ============================================================
 
 @st.cache_data(show_spinner=False, ttl=1800)
+
+
+# ============================================================
+# APENSAÇÕES / TRAMITAÇÃO EM CONJUNTO — utilitários
+# ============================================================
+@st.cache_data(show_spinner=False, ttl=1800)
+def fetch_proposicao_relacionadas(id_proposicao: str) -> list:
+    """Retorna relações/apensações da proposição (API Câmara /relacionadas)."""
+    if not id_proposicao:
+        return []
+    url = f"{BASE_URL}/proposicoes/{id_proposicao}/relacionadas"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        if r.status_code == 200:
+            return r.json().get("dados", []) or []
+        return []
+    except Exception:
+        return []
+
+
+def get_proposicao_principal_id(id_proposicao: str):
+    """Descobre a proposição principal à qual esta está apensada (se houver)."""
+    dados = fetch_proposicao_relacionadas(str(id_proposicao))
+    if not dados:
+        return None
+
+    # Preferir campos explícitos de principal
+    for item in dados:
+        prop_princ = item.get("proposicaoPrincipal") or item.get("proposicao_principal")
+        if isinstance(prop_princ, dict):
+            uri = prop_princ.get("uri") or prop_princ.get("uriProposicao") or prop_princ.get("uriProposicaoPrincipal")
+            if uri:
+                pid = extract_id_from_uri(uri)
+                if pid:
+                    return pid
+
+        for chave_uri in ("uriProposicaoPrincipal", "uriProposicao_principal", "uriPrincipal"):
+            if item.get(chave_uri):
+                pid = extract_id_from_uri(item.get(chave_uri))
+                if pid:
+                    return pid
+
+    # Fallback: usar helper genérico (melhor que ficar em branco)
+    for item in dados:
+        pid = get_proposicao_id_from_item(item)
+        if pid:
+            return pid
+
+    return None
+
+
+def format_relator_text(relator_info: dict) -> tuple[str, str]:
+    """Formata relator para 'Nome (PART/UF)'. Retorna (texto, id)."""
+    if not relator_info or not isinstance(relator_info, dict) or not relator_info.get("nome"):
+        return ("", "")
+    nome = str(relator_info.get("nome", "")).strip()
+    partido = str(relator_info.get("partido", "") or "").strip()
+    uf = str(relator_info.get("uf", "") or "").strip()
+    relator_id = str(relator_info.get("id_deputado", "") or "")
+    if partido or uf:
+        txt = f"{nome} ({partido}/{uf})".replace("//", "/").replace("(/", "(").replace("/)", ")")
+    else:
+        txt = nome
+    return (txt, relator_id)
+
 def fetch_proposicao_completa(id_proposicao: str) -> dict:
     """
     FUNÇÃO CENTRAL: Busca TODAS as informações da proposição de uma vez.
@@ -4561,6 +4624,7 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
         "Aguardando Parecer do Relator(a)": "Aguardando Parecer",
         "Aguardando Parecer do Relator(a).": "Aguardando Parecer",
     })
+    df.loc[df["Situação atual"].astype(str).str.startswith("Aguardando Parecer", na=False), "Situação atual"] = "Aguardando Parecer"
     # Tratar marcadores vazios/traços como interno
     def _is_blankish(v):
         if pd.isna(v):
@@ -4576,6 +4640,24 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
         "Aguardando Designacao de Relator(a)",
     ])
     df.loc[mask_aguardando_relator & df["Relator(a)"].apply(_is_blankish), "Relator(a)"] = "Aguardando"
+
+    # Preencher relator para "Tramitando em Conjunto" buscando a proposição principal (apensada)
+    mask_conjunto = df["Situação atual"].eq("Tramitando em Conjunto")
+    if mask_conjunto.any():
+        def _fill_relator_conjunto(row):
+            if not _is_blankish(row.get("Relator(a)", "")):
+                return row.get("Relator(a)", "—")
+            pid = str(row.get("id", "") or "").strip()
+            if not pid:
+                return row.get("Relator(a)", "—")
+            principal_id = get_proposicao_principal_id(pid)
+            if not principal_id or str(principal_id) == pid:
+                return row.get("Relator(a)", "—")
+            dados_principal = fetch_proposicao_completa(str(principal_id))
+            rel_txt, _ = format_relator_text(dados_principal.get("relator", {}) or {})
+            return rel_txt if rel_txt else row.get("Relator(a)", "—")
+        df.loc[mask_conjunto, "Relator(a)"] = df.loc[mask_conjunto].apply(_fill_relator_conjunto, axis=1)
+
     
     # Link do relator (se tiver id)
     def _link_relator(row):
