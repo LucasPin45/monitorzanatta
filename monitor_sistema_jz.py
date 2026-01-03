@@ -4541,6 +4541,41 @@ def enrich_with_status(df_base: pd.DataFrame, status_map: dict) -> pd.DataFrame:
     df["Órgão (sigla)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("siglaOrgao", ""))
     df["Relator(a)"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator", "—"))
     df["Relator_ID"] = df["id"].astype(str).map(lambda x: status_map.get(str(x), {}).get("relator_id", ""))
+
+    # ------------------------------------------------------------
+    # Normalizações pedidas pelo gabinete (sem mudar a estrutura):
+    # - Unificar 'Aguardando Parecer do Relator(a)' -> 'Aguardando Parecer'
+    # - Situações internas/ambiguas -> 'Em providência Interna'
+    # - Quando 'Aguardando Designação de Relator(a)', preencher Relator(a) com 'Aguardando'
+    # ------------------------------------------------------------
+    _SITUACOES_INTERNA = {
+        "Despacho de Apensação",
+        "Distribuição",
+        "Publicação de Despacho",
+        "Notificacao para Publicação Intermediária",
+        "Notificações",
+        "Ratificação de Parecer",
+    }
+    # Unificar variações
+    df["Situação atual"] = df["Situação atual"].replace({
+        "Aguardando Parecer do Relator(a)": "Aguardando Parecer",
+        "Aguardando Parecer do Relator(a).": "Aguardando Parecer",
+    })
+    # Tratar marcadores vazios/traços como interno
+    def _is_blankish(v):
+        if pd.isna(v):
+            return True
+        s = str(v).strip()
+        return s in ("", "-", "—", "–")
+    df.loc[df["Situação atual"].apply(_is_blankish), "Situação atual"] = "Em providência Interna"
+    df.loc[df["Situação atual"].isin(_SITUACOES_INTERNA), "Situação atual"] = "Em providência Interna"
+
+    # Preencher relator quando aguardando designação
+    mask_aguardando_relator = df["Situação atual"].isin([
+        "Aguardando Designação de Relator(a)",
+        "Aguardando Designacao de Relator(a)",
+    ])
+    df.loc[mask_aguardando_relator & df["Relator(a)"].apply(_is_blankish), "Relator(a)"] = "Aguardando"
     
     # Link do relator (se tiver id)
     def _link_relator(row):
@@ -6036,6 +6071,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             ).copy()
             
             df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
+            df_tbl["Parado (dias)"] = df_rast_enriched.get("Parado (dias)", pd.Series([None]*len(df_rast_enriched)))
             df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
             
             def get_alerta_emoji(dias):
@@ -6052,8 +6088,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
 
             show_cols_r = [
-                "Alerta", "Proposição", "Ementa", "ID", "Ano", "Tipo", "Órgão (sigla)",
-                "Situação atual", "Último andamento", "Data do status", "LinkTramitacao",
+                "Alerta", "Proposição", "Tipo", "Ano",
+                "Situação atual", "Órgão (sigla)", "Relator(a)",
+                "Último andamento", "Data do status", "Parado (dias)", "LinkTramitacao",
+                "Ementa", "ID",
             ]
 
             for c in show_cols_r:
