@@ -5113,7 +5113,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v26")
+    st.caption("v26 – versão estável (sem IA)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -5958,7 +5958,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 fetch_lista_proposicoes_autoria.clear()
                 build_status_map.clear()
                 st.session_state.pop("df_status_last", None)
-                st.session_state.pop("df_todas_enriquecido_tab5", None)  # Limpar cache do chat também
+                st.session_state.pop("df_todas_enriquecido_tab5", None)  # Limpar cache do dataset enriquecido também
                 st.success("✅ Cache limpo! Recarregando...")
                 st.rerun()  # Forçar recarga da página
 
@@ -6170,15 +6170,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.caption(f"🔎 Filtro atual: **'{filtro_busca}'**" if filtro_busca else "🔎 Sem filtro ativo")
         
         # Usar o DataFrame COMPLETO enriquecido (com Situação e Órgão)
-        df_para_chat = st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())
-        
-        if df_para_chat.empty:
-        
+        df_view_tab5 = st.session_state.get("df_todas_enriquecido_tab5", pd.DataFrame())
+        if df_view_tab5.empty:
             pass
-        # DEBUG: Mostrar fonte dos dados
-        st.caption(f"📁 Fonte: **{fonte}** ({len(df_para_chat)} registros)")
-        
-        if filtro_busca and not df_para_chat.empty:
+        if filtro_busca and not df_view_tab5.empty:
             busca = filtro_busca.strip().lower()
             if busca:
                 # Aplicar filtro
@@ -6192,40 +6187,40 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     return txt
                 
                 # Determinar colunas
-                col_prop = "Proposição" if "Proposição" in df_para_chat.columns else "Proposicao"
-                col_ementa = "Ementa" if "Ementa" in df_para_chat.columns else "ementa"
+                col_prop = "Proposição" if "Proposição" in df_view_tab5.columns else "Proposicao"
+                col_ementa = "Ementa" if "Ementa" in df_view_tab5.columns else "ementa"
                 
-                df_para_chat = df_para_chat.copy()
-                df_para_chat["_busca_tmp"] = (
-                    df_para_chat[col_prop].fillna("").astype(str) + " " + 
-                    df_para_chat[col_ementa].fillna("").astype(str)
+                df_view_tab5 = df_view_tab5.copy()
+                df_view_tab5["_busca_tmp"] = (
+                    df_view_tab5[col_prop].fillna("").astype(str) + " " + 
+                    df_view_tab5[col_ementa].fillna("").astype(str)
                 ).apply(normalizar_busca)
                 
                 busca_norm = normalizar_busca(busca)
-                df_para_chat = df_para_chat[df_para_chat["_busca_tmp"].str.contains(busca_norm, na=False)]
-                df_para_chat = df_para_chat.drop(columns=["_busca_tmp"], errors="ignore")
+                df_view_tab5 = df_view_tab5[df_view_tab5["_busca_tmp"].str.contains(busca_norm, na=False)]
+                df_view_tab5 = df_view_tab5.drop(columns=["_busca_tmp"], errors="ignore")
                 
         
         # DEBUG info
-        if not df_para_chat.empty:
-            colunas = list(df_para_chat.columns)
+        if not df_view_tab5.empty:
+            colunas = list(df_view_tab5.columns)
             tem_situacao = "Situação atual" in colunas
             tem_orgao = "Órgão (sigla)" in colunas
             
             # Verificar se tem dados nas colunas
             if tem_situacao:
-                situacao_valores = df_para_chat["Situação atual"].dropna().astype(str)
+                situacao_valores = df_view_tab5["Situação atual"].dropna().astype(str)
                 situacao_nao_vazio = situacao_valores[situacao_valores != ""].count()
             else:
                 situacao_nao_vazio = 0
                 
             if tem_orgao:
-                orgao_valores = df_para_chat["Órgão (sigla)"].dropna().astype(str)
+                orgao_valores = df_view_tab5["Órgão (sigla)"].dropna().astype(str)
                 orgao_nao_vazio = orgao_valores[orgao_valores != ""].count()
             else:
                 orgao_nao_vazio = 0
             
-            total = len(df_para_chat)
+            total = len(df_view_tab5)
             
             if filtro_busca:
             
