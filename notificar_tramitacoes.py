@@ -14,6 +14,7 @@ Horário: 08:00 às 20:00 (Brasília) - Segunda a Sexta
 import os
 import sys
 import json
+import html
 import requests
 import time
 from datetime import datetime, timedelta, timezone
@@ -52,7 +53,7 @@ def carregar_estado():
         if ESTADO_FILE.exists():
             with open(ESTADO_FILE, "r") as f:
                 estado = json.load(f)
-                print(f"📁 Estado carregado: {estado}")
+                print(f"📂 Estado carregado: {estado}")
                 return estado
     except Exception as e:
         print(f"⚠️ Erro ao carregar estado: {e}")
@@ -74,6 +75,16 @@ def salvar_estado(teve_novidade):
 # ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
+
+def escapar_html(texto):
+    """
+    Escapa caracteres especiais para evitar erro 400 no Telegram.
+    Caracteres como <, >, & quebram o parse_mode=HTML.
+    """
+    if not texto:
+        return ""
+    return html.escape(str(texto))
+
 
 def obter_data_hora_brasilia():
     """Retorna data e hora no fuso de Brasília"""
@@ -187,12 +198,15 @@ def tramitacao_recente(tramitacao, horas=48):
 
 
 def formatar_mensagem_novidade(proposicao, tramitacao):
-    """Formata mensagem de nova tramitação"""
+    """Formata mensagem de nova tramitação com escape de HTML"""
     
+    # Dados básicos (não precisam de escape - são controlados)
     sigla = proposicao.get("siglaTipo", "")
     numero = proposicao.get("numero", "")
     ano = proposicao.get("ano", "")
-    ementa = proposicao.get("ementa", "")
+    
+    # Dados que PRECISAM de escape (vêm da API e podem ter caracteres especiais)
+    ementa = escapar_html(proposicao.get("ementa", ""))
     
     if len(ementa) > 200:
         ementa = ementa[:197] + "..."
@@ -207,7 +221,10 @@ def formatar_mensagem_novidade(proposicao, tramitacao):
     else:
         data_formatada = "Data não disponível"
     
-    descricao = tramitacao.get("despacho", "") or tramitacao.get("descricaoTramitacao", "")
+    # Descrição também precisa de escape
+    descricao_raw = tramitacao.get("despacho", "") or tramitacao.get("descricaoTramitacao", "")
+    descricao = escapar_html(descricao_raw)
+    
     link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={proposicao['id']}"
     
     data_hora_varredura = obter_data_hora_brasilia()
@@ -277,6 +294,15 @@ def enviar_telegram(mensagem):
         resp.raise_for_status()
         print("✅ Mensagem enviada com sucesso!")
         return True
+    except requests.exceptions.HTTPError as e:
+        print(f"❌ Erro ao enviar mensagem: {e}")
+        # Log adicional para debug
+        try:
+            error_detail = resp.json()
+            print(f"   Detalhe do erro: {error_detail}")
+        except:
+            print(f"   Response: {resp.text}")
+        return False
     except Exception as e:
         print(f"❌ Erro ao enviar mensagem: {e}")
         return False
