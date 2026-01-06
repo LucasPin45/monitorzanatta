@@ -2,7 +2,14 @@ name: Notificar Tramitações
 
 on:
   schedule:
-    # Horários de Brasília (UTC-3) → converter para UTC
+    # ============================================================
+    # HORÁRIOS (Brasília → UTC)
+    # ============================================================
+    # 
+    # BOM DIA: 07:55 BRT = 10:55 UTC
+    - cron: '55 10 * * 1-5'
+    
+    # VARREDURAS: de 2 em 2h
     # 08:00 BRT = 11:00 UTC
     # 10:00 BRT = 13:00 UTC
     # 12:00 BRT = 15:00 UTC
@@ -10,16 +17,30 @@ on:
     # 16:00 BRT = 19:00 UTC
     # 18:00 BRT = 21:00 UTC
     # 20:00 BRT = 23:00 UTC
-    # 
-    # Formato cron: minuto hora dia-mês mês dia-semana
-    # dia-semana: 1-5 = segunda a sexta
     - cron: '0 11,13,15,17,19,21,23 * * 1-5'
+    
+    # RESUMO DO DIA: 20:30 BRT = 23:30 UTC
+    - cron: '30 23 * * 1-5'
   
-  workflow_dispatch:  # Permite executar manualmente
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Modo de execução'
+        required: true
+        default: 'varredura'
+        type: choice
+        options:
+          - varredura
+          - bom_dia
+          - resumo
 
 jobs:
-  notificar:
+  # ============================================================
+  # JOB: BOM DIA (07:55 BRT)
+  # ============================================================
+  bom_dia:
     runs-on: ubuntu-latest
+    if: github.event.schedule == '55 10 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'bom_dia')
     
     steps:
       - name: Checkout do código
@@ -31,10 +52,51 @@ jobs:
           python-version: '3.11'
       
       - name: Instalar dependências
-        run: |
-          pip install requests
+        run: pip install requests
       
-      # Restaurar estado da última execução
+      # Restaurar resumo do dia (para resetar)
+      - name: Restaurar resumo do dia
+        uses: actions/cache@v4
+        with:
+          path: resumo_dia.json
+          key: resumo-dia-${{ github.run_id }}
+          restore-keys: |
+            resumo-dia-
+      
+      - name: Enviar Bom Dia
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MODO_EXECUCAO: bom_dia
+        run: python notificar_tramitacoes.py
+      
+      # Salvar resumo do dia (resetado)
+      - name: Salvar resumo do dia
+        uses: actions/cache@v4
+        with:
+          path: resumo_dia.json
+          key: resumo-dia-${{ github.run_id }}
+
+  # ============================================================
+  # JOB: VARREDURA (de 2 em 2h)
+  # ============================================================
+  varredura:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 11,13,15,17,19,21,23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'varredura')
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependências
+        run: pip install requests
+      
+      # Restaurar estado
       - name: Restaurar estado
         uses: actions/cache@v4
         with:
@@ -43,16 +105,83 @@ jobs:
           restore-keys: |
             estado-monitor-
       
-      - name: Executar script de notificação
+      # Restaurar histórico de notificações
+      - name: Restaurar histórico
+        uses: actions/cache@v4
+        with:
+          path: historico_notificacoes.json
+          key: historico-notificacoes-${{ github.run_id }}
+          restore-keys: |
+            historico-notificacoes-
+      
+      # Restaurar resumo do dia
+      - name: Restaurar resumo do dia
+        uses: actions/cache@v4
+        with:
+          path: resumo_dia.json
+          key: resumo-dia-${{ github.run_id }}
+          restore-keys: |
+            resumo-dia-
+      
+      - name: Executar varredura
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python notificar_tramitacoes.py
+          MODO_EXECUCAO: varredura
+        run: python notificar_tramitacoes.py
       
-      # Salvar estado para próxima execução
+      # Salvar estado
       - name: Salvar estado
         uses: actions/cache@v4
         with:
           path: estado_monitor.json
           key: estado-monitor-${{ github.run_id }}
+      
+      # Salvar histórico
+      - name: Salvar histórico
+        uses: actions/cache@v4
+        with:
+          path: historico_notificacoes.json
+          key: historico-notificacoes-${{ github.run_id }}
+      
+      # Salvar resumo do dia
+      - name: Salvar resumo do dia
+        uses: actions/cache@v4
+        with:
+          path: resumo_dia.json
+          key: resumo-dia-${{ github.run_id }}
+
+  # ============================================================
+  # JOB: RESUMO DO DIA (20:30 BRT)
+  # ============================================================
+  resumo:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '30 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'resumo')
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependências
+        run: pip install requests
+      
+      # Restaurar resumo do dia
+      - name: Restaurar resumo do dia
+        uses: actions/cache@v4
+        with:
+          path: resumo_dia.json
+          key: resumo-dia-${{ github.run_id }}
+          restore-keys: |
+            resumo-dia-
+      
+      - name: Enviar Resumo do Dia
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MODO_EXECUCAO: resumo
+        run: python notificar_tramitacoes.py
