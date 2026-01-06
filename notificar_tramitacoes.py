@@ -9,6 +9,11 @@ Verifica novas movimentações e notifica via Telegram
 Tipos monitorados: PL, PLP, PDL, RIC, REQ, PRL
 Período: Desde 2023 (início do mandato)
 Horário: 08:00 às 20:00 (Brasília) - Segunda a Sexta
+
+v3: 
+- Controle de duplicatas - não repete notificações já enviadas
+- Mensagem de bom dia às 07:55
+- Resumo do dia às 20:30
 """
 
 import os
@@ -31,6 +36,9 @@ DEPUTADA_ID = 220559  # Júlia Zanatta
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Modo de execução (bom_dia, varredura, resumo)
+MODO_EXECUCAO = os.getenv("MODO_EXECUCAO", "varredura")
+
 # Tipos de proposição a monitorar
 TIPOS_MONITORADOS = ["PL", "PLP", "PDL", "RIC", "REQ", "PRL"]
 
@@ -39,6 +47,15 @@ DATA_INICIO_MANDATO = "2023-02-01"
 
 # Arquivo para guardar estado entre execuções
 ESTADO_FILE = Path("estado_monitor.json")
+
+# Arquivo para guardar histórico de notificações enviadas
+HISTORICO_FILE = Path("historico_notificacoes.json")
+
+# Arquivo para guardar tramitações do dia (para resumo)
+RESUMO_DIA_FILE = Path("resumo_dia.json")
+
+# Dias para manter histórico (evita crescer indefinidamente)
+DIAS_MANTER_HISTORICO = 7
 
 # Fuso horário de Brasília (UTC-3)
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
@@ -70,6 +87,147 @@ def salvar_estado(teve_novidade):
         print(f"💾 Estado salvo: {estado}")
     except Exception as e:
         print(f"⚠️ Erro ao salvar estado: {e}")
+
+
+# ============================================================
+# GERENCIAMENTO DE HISTÓRICO DE NOTIFICAÇÕES
+# ============================================================
+
+def carregar_historico():
+    """Carrega o histórico de notificações já enviadas"""
+    try:
+        if HISTORICO_FILE.exists():
+            with open(HISTORICO_FILE, "r") as f:
+                historico = json.load(f)
+                print(f"📂 Histórico carregado: {len(historico.get('notificadas', []))} tramitações registradas")
+                return historico
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar histórico: {e}")
+    
+    return {"notificadas": [], "ultima_limpeza": None}
+
+
+def salvar_historico(historico):
+    """Salva o histórico de notificações"""
+    try:
+        with open(HISTORICO_FILE, "w") as f:
+            json.dump(historico, f, indent=2)
+        print(f"💾 Histórico salvo: {len(historico.get('notificadas', []))} tramitações")
+    except Exception as e:
+        print(f"⚠️ Erro ao salvar histórico: {e}")
+
+
+def limpar_historico_antigo(historico):
+    """Remove entradas antigas do histórico para não crescer indefinidamente"""
+    agora = datetime.now(FUSO_BRASILIA)
+    data_corte = (agora - timedelta(days=DIAS_MANTER_HISTORICO)).isoformat()
+    
+    notificadas_original = len(historico.get("notificadas", []))
+    
+    # Filtrar apenas as entradas recentes
+    historico["notificadas"] = [
+        item for item in historico.get("notificadas", [])
+        if item.get("registrado_em", "") >= data_corte
+    ]
+    
+    removidas = notificadas_original - len(historico["notificadas"])
+    if removidas > 0:
+        print(f"🧹 Limpeza do histórico: {removidas} entradas antigas removidas")
+    
+    historico["ultima_limpeza"] = agora.isoformat()
+    return historico
+
+
+def gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao):
+    """
+    Gera uma chave única para identificar uma tramitação específica.
+    Formato: {proposicao_id}_{data_hora_tramitacao}
+    """
+    # Normaliza a data/hora para evitar variações
+    data_normalizada = str(data_hora_tramitacao)[:19] if data_hora_tramitacao else "sem_data"
+    return f"{proposicao_id}_{data_normalizada}"
+
+
+def ja_foi_notificada(historico, proposicao_id, data_hora_tramitacao):
+    """Verifica se uma tramitação já foi notificada anteriormente"""
+    chave = gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao)
+    
+    for item in historico.get("notificadas", []):
+        if item.get("chave") == chave:
+            return True
+    
+    return False
+
+
+def registrar_notificacao(historico, proposicao_id, data_hora_tramitacao, sigla_proposicao):
+    """Registra uma tramitação como notificada"""
+    chave = gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao)
+    agora = datetime.now(FUSO_BRASILIA).isoformat()
+    
+    historico["notificadas"].append({
+        "chave": chave,
+        "proposicao_id": proposicao_id,
+        "sigla": sigla_proposicao,
+        "data_tramitacao": str(data_hora_tramitacao)[:19] if data_hora_tramitacao else None,
+        "registrado_em": agora
+    })
+    
+    return historico
+
+
+# ============================================================
+# GERENCIAMENTO DO RESUMO DO DIA
+# ============================================================
+
+def carregar_resumo_dia():
+    """Carrega as tramitações do dia atual"""
+    try:
+        if RESUMO_DIA_FILE.exists():
+            with open(RESUMO_DIA_FILE, "r") as f:
+                resumo = json.load(f)
+                print(f"📂 Resumo do dia carregado: {len(resumo.get('tramitacoes', []))} tramitações")
+                return resumo
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar resumo do dia: {e}")
+    
+    return {"data": None, "tramitacoes": []}
+
+
+def salvar_resumo_dia(resumo):
+    """Salva as tramitações do dia"""
+    try:
+        with open(RESUMO_DIA_FILE, "w") as f:
+            json.dump(resumo, f, indent=2)
+        print(f"💾 Resumo do dia salvo: {len(resumo.get('tramitacoes', []))} tramitações")
+    except Exception as e:
+        print(f"⚠️ Erro ao salvar resumo do dia: {e}")
+
+
+def inicializar_resumo_dia():
+    """Inicializa/reseta o resumo do dia (chamado no bom dia)"""
+    agora = datetime.now(FUSO_BRASILIA)
+    resumo = {
+        "data": agora.strftime("%Y-%m-%d"),
+        "tramitacoes": []
+    }
+    salvar_resumo_dia(resumo)
+    return resumo
+
+
+def adicionar_ao_resumo(resumo, sigla_proposicao):
+    """Adiciona uma tramitação ao resumo do dia"""
+    agora = datetime.now(FUSO_BRASILIA)
+    data_hoje = agora.strftime("%Y-%m-%d")
+    
+    # Se mudou o dia, reinicia o resumo
+    if resumo.get("data") != data_hoje:
+        resumo = {"data": data_hoje, "tramitacoes": []}
+    
+    # Evita duplicatas no resumo do dia
+    if sigla_proposicao not in resumo["tramitacoes"]:
+        resumo["tramitacoes"].append(sigla_proposicao)
+    
+    return resumo
 
 
 # ============================================================
@@ -273,6 +431,55 @@ def formatar_mensagem_sem_novidades_curta():
     return mensagem
 
 
+def formatar_mensagem_bom_dia():
+    """Formata mensagem de bom dia"""
+    
+    mensagem = """☀️ <b>Bom dia!</b>
+
+Sou <b>MoniParBot</b>, ou Robô do Monitor Parlamentar, sistema criado para monitorar as matérias legislativas de autoria da Deputada Júlia Zanatta, a Deputada pronta para combate! 💪
+
+Ao longo do dia, faremos uma varredura de 2 em 2h para identificar movimentações nas matérias da Deputada. Quando encontrada, será notificada. Quando não encontrada, será avisado que não foi encontrada.
+
+Até daqui a pouco! 🔍"""
+    
+    return mensagem
+
+
+def formatar_mensagem_resumo_dia(tramitacoes):
+    """Formata mensagem de resumo do dia"""
+    
+    quantidade = len(tramitacoes)
+    
+    if quantidade == 0:
+        mensagem = """🌙 <b>Resumo do dia:</b>
+
+Hoje não foram identificadas tramitações em matérias da Dep. Júlia Zanatta.
+
+Até amanhã! 👋"""
+    
+    elif quantidade == 1:
+        lista = f"• {tramitacoes[0]}"
+        mensagem = f"""🌙 <b>Resumo do dia:</b>
+
+Hoje foi identificada <b>1 tramitação</b>. Na seguinte matéria:
+
+{lista}
+
+Até amanhã! 👋"""
+    
+    else:
+        lista = "\n".join([f"• {t}" for t in tramitacoes])
+        mensagem = f"""🌙 <b>Resumo do dia:</b>
+
+Hoje foram identificadas <b>{quantidade} tramitações</b>. Nas seguintes matérias:
+
+{lista}
+
+Até amanhã! 👋"""
+    
+    return mensagem
+
+
 def enviar_telegram(mensagem):
     """Envia mensagem para o Telegram"""
     
@@ -309,35 +516,74 @@ def enviar_telegram(mensagem):
 
 
 # ============================================================
-# FUNÇÃO PRINCIPAL
+# FUNÇÕES DE MODO DE EXECUÇÃO
 # ============================================================
 
-def main():
-    """Verifica novas tramitações e notifica via Telegram"""
+def executar_bom_dia():
+    """Envia mensagem de bom dia e reseta o resumo do dia"""
+    
+    print("☀️ MODO: BOM DIA")
+    print("=" * 60)
+    
+    # Resetar resumo do dia
+    inicializar_resumo_dia()
+    print("📋 Resumo do dia inicializado")
+    
+    # Enviar mensagem de bom dia
+    mensagem = formatar_mensagem_bom_dia()
+    enviar_telegram(mensagem)
+    
+    print("\n✅ Bom dia enviado!")
+
+
+def executar_resumo_dia():
+    """Envia resumo das tramitações do dia"""
+    
+    print("🌙 MODO: RESUMO DO DIA")
+    print("=" * 60)
+    
+    # Carregar resumo do dia
+    resumo = carregar_resumo_dia()
+    tramitacoes = resumo.get("tramitacoes", [])
+    
+    print(f"📊 Tramitações do dia: {len(tramitacoes)}")
+    for t in tramitacoes:
+        print(f"   • {t}")
+    
+    # Enviar mensagem de resumo
+    mensagem = formatar_mensagem_resumo_dia(tramitacoes)
+    enviar_telegram(mensagem)
+    
+    print("\n✅ Resumo do dia enviado!")
+
+
+def executar_varredura():
+    """Executa varredura normal de tramitações"""
     
     data_hora_brasilia = obter_data_hora_brasilia()
     
-    print("=" * 60)
-    print("🔔 MONITOR DE TRAMITAÇÕES - DEPUTADA JÚLIA ZANATTA")
+    print("🔍 MODO: VARREDURA")
     print("=" * 60)
     print(f"📅 Data/Hora (Brasília): {data_hora_brasilia}")
-    print()
-    
-    # Verificar variáveis de ambiente
-    if not TELEGRAM_BOT_TOKEN:
-        print("❌ ERRO: TELEGRAM_BOT_TOKEN não configurado!")
-        sys.exit(1)
-    if not TELEGRAM_CHAT_ID:
-        print("❌ ERRO: TELEGRAM_CHAT_ID não configurado!")
-        sys.exit(1)
-    
-    print(f"✅ Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
-    print(f"✅ Chat ID: {TELEGRAM_CHAT_ID}")
     print()
     
     # Carregar estado da última execução
     estado = carregar_estado()
     ultima_teve_novidade = estado.get("ultima_novidade", True)
+    
+    # Carregar histórico de notificações
+    historico = carregar_historico()
+    historico = limpar_historico_antigo(historico)
+    
+    # Carregar resumo do dia
+    resumo = carregar_resumo_dia()
+    
+    # Verificar se é um novo dia (e resetar resumo se necessário)
+    agora = datetime.now(FUSO_BRASILIA)
+    data_hoje = agora.strftime("%Y-%m-%d")
+    if resumo.get("data") != data_hoje:
+        print("📋 Novo dia detectado - inicializando resumo")
+        resumo = {"data": data_hoje, "tramitacoes": []}
     
     # 1. Buscar proposições
     proposicoes = buscar_todas_proposicoes(DEPUTADA_ID)
@@ -349,12 +595,15 @@ def main():
         else:
             enviar_telegram(formatar_mensagem_sem_novidades_curta())
         salvar_estado(False)
+        salvar_historico(historico)
+        salvar_resumo_dia(resumo)
         return
     
     # 2. Verificar tramitações recentes
     print("\n🔍 Verificando tramitações das últimas 48h...\n")
     
     props_com_novidade = []
+    props_ja_notificadas = 0
     erros = 0
     
     for i, prop in enumerate(proposicoes, 1):
@@ -370,11 +619,19 @@ def main():
             continue
         
         if tramitacao_recente(tramitacao, horas=48):
-            print(f"   ✅ NOVA! {sigla_prop}")
-            props_com_novidade.append({
-                "proposicao": prop,
-                "tramitacao": tramitacao
-            })
+            # VERIFICAR SE JÁ FOI NOTIFICADA
+            data_hora_tram = tramitacao.get("dataHora", "")
+            
+            if ja_foi_notificada(historico, prop["id"], data_hora_tram):
+                print(f"   ⏭️ JÁ NOTIFICADA: {sigla_prop}")
+                props_ja_notificadas += 1
+            else:
+                print(f"   ✅ NOVA! {sigla_prop}")
+                props_com_novidade.append({
+                    "proposicao": prop,
+                    "tramitacao": tramitacao,
+                    "sigla": sigla_prop
+                })
         
         time.sleep(0.15)
     
@@ -382,7 +639,8 @@ def main():
     print(f"\n{'=' * 60}")
     print(f"📊 RESUMO:")
     print(f"   Total verificadas: {len(proposicoes)}")
-    print(f"   Com novidades: {len(props_com_novidade)}")
+    print(f"   Com novidades (novas): {len(props_com_novidade)}")
+    print(f"   Já notificadas anteriormente: {props_ja_notificadas}")
     print(f"   Erros de API: {erros}")
     print(f"{'=' * 60}")
     
@@ -394,10 +652,21 @@ def main():
         for item in props_com_novidade:
             mensagem = formatar_mensagem_novidade(item["proposicao"], item["tramitacao"])
             if enviar_telegram(mensagem):
+                # Registrar no histórico após envio bem-sucedido
+                historico = registrar_notificacao(
+                    historico,
+                    item["proposicao"]["id"],
+                    item["tramitacao"].get("dataHora", ""),
+                    item["sigla"]
+                )
+                # Adicionar ao resumo do dia
+                resumo = adicionar_ao_resumo(resumo, item["sigla"])
                 enviadas += 1
             time.sleep(1)
         
         salvar_estado(True)
+        salvar_historico(historico)
+        salvar_resumo_dia(resumo)
         print(f"\n✅ Processo concluído! {enviadas} mensagens enviadas.")
     
     else:
@@ -411,7 +680,44 @@ def main():
             enviar_telegram(formatar_mensagem_sem_novidades_curta())
         
         salvar_estado(False)
+        salvar_historico(historico)
+        salvar_resumo_dia(resumo)
         print("\n✅ Processo concluído!")
+
+
+# ============================================================
+# FUNÇÃO PRINCIPAL
+# ============================================================
+
+def main():
+    """Função principal - executa de acordo com o modo"""
+    
+    print("=" * 60)
+    print("🤖 MONIPARBOT - MONITOR PARLAMENTAR")
+    print("    Deputada Júlia Zanatta")
+    print("=" * 60)
+    print()
+    
+    # Verificar variáveis de ambiente
+    if not TELEGRAM_BOT_TOKEN:
+        print("❌ ERRO: TELEGRAM_BOT_TOKEN não configurado!")
+        sys.exit(1)
+    if not TELEGRAM_CHAT_ID:
+        print("❌ ERRO: TELEGRAM_CHAT_ID não configurado!")
+        sys.exit(1)
+    
+    print(f"✅ Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
+    print(f"✅ Chat ID: {TELEGRAM_CHAT_ID}")
+    print(f"📋 Modo de execução: {MODO_EXECUCAO}")
+    print()
+    
+    # Executar de acordo com o modo
+    if MODO_EXECUCAO == "bom_dia":
+        executar_bom_dia()
+    elif MODO_EXECUCAO == "resumo":
+        executar_resumo_dia()
+    else:
+        executar_varredura()
 
 
 if __name__ == "__main__":
