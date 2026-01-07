@@ -1,0 +1,142 @@
+name: Monitor Palavras-chave
+
+on:
+  schedule:
+    # ============================================================
+    # HORÁRIOS (Brasília → UTC)
+    # ============================================================
+    # 
+    # BOM DIA: 08:00 BRT = 11:00 UTC
+    - cron: '0 11 * * 1-5'
+    
+    # VARREDURAS: de 3 em 3h (menos frequente que o outro bot)
+    # 09:00 BRT = 12:00 UTC
+    # 12:00 BRT = 15:00 UTC
+    # 15:00 BRT = 18:00 UTC
+    # 18:00 BRT = 21:00 UTC
+    - cron: '0 12,15,18,21 * * 1-5'
+    
+    # RESUMO DO DIA: 20:00 BRT = 23:00 UTC
+    - cron: '0 23 * * 1-5'
+  
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Modo de execução'
+        required: true
+        default: 'varredura'
+        type: choice
+        options:
+          - varredura
+          - bom_dia
+          - resumo
+
+# Permissões explícitas para fazer commits
+permissions:
+  contents: write
+
+jobs:
+  # ============================================================
+  # JOB: BOM DIA (08:00 BRT)
+  # ============================================================
+  bom_dia:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 11 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'bom_dia')
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependências
+        run: pip install requests
+      
+      - name: Enviar Bom Dia
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Ou use tokens específicos se quiser grupo separado:
+          # TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
+          # TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
+          MODO_EXECUCAO: bom_dia
+        run: python notificar_palavras_chave.py
+      
+      - name: Salvar estado no repositório
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A *palavras_chave*.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🔑 Atualiza estado do monitor de palavras-chave [skip ci]"
+          git push || true
+
+  # ============================================================
+  # JOB: VARREDURA (de 3 em 3h)
+  # ============================================================
+  varredura:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 12,15,18,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'varredura')
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependências
+        run: pip install requests
+      
+      - name: Executar varredura
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MODO_EXECUCAO: varredura
+        run: python notificar_palavras_chave.py
+      
+      - name: Salvar estado no repositório
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A *palavras_chave*.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🔑 Atualiza estado do monitor de palavras-chave [skip ci]"
+          git push || true
+
+  # ============================================================
+  # JOB: RESUMO DO DIA (20:00 BRT)
+  # ============================================================
+  resumo:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'resumo')
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependências
+        run: pip install requests
+      
+      - name: Enviar Resumo do Dia
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MODO_EXECUCAO: resumo
+        run: python notificar_palavras_chave.py
+      
+      - name: Salvar estado no repositório
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A *palavras_chave*.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🔑 Atualiza estado do monitor de palavras-chave [skip ci]"
+          git push || true
