@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -54,15 +56,6 @@ jobs:
       - name: Instalar dependências
         run: pip install requests
       
-      # Restaurar resumo do dia (para resetar)
-      - name: Restaurar resumo do dia
-        uses: actions/cache@v4
-        with:
-          path: resumo_dia.json
-          key: resumo-dia-${{ github.run_id }}
-          restore-keys: |
-            resumo-dia-
-      
       - name: Enviar Bom Dia
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -70,12 +63,13 @@ jobs:
           MODO_EXECUCAO: bom_dia
         run: python notificar_tramitacoes.py
       
-      # Salvar resumo do dia (resetado)
-      - name: Salvar resumo do dia
-        uses: actions/cache@v4
-        with:
-          path: resumo_dia.json
-          key: resumo-dia-${{ github.run_id }}
+      - name: Salvar estado no repositório
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A *.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🤖 Atualiza estado do monitor [skip ci]"
+          git push || true
 
   # ============================================================
   # JOB: VARREDURA (de 2 em 2h)
@@ -87,6 +81,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -96,33 +92,6 @@ jobs:
       - name: Instalar dependências
         run: pip install requests
       
-      # Restaurar estado
-      - name: Restaurar estado
-        uses: actions/cache@v4
-        with:
-          path: estado_monitor.json
-          key: estado-monitor-${{ github.run_id }}
-          restore-keys: |
-            estado-monitor-
-      
-      # Restaurar histórico de notificações
-      - name: Restaurar histórico
-        uses: actions/cache@v4
-        with:
-          path: historico_notificacoes.json
-          key: historico-notificacoes-${{ github.run_id }}
-          restore-keys: |
-            historico-notificacoes-
-      
-      # Restaurar resumo do dia
-      - name: Restaurar resumo do dia
-        uses: actions/cache@v4
-        with:
-          path: resumo_dia.json
-          key: resumo-dia-${{ github.run_id }}
-          restore-keys: |
-            resumo-dia-
-      
       - name: Executar varredura
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -130,26 +99,13 @@ jobs:
           MODO_EXECUCAO: varredura
         run: python notificar_tramitacoes.py
       
-      # Salvar estado
-      - name: Salvar estado
-        uses: actions/cache@v4
-        with:
-          path: estado_monitor.json
-          key: estado-monitor-${{ github.run_id }}
-      
-      # Salvar histórico
-      - name: Salvar histórico
-        uses: actions/cache@v4
-        with:
-          path: historico_notificacoes.json
-          key: historico-notificacoes-${{ github.run_id }}
-      
-      # Salvar resumo do dia
-      - name: Salvar resumo do dia
-        uses: actions/cache@v4
-        with:
-          path: resumo_dia.json
-          key: resumo-dia-${{ github.run_id }}
+      - name: Salvar estado no repositório
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A *.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🤖 Atualiza estado do monitor [skip ci]"
+          git push || true
 
   # ============================================================
   # JOB: RESUMO DO DIA (20:30 BRT)
@@ -161,6 +117,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -170,18 +128,17 @@ jobs:
       - name: Instalar dependências
         run: pip install requests
       
-      # Restaurar resumo do dia
-      - name: Restaurar resumo do dia
-        uses: actions/cache@v4
-        with:
-          path: resumo_dia.json
-          key: resumo-dia-${{ github.run_id }}
-          restore-keys: |
-            resumo-dia-
-      
       - name: Enviar Resumo do Dia
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MODO_EXECUCAO: resumo
         run: python notificar_tramitacoes.py
+      
+      - name: Salvar estado no repositório
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A *.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🤖 Atualiza estado do monitor [skip ci]"
+          git push || true
