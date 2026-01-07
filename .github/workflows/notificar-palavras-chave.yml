@@ -57,8 +57,8 @@ jobs:
       
       - name: Enviar Bom Dia
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
+          TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
           # Ou use tokens específicos se quiser grupo separado:
           # TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
           # TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
