@@ -67,13 +67,21 @@ if not st.session_state.autenticado:
 
     senha = st.text_input("Digite a senha de acesso", type="password")
 
-    senha_correta = st.secrets.get("auth", {}).get("senha")
-    if not senha_correta:
-        st.error("Erro de configuração: defina [auth].senha em Settings → Secrets.")
+    # Suporte a múltiplas senhas (lista) ou senha única (retrocompatível)
+    auth_config = st.secrets.get("auth", {})
+    senhas_validas = list(auth_config.get("senhas", []))  # Lista de senhas
+    senha_unica = auth_config.get("senha")  # Senha única (formato antigo)
+    
+    # Se existir senha única no formato antigo, adiciona à lista
+    if senha_unica:
+        senhas_validas.append(senha_unica)
+    
+    if not senhas_validas:
+        st.error("Erro de configuração: defina [auth].senhas ou [auth].senha em Settings → Secrets.")
         st.stop()
 
     if senha:
-        if senha == senha_correta:
+        if senha in senhas_validas:
             st.session_state.autenticado = True
             st.rerun()
         else:
