@@ -404,17 +404,27 @@ def buscar_tramitacoes_recentes_global(horas=48):
 def buscar_ultima_tramitacao(proposicao_id):
     """Busca a última tramitação de uma proposição"""
     url = f"{BASE_URL}/proposicoes/{proposicao_id}/tramitacoes"
-    params = {"ordem": "DESC", "ordenarPor": "dataHora", "itens": 1}
+    # API não aceita ordenarPor - buscar todas e ordenar manualmente
+    params = {"itens": 100}
     
     try:
         resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         
-        if data.get("dados"):
-            return data["dados"][0]
+        tramitacoes = data.get("dados", [])
+        
+        if tramitacoes:
+            # Ordenar por data (mais recente primeiro)
+            tramitacoes_ordenadas = sorted(
+                tramitacoes,
+                key=lambda x: x.get("dataHora", ""),
+                reverse=True
+            )
+            return tramitacoes_ordenadas[0]
     except Exception as e:
-        print(f"⚠️ Erro ao buscar tramitação de {proposicao_id}: {e}")
+        # Não logar cada erro para não poluir o output
+        pass
     
     return None
 
