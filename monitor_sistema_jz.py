@@ -1,4 +1,4 @@
-# monitor_sistema_jz.py - v25
+# monitor_sistema_jz.py - v26
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
 # - Saídas prontas (briefings, análises, checklists)
@@ -13,12 +13,15 @@
 # - Campo "Parado há (dias)" calculado
 # - Relator com alerta de adversário (PT, PSOL, PCdoB, PSB, PV, Rede)
 # - RIC: extração de prazo de resposta, ministério, status respondido
+# - Monitoramento de logins (Telegram + Google Sheets)
+# - Suporte a múltiplas senhas por usuário
 # ============================================================
 
 import datetime
 import concurrent.futures
 import time
 import unicodedata
+import json
 from functools import lru_cache
 from io import BytesIO
 from urllib.parse import urlparse
@@ -43,6 +46,130 @@ except ImportError:
     except ImportError:
         PDF_AVAILABLE = False
 
+# Tentar importar biblioteca do Google Sheets (opcional)
+try:
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+    GSHEETS_AVAILABLE = True
+except ImportError:
+    GSHEETS_AVAILABLE = False
+
+
+# ============================================================
+# FUNÇÕES DE MONITORAMENTO DE LOGIN (Telegram + Google Sheets)
+# ============================================================
+
+def enviar_telegram(mensagem: str) -> bool:
+    """
+    Envia mensagem para o Telegram.
+    Retorna True se enviou com sucesso, False caso contrário.
+    """
+    try:
+        telegram_config = st.secrets.get("telegram", {})
+        bot_token = telegram_config.get("bot_token")
+        chat_id = telegram_config.get("chat_id")
+        
+        if not bot_token or not chat_id:
+            return False
+        
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": mensagem,
+            "parse_mode": "HTML"
+        }
+        
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def registrar_gsheets(usuario: str, data_hora: str, ip: str = "N/A") -> bool:
+    """
+    Registra login no Google Sheets.
+    Retorna True se registrou com sucesso, False caso contrário.
+    """
+    if not GSHEETS_AVAILABLE:
+        return False
+    
+    try:
+        gsheets_config = st.secrets.get("gsheets", {})
+        spreadsheet_id = gsheets_config.get("spreadsheet_id")
+        credentials_json = gsheets_config.get("credentials")
+        
+        if not spreadsheet_id or not credentials_json:
+            return False
+        
+        # Carregar credenciais
+        if isinstance(credentials_json, str):
+            creds_dict = json.loads(credentials_json)
+        else:
+            creds_dict = dict(credentials_json)
+        
+        creds = Credentials.from_service_account_info(
+            creds_dict,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        
+        service = build("sheets", "v4", credentials=creds)
+        
+        # Dados a inserir
+        valores = [[data_hora, usuario, ip]]
+        
+        body = {"values": valores}
+        
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range="A:C",  # Colunas: Data/Hora, Usuário, IP
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body=body
+        ).execute()
+        
+        return True
+    except Exception:
+        return False
+
+
+def registrar_login(usuario: str):
+    """
+    Registra o login do usuário no Telegram e Google Sheets.
+    Executado em background para não travar a interface.
+    """
+    try:
+        # Obter data/hora de Brasília
+        tz_brasilia = ZoneInfo("America/Sao_Paulo")
+        agora = datetime.datetime.now(tz_brasilia)
+        data_hora_str = agora.strftime("%d/%m/%Y %H:%M:%S")
+        
+        # Tentar obter IP (pode não funcionar em todos os ambientes)
+        ip = "N/A"
+        try:
+            # No Streamlit Cloud, headers podem ter o IP
+            if hasattr(st, 'context') and hasattr(st.context, 'headers'):
+                ip = st.context.headers.get("x-forwarded-for", "N/A")
+        except Exception:
+            pass
+        
+        # Mensagem para o Telegram
+        mensagem = (
+            f"🔐 <b>Login no Monitor Zanatta</b>\n\n"
+            f"👤 <b>Usuário:</b> {usuario}\n"
+            f"📅 <b>Data/Hora:</b> {data_hora_str}\n"
+            f"🌐 <b>IP:</b> {ip}"
+        )
+        
+        # Enviar notificação Telegram
+        enviar_telegram(mensagem)
+        
+        # Registrar no Google Sheets
+        registrar_gsheets(usuario, data_hora_str, ip)
+        
+    except Exception:
+        # Silenciosamente ignora erros para não travar o login
+        pass
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
 # ============================================================
@@ -60,6 +187,7 @@ st.set_page_config(
 
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
+    st.session_state.usuario_logado = None
 
 if not st.session_state.autenticado:
     st.markdown("## 🔒 Acesso restrito – Gabinete da Deputada Júlia Zanatta")
@@ -67,22 +195,52 @@ if not st.session_state.autenticado:
 
     senha = st.text_input("Digite a senha de acesso", type="password")
 
-    # Suporte a múltiplas senhas (lista) ou senha única (retrocompatível)
+    # Configuração de autenticação
     auth_config = st.secrets.get("auth", {})
-    senhas_validas = list(auth_config.get("senhas", []))  # Lista de senhas
-    senha_unica = auth_config.get("senha")  # Senha única (formato antigo)
     
-    # Se existir senha única no formato antigo, adiciona à lista
-    if senha_unica:
-        senhas_validas.append(senha_unica)
+    # FORMATO 1 (PREFERIDO): Usuários nomeados - [auth.usuarios]
+    # Exemplo: "Lucas" = "senha123"
+    usuarios_config = auth_config.get("usuarios", {})
     
-    if not senhas_validas:
-        st.error("Erro de configuração: defina [auth].senhas ou [auth].senha em Settings → Secrets.")
+    # FORMATO 2: Lista de senhas - senhas = ["senha1", "senha2"]
+    senhas_lista = list(auth_config.get("senhas", []))
+    
+    # FORMATO 3 (LEGADO): Senha única - senha = "senha123"
+    senha_unica = auth_config.get("senha")
+    
+    # Verificar se há pelo menos uma forma de autenticação configurada
+    if not usuarios_config and not senhas_lista and not senha_unica:
+        st.error("Erro de configuração: defina [auth.usuarios], [auth].senhas ou [auth].senha em Settings → Secrets.")
         st.stop()
 
     if senha:
-        if senha in senhas_validas:
+        usuario_encontrado = None
+        autenticado = False
+        
+        # Primeiro, verifica nos usuários nomeados
+        for nome_usuario, senha_usuario in usuarios_config.items():
+            if senha == senha_usuario:
+                usuario_encontrado = nome_usuario
+                autenticado = True
+                break
+        
+        # Se não encontrou, verifica na lista de senhas
+        if not autenticado and senha in senhas_lista:
+            usuario_encontrado = "Usuário (senha da lista)"
+            autenticado = True
+        
+        # Se não encontrou, verifica senha única legada
+        if not autenticado and senha_unica and senha == senha_unica:
+            usuario_encontrado = "Usuário (senha principal)"
+            autenticado = True
+        
+        if autenticado:
             st.session_state.autenticado = True
+            st.session_state.usuario_logado = usuario_encontrado
+            
+            # Registrar login (Telegram + Google Sheets)
+            registrar_login(usuario_encontrado)
+            
             st.rerun()
         else:
             st.error("Senha incorreta")
