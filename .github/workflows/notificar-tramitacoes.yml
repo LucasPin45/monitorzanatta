@@ -34,6 +34,10 @@ on:
           - bom_dia
           - resumo
 
+# Permissões explícitas para fazer commits
+permissions:
+  contents: write
+
 jobs:
   # ============================================================
   # JOB: BOM DIA (07:55 BRT)
@@ -45,8 +49,6 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -81,8 +83,6 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -117,8 +117,6 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Configurar Python
         uses: actions/setup-python@v5
