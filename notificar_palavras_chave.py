@@ -43,6 +43,15 @@ if not TELEGRAM_CHAT_ID:
 MODO_EXECUCAO = os.getenv("MODO_EXECUCAO", "varredura")
 
 # ============================================================
+# DADOS DA DEPUTADA
+# ============================================================
+
+DEPUTADA_ID = 220559
+DEPUTADA_NOME = "Zanatta"
+DEPUTADA_PARTIDO = "PL"
+DEPUTADA_UF = "SC"
+
+# ============================================================
 # PALAVRAS-CHAVE DE INTERESSE
 # ============================================================
 
@@ -363,6 +372,63 @@ def fetch_proposicao_info(prop_id):
     return data.get("dados", {})
 
 
+def fetch_ids_autoria_deputada(id_deputada):
+    """Busca todos os IDs de proposições de autoria da deputada"""
+    ids = set()
+    url = f"{BASE_URL}/proposicoes"
+    params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "ASC", "ordenarPor": "id"}
+    
+    print(f"   📋 Buscando proposições de autoria da deputada...")
+    
+    while True:
+        data = safe_get(url, params=params)
+        if not data:
+            break
+        
+        for d in data.get("dados", []):
+            if d.get("id"):
+                ids.add(str(d["id"]))
+        
+        # Próxima página
+        next_link = None
+        for link in data.get("links", []):
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+        
+        if not next_link:
+            break
+        
+        url = next_link
+        params = {}
+        time.sleep(0.1)
+    
+    print(f"   ✅ {len(ids)} proposições de autoria encontradas")
+    return ids
+
+
+def verificar_relatoria_deputada(item):
+    """Verifica se a deputada é relatora do item da pauta"""
+    relator = item.get("relator") or {}
+    nome = relator.get("nome") or ""
+    partido = relator.get("siglaPartido") or ""
+    uf = relator.get("siglaUf") or ""
+    
+    # Verificar se o nome contém "Zanatta"
+    if normalize_text(DEPUTADA_NOME) not in normalize_text(nome):
+        return False
+    
+    # Verificar partido se disponível
+    if partido and normalize_text(DEPUTADA_PARTIDO) != normalize_text(partido):
+        return False
+    
+    # Verificar UF se disponível
+    if uf and normalize_text(DEPUTADA_UF) != normalize_text(uf):
+        return False
+    
+    return True
+
+
 # ============================================================
 # BUSCA DE PALAVRAS-CHAVE
 # ============================================================
@@ -433,17 +499,14 @@ def buscar_palavras_no_item(item, palavras_normalizadas, prop_info=None):
 def formatar_mensagem_bom_dia():
     data_hora = obter_data_hora_brasilia()
     
-    mensagem = f"""🔑 <b>Monitor de Palavras-chave Ativo!</b>
+    mensagem = f"""📢 <b>Monitor Parlamentar Informa:</b>
 
-Bom dia! Monitorando pautas das comissões.
+☀️ Bom dia! Monitorando pautas das comissões.
 
-📋 <b>Categorias:</b>
-• Armas e Segurança
-• Saúde - Vacinas
-• Vida e Família
-• Economia Digital
-• Liberdade de Expressão
-• E mais...
+📋 <b>Monitoramento ativo:</b>
+• Matérias de <b>autoria</b> da Dep. Zanatta
+• Matérias com <b>relatoria</b> da Dep. Zanatta
+• Matérias com <b>palavras-chave</b> de interesse
 
 ⏰ <i>{data_hora}</i>"""
     
@@ -500,11 +563,13 @@ def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
     else:
         link = ""
     
-    data_hora_varredura = obter_data_hora_brasilia()
+    data_hora = obter_data_hora_brasilia()
     
     link_texto = f'\n🔗 <a href="{link}">Ver tramitação</a>' if link else ""
     
-    mensagem = f"""🔑 <b>Palavra-chave na Pauta!</b>
+    mensagem = f"""📢 <b>Monitor Parlamentar Informa:</b>
+
+🔑 <b>Palavra-chave na Pauta!</b>
 
 📄 <b>{sigla} {numero}/{ano}</b>
 {ementa}
@@ -515,7 +580,7 @@ def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
 🏷️ <b>Palavras encontradas:</b>
 {palavras_str}{link_texto}
 
-⏰ <i>Varredura: {data_hora_varredura}</i>"""
+⏰ <i>{data_hora}</i>"""
     
     return mensagem
 
@@ -523,20 +588,20 @@ def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
 def formatar_mensagem_sem_novidades_completa():
     data_hora = obter_data_hora_brasilia()
     
-    mensagem = f"""🔑 <b>Monitor de Palavras-chave:</b>
+    mensagem = f"""📢 <b>Monitor Parlamentar Informa:</b>
 
-Não foram encontradas matérias com palavras-chave nas pautas analisadas.
+Não foram encontradas matérias de interesse nas pautas (autoria, relatoria ou palavras-chave).
 
-Continue atento! 👀
-
-⏰ <i>Varredura: {data_hora}</i>"""
+⏰ <i>{data_hora}</i>"""
     
     return mensagem
 
 
 def formatar_mensagem_sem_novidades_curta():
     data_hora = obter_data_hora_brasilia()
-    return f"""🔑 Sem novidades nas pautas.
+    return f"""📢 <b>Monitor Parlamentar Informa:</b>
+
+Sem novidades nas pautas.
 
 ⏰ <i>{data_hora}</i>"""
 
@@ -546,31 +611,99 @@ def formatar_mensagem_recesso():
     data_hora = obter_data_hora_brasilia()
     data_retorno = get_data_retorno_sessao()
     
-    return f"""🔑 <b>Monitor de Palavras-chave</b>
+    return f"""📢 <b>Monitor Parlamentar Informa:</b>
 
 🏖️ <b>Recesso Parlamentar</b>
 
-O Congresso está em recesso. Não há reuniões de comissões agendadas neste período.
+O Congresso está em recesso. Não há reuniões de comissões neste período.
 
 📅 <b>Previsão de retorno:</b> {data_retorno}
-
-O monitoramento de pautas será retomado automaticamente quando a sessão legislativa reiniciar.
 
 ⏰ <i>{data_hora}</i>"""
 
 
-def formatar_mensagem_bom_dia_recesso():
-    """Bom dia durante o recesso"""
-    data_hora = obter_data_hora_brasilia()
-    data_retorno = get_data_retorno_sessao()
+def formatar_mensagem_autoria(evento, prop_info):
+    """Formata mensagem quando matéria de AUTORIA entra na pauta"""
     
-    return f"""🔑 <b>Monitor de Palavras-chave</b>
+    orgao = evento.get("orgaos", [{}])[0].get("sigla", "")
+    data_evento = evento.get("dataHoraInicio", "")[:10]
+    if data_evento:
+        try:
+            dt = datetime.fromisoformat(data_evento)
+            data_formatada = dt.strftime("%d/%m/%Y")
+        except:
+            data_formatada = data_evento
+    else:
+        data_formatada = "Data não informada"
+    
+    sigla = prop_info.get("siglaTipo", "")
+    numero = prop_info.get("numero", "")
+    ano = prop_info.get("ano", "")
+    ementa = escapar_html(prop_info.get("ementa", ""))
+    prop_id = prop_info.get("id", "")
+    
+    if len(ementa) > 250:
+        ementa = ementa[:247] + "..."
+    
+    link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}" if prop_id else ""
+    link_texto = f'\n🔗 <a href="{link}">Ver tramitação</a>' if link else ""
+    
+    data_hora = obter_data_hora_brasilia()
+    
+    return f"""📢 <b>Monitor Parlamentar Informa:</b>
 
-☀️ Bom dia!
+📝 <b>Matéria de AUTORIA na Pauta!</b>
 
-🏖️ O Congresso está em <b>recesso parlamentar</b>.
+📄 <b>{sigla} {numero}/{ano}</b>
+{ementa}
 
-O monitoramento de pautas será retomado em <b>{data_retorno}</b>.
+🏛️ <b>Comissão:</b> {orgao}
+📅 <b>Data:</b> {data_formatada}
+
+👤 <b>Autoria:</b> Dep. Júlia Zanatta (PL-SC){link_texto}
+
+⏰ <i>{data_hora}</i>"""
+
+
+def formatar_mensagem_relatoria(evento, prop_info):
+    """Formata mensagem quando deputada é RELATORA de matéria na pauta"""
+    
+    orgao = evento.get("orgaos", [{}])[0].get("sigla", "")
+    data_evento = evento.get("dataHoraInicio", "")[:10]
+    if data_evento:
+        try:
+            dt = datetime.fromisoformat(data_evento)
+            data_formatada = dt.strftime("%d/%m/%Y")
+        except:
+            data_formatada = data_evento
+    else:
+        data_formatada = "Data não informada"
+    
+    sigla = prop_info.get("siglaTipo", "")
+    numero = prop_info.get("numero", "")
+    ano = prop_info.get("ano", "")
+    ementa = escapar_html(prop_info.get("ementa", ""))
+    prop_id = prop_info.get("id", "")
+    
+    if len(ementa) > 250:
+        ementa = ementa[:247] + "..."
+    
+    link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}" if prop_id else ""
+    link_texto = f'\n🔗 <a href="{link}">Ver tramitação</a>' if link else ""
+    
+    data_hora = obter_data_hora_brasilia()
+    
+    return f"""📢 <b>Monitor Parlamentar Informa:</b>
+
+📋 <b>RELATORIA na Pauta!</b>
+
+📄 <b>{sigla} {numero}/{ano}</b>
+{ementa}
+
+🏛️ <b>Comissão:</b> {orgao}
+📅 <b>Data:</b> {data_formatada}
+
+👩‍⚖️ <b>Relatora:</b> Dep. Júlia Zanatta (PL-SC){link_texto}
 
 ⏰ <i>{data_hora}</i>"""
 
@@ -583,32 +716,45 @@ def formatar_mensagem_resumo_dia(resumo):
     total = len(tramitacoes)
     
     if total == 0:
-        return f"""🌙 <b>Resumo do Dia - Palavras-chave</b>
+        return f"""📢 <b>Monitor Parlamentar Informa:</b>
 
-Hoje não houve matérias com palavras-chave nas pautas.
+🌙 <b>Resumo do Dia</b>
 
-Até amanhã! 👋
+Hoje não houve matérias de interesse nas pautas.
 
 ⏰ <i>{data_hora}</i>"""
     
+    # Separar por tipo
+    autoria = por_categoria.get("Autoria", [])
+    relatoria = por_categoria.get("Relatoria", [])
+    
+    # Palavras-chave (todas as outras categorias)
+    palavras_categorias = {k: v for k, v in por_categoria.items() if k not in ["Autoria", "Relatoria"]}
+    
     detalhes = []
-    for categoria, props in por_categoria.items():
+    
+    if autoria:
+        detalhes.append(f"📝 <b>Autoria:</b> {', '.join(autoria[:5])}")
+    
+    if relatoria:
+        detalhes.append(f"📋 <b>Relatoria:</b> {', '.join(relatoria[:5])}")
+    
+    for categoria, props in palavras_categorias.items():
         if props:
-            props_texto = ", ".join(props[:5])
-            if len(props) > 5:
-                props_texto += f" (+{len(props)-5})"
-            detalhes.append(f"• <b>{categoria}:</b> {props_texto}")
+            props_texto = ", ".join(props[:3])
+            if len(props) > 3:
+                props_texto += f" (+{len(props)-3})"
+            detalhes.append(f"🔑 <b>{categoria}:</b> {props_texto}")
     
     detalhes_str = "\n".join(detalhes)
     
-    return f"""🌙 <b>Resumo do Dia - Palavras-chave</b>
+    return f"""📢 <b>Monitor Parlamentar Informa:</b>
 
-📊 <b>Total:</b> {total} matéria(s) identificada(s)
+🌙 <b>Resumo do Dia</b>
 
-<b>Por categoria:</b>
+📊 <b>Total:</b> {total} matéria(s)
+
 {detalhes_str}
-
-Até amanhã! 👋
 
 ⏰ <i>{data_hora}</i>"""
 
@@ -675,7 +821,7 @@ def executar_resumo_dia():
 def executar_varredura():
     data_hora = obter_data_hora_brasilia()
     
-    print("🔍 MODO: VARREDURA PALAVRAS-CHAVE")
+    print("🔍 MODO: VARREDURA PALAVRAS-CHAVE + AUTORIA/RELATORIA")
     print("=" * 60)
     print(f"📅 Data/Hora: {data_hora}")
     print()
@@ -705,6 +851,9 @@ def executar_varredura():
     palavras_norm = preparar_palavras_chave()
     print(f"🔑 Palavras-chave: {len(palavras_norm)} termos")
     
+    # Buscar IDs de proposições de autoria da deputada
+    ids_autoria = fetch_ids_autoria_deputada(DEPUTADA_ID)
+    
     # Buscar eventos dos próximos 7 dias
     start_date = agora
     end_date = agora + timedelta(days=7)
@@ -727,7 +876,9 @@ def executar_varredura():
     # Analisar pautas
     print("\n🔍 Analisando pautas...\n")
     
-    itens_encontrados = []
+    itens_palavras_chave = []
+    itens_autoria = []
+    itens_relatoria = []
     itens_ja_notificados = 0
     total_itens_pauta = 0
     
@@ -753,93 +904,173 @@ def executar_varredura():
             if prop_id:
                 prop_info = fetch_proposicao_info(prop_id)
             
-            # Buscar palavras-chave
+            # Verificar AUTORIA
+            is_autoria = prop_id and prop_id in ids_autoria
+            
+            # Verificar RELATORIA
+            is_relatoria = verificar_relatoria_deputada(item)
+            
+            # Verificar PALAVRAS-CHAVE
             palavras_encontradas = buscar_palavras_no_item(item, palavras_norm, prop_info)
             
-            if palavras_encontradas:
-                # Verificar se já notificou
-                if ja_foi_notificada(historico, evento_id, prop_id or "sem_id"):
+            # Se não tem nenhum interesse, pular
+            if not (is_autoria or is_relatoria or palavras_encontradas):
+                continue
+            
+            # Montar sigla
+            if prop_info:
+                sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
+            else:
+                sigla = item.get("titulo", "Item")[:30]
+            
+            # Verificar se já notificou (chave única por tipo)
+            chave_base = f"{evento_id}_{prop_id or 'sem_id'}"
+            
+            # AUTORIA
+            if is_autoria:
+                chave_autoria = f"autoria_{chave_base}"
+                if ja_foi_notificada(historico, "autoria", chave_autoria):
                     itens_ja_notificados += 1
-                    continue
-                
-                # Montar sigla
-                if prop_info:
-                    sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
                 else:
-                    sigla = item.get("titulo", "Item")[:30]
-                
-                categoria_principal = palavras_encontradas[0][1]
-                
-                print(f"   ✅ {sigla} em {orgao} - {[p[0] for p in palavras_encontradas]}")
-                
-                itens_encontrados.append({
-                    "evento": evento,
-                    "item": item,
-                    "prop_info": prop_info,
-                    "prop_id": prop_id,
-                    "palavras": palavras_encontradas,
-                    "sigla": sigla,
-                    "categoria": categoria_principal
-                })
+                    print(f"   📝 AUTORIA: {sigla} em {orgao}")
+                    itens_autoria.append({
+                        "evento": evento,
+                        "item": item,
+                        "prop_info": prop_info,
+                        "prop_id": prop_id,
+                        "sigla": sigla,
+                        "chave": chave_autoria
+                    })
+            
+            # RELATORIA
+            if is_relatoria:
+                chave_relatoria = f"relatoria_{chave_base}"
+                if ja_foi_notificada(historico, "relatoria", chave_relatoria):
+                    itens_ja_notificados += 1
+                else:
+                    print(f"   📋 RELATORIA: {sigla} em {orgao}")
+                    itens_relatoria.append({
+                        "evento": evento,
+                        "item": item,
+                        "prop_info": prop_info,
+                        "prop_id": prop_id,
+                        "sigla": sigla,
+                        "chave": chave_relatoria
+                    })
+            
+            # PALAVRAS-CHAVE
+            if palavras_encontradas:
+                chave_palavras = f"palavras_{chave_base}"
+                if ja_foi_notificada(historico, "palavras", chave_palavras):
+                    itens_ja_notificados += 1
+                else:
+                    categoria_principal = palavras_encontradas[0][1]
+                    print(f"   🔑 PALAVRAS: {sigla} em {orgao} - {[p[0] for p in palavras_encontradas]}")
+                    itens_palavras_chave.append({
+                        "evento": evento,
+                        "item": item,
+                        "prop_info": prop_info,
+                        "prop_id": prop_id,
+                        "palavras": palavras_encontradas,
+                        "sigla": sigla,
+                        "categoria": categoria_principal,
+                        "chave": chave_palavras
+                    })
         
         time.sleep(0.1)
     
     # Resumo
+    total_novos = len(itens_autoria) + len(itens_relatoria) + len(itens_palavras_chave)
+    
     print(f"\n{'=' * 60}")
     print(f"📊 RESUMO:")
     print(f"   Eventos analisados: {len(eventos)}")
     print(f"   Itens de pauta: {total_itens_pauta}")
-    print(f"   Com palavras-chave (novos): {len(itens_encontrados)}")
+    print(f"   AUTORIA (novos): {len(itens_autoria)}")
+    print(f"   RELATORIA (novos): {len(itens_relatoria)}")
+    print(f"   PALAVRAS-CHAVE (novos): {len(itens_palavras_chave)}")
     print(f"   Já notificados: {itens_ja_notificados}")
     print(f"{'=' * 60}")
     
     # Enviar notificações
-    if itens_encontrados:
-        print(f"\n📤 Enviando {len(itens_encontrados)} notificação(ões)...\n")
-        
-        enviadas = 0
-        for item_data in itens_encontrados:
+    enviadas = 0
+    
+    # 1. Notificações de AUTORIA (prioridade alta)
+    if itens_autoria:
+        print(f"\n📤 Enviando {len(itens_autoria)} notificação(ões) de AUTORIA...\n")
+        for item_data in itens_autoria:
+            mensagem = formatar_mensagem_autoria(
+                item_data["evento"],
+                item_data["prop_info"] or {}
+            )
+            if enviar_telegram(mensagem):
+                historico = registrar_notificacao(
+                    historico,
+                    "autoria",
+                    item_data["chave"],
+                    item_data["sigla"],
+                    "Autoria"
+                )
+                resumo = adicionar_ao_resumo(resumo, item_data["sigla"], "Autoria")
+                enviadas += 1
+            time.sleep(1)
+    
+    # 2. Notificações de RELATORIA (prioridade alta)
+    if itens_relatoria:
+        print(f"\n📤 Enviando {len(itens_relatoria)} notificação(ões) de RELATORIA...\n")
+        for item_data in itens_relatoria:
+            mensagem = formatar_mensagem_relatoria(
+                item_data["evento"],
+                item_data["prop_info"] or {}
+            )
+            if enviar_telegram(mensagem):
+                historico = registrar_notificacao(
+                    historico,
+                    "relatoria",
+                    item_data["chave"],
+                    item_data["sigla"],
+                    "Relatoria"
+                )
+                resumo = adicionar_ao_resumo(resumo, item_data["sigla"], "Relatoria")
+                enviadas += 1
+            time.sleep(1)
+    
+    # 3. Notificações de PALAVRAS-CHAVE
+    if itens_palavras_chave:
+        print(f"\n📤 Enviando {len(itens_palavras_chave)} notificação(ões) de PALAVRAS-CHAVE...\n")
+        for item_data in itens_palavras_chave:
             mensagem = formatar_mensagem_novidade(
                 item_data["evento"],
                 item_data["item"],
                 item_data["prop_info"],
                 item_data["palavras"]
             )
-            
             if enviar_telegram(mensagem):
                 historico = registrar_notificacao(
                     historico,
-                    item_data["evento"].get("id"),
-                    item_data["prop_id"] or "sem_id",
+                    "palavras",
+                    item_data["chave"],
                     item_data["sigla"],
                     item_data["categoria"]
                 )
-                resumo = adicionar_ao_resumo(
-                    resumo,
-                    item_data["sigla"],
-                    item_data["categoria"]
-                )
+                resumo = adicionar_ao_resumo(resumo, item_data["sigla"], item_data["categoria"])
                 enviadas += 1
-            
             time.sleep(1)
-        
-        salvar_estado(True)
-        salvar_historico(historico)
-        salvar_resumo_dia(resumo)
-        print(f"\n✅ {enviadas} mensagens enviadas!")
     
-    else:
+    # Se não teve nenhuma novidade
+    if total_novos == 0:
         print("\n📤 Enviando mensagem de status...")
-        
         if ultima_teve_novidade:
             enviar_telegram(formatar_mensagem_sem_novidades_completa())
         else:
             enviar_telegram(formatar_mensagem_sem_novidades_curta())
-        
-        salvar_estado(False)
-        salvar_historico(historico)
-        salvar_resumo_dia(resumo)
-        print("✅ Processo concluído!")
+    
+    # Salvar estados
+    salvar_estado(total_novos > 0)
+    salvar_historico(historico)
+    salvar_resumo_dia(resumo)
+    
+    print(f"\n✅ {enviadas} mensagens enviadas!")
 
 
 # ============================================================
@@ -848,8 +1079,8 @@ def executar_varredura():
 
 def main():
     print("=" * 60)
-    print("🔑 MONITOR DE PALAVRAS-CHAVE v4")
-    print("    Busca em PAUTAS de comissões")
+    print("🔑 MONITOR DE PAUTAS v5")
+    print("    Autoria + Relatoria + Palavras-chave")
     print("=" * 60)
     print()
     
