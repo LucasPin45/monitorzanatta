@@ -351,10 +351,11 @@ def buscar_proposicoes_recentes(dias=2):
         
         while True:
             url = f"{BASE_URL}/proposicoes"
+            # Parâmetros corretos da API da Câmara
             params = {
                 "siglaTipo": tipo,
-                "dataInicio": data_inicio,
-                "dataFim": data_fim,
+                "dataApresentacaoInicio": data_inicio,
+                "dataApresentacaoFim": data_fim,
                 "ordem": "DESC",
                 "ordenarPor": "id",
                 "pagina": pagina,
@@ -388,6 +389,13 @@ def buscar_proposicoes_recentes(dias=2):
                 break
     
     print(f"✅ Total de proposições encontradas: {len(proposicoes)}")
+    
+    # Debug: mostrar estrutura do primeiro objeto
+    if proposicoes:
+        first = proposicoes[0]
+        print(f"   📝 Exemplo de proposição: id={first.get('id')}, uri={first.get('uri')}")
+        print(f"      Campos: {list(first.keys())[:8]}...")
+    
     return proposicoes
 
 
@@ -401,7 +409,7 @@ def buscar_tramitacoes_recentes_global(horas=48):
     return buscar_proposicoes_recentes(dias=2)
 
 
-def buscar_ultima_tramitacao(proposicao_id):
+def buscar_ultima_tramitacao(proposicao_id, debug_primeiro_erro=[True]):
     """Busca a última tramitação de uma proposição"""
     url = f"{BASE_URL}/proposicoes/{proposicao_id}/tramitacoes"
     # API não aceita ordenarPor - buscar todas e ordenar manualmente
@@ -422,11 +430,14 @@ def buscar_ultima_tramitacao(proposicao_id):
                 reverse=True
             )
             return tramitacoes_ordenadas[0]
+        else:
+            return None
     except Exception as e:
-        # Não logar cada erro para não poluir o output
-        pass
-    
-    return None
+        # Log apenas o primeiro erro para debug
+        if debug_primeiro_erro[0]:
+            print(f"   🔴 DEBUG - Erro em tramitação ({proposicao_id}): {e}")
+            debug_primeiro_erro[0] = False
+        return None
 
 
 def buscar_detalhes_proposicao(proposicao_id):
@@ -438,10 +449,9 @@ def buscar_detalhes_proposicao(proposicao_id):
         resp.raise_for_status()
         data = resp.json()
         return data.get("dados", {})
-    except Exception as e:
-        print(f"⚠️ Erro ao buscar detalhes de {proposicao_id}: {e}")
-    
-    return None
+    except Exception:
+        # Silencioso para não poluir o log
+        return None
 
 
 def tramitacao_recente(tramitacao, horas=48):
@@ -740,20 +750,31 @@ def executar_varredura():
     props_com_palavra_chave = []
     props_ja_notificadas = 0
     analisadas = 0
+    erros_detalhes = 0
+    erros_tramitacao = 0
     
     for i, prop in enumerate(proposicoes, 1):
-        sigla_prop = f"{prop['siglaTipo']} {prop['numero']}/{prop['ano']}"
+        sigla_prop = f"{prop.get('siglaTipo', '?')} {prop.get('numero', '?')}/{prop.get('ano', '?')}"
+        prop_id = prop.get("id")
         
-        if i % 50 == 0 or i == 1:
+        if i % 10 == 0 or i == 1:
             print(f"📊 Progresso: {i}/{len(proposicoes)}...")
         
-        # Buscar detalhes e tramitação
-        detalhes = buscar_detalhes_proposicao(prop["id"])
-        if not detalhes:
+        if not prop_id:
+            print(f"   ⚠️ {sigla_prop}: sem ID")
             continue
         
-        tramitacao = buscar_ultima_tramitacao(prop["id"])
+        # A listagem já inclui a ementa, não precisa buscar detalhes
+        # Mas vamos buscar para ter a ementa completa
+        detalhes = buscar_detalhes_proposicao(prop_id)
+        if not detalhes:
+            erros_detalhes += 1
+            # Usar dados da listagem como fallback
+            detalhes = prop
+        
+        tramitacao = buscar_ultima_tramitacao(prop_id)
         if not tramitacao:
+            erros_tramitacao += 1
             continue
         
         analisadas += 1
@@ -795,6 +816,8 @@ def executar_varredura():
     print(f"\n{'=' * 60}")
     print(f"📊 RESUMO:")
     print(f"   Total de proposições: {len(proposicoes)}")
+    print(f"   Erros ao buscar detalhes: {erros_detalhes}")
+    print(f"   Erros ao buscar tramitações: {erros_tramitacao}")
     print(f"   Analisadas com sucesso: {analisadas}")
     print(f"   Com palavras-chave (novas): {len(props_com_palavra_chave)}")
     print(f"   Já notificadas anteriormente: {props_ja_notificadas}")
