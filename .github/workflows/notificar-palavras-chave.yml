@@ -59,9 +59,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
           TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
-          # Ou use tokens específicos se quiser grupo separado:
-          # TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
-          # TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
           MODO_EXECUCAO: bom_dia
         run: python notificar_palavras_chave.py
       
