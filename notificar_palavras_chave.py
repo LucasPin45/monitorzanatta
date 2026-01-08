@@ -333,68 +333,72 @@ def encontrar_palavras_chave(texto):
 
 def buscar_proposicoes_recentes(dias=2):
     """
-    Busca proposições que tiveram tramitação nos últimos X dias.
-    Usa o endpoint de proposições com filtro de data de tramitação.
+    Busca proposições dos anos recentes e depois filtra as que tramitaram.
+    A API não tem filtro direto por data de tramitação, então buscamos
+    proposições recentes e verificamos tramitações individualmente.
     """
     proposicoes = []
     
-    # Data de corte
+    # Anos para buscar (atual e anterior)
     agora = datetime.now(FUSO_BRASILIA)
-    data_inicio = (agora - timedelta(days=dias)).strftime("%Y-%m-%d")
-    data_fim = agora.strftime("%Y-%m-%d")
+    ano_atual = agora.year
+    anos = [ano_atual, ano_atual - 1]  # Ex: 2026, 2025
     
-    print(f"📆 Buscando tramitações de {data_inicio} a {data_fim}")
+    print(f"📆 Buscando proposições dos anos: {anos}")
     
     for tipo in TIPOS_MONITORADOS:
-        print(f"   🔍 Buscando {tipo}...")
-        pagina = 1
-        
-        while True:
-            url = f"{BASE_URL}/proposicoes"
-            # Parâmetros corretos da API da Câmara
-            params = {
-                "siglaTipo": tipo,
-                "dataApresentacaoInicio": data_inicio,
-                "dataApresentacaoFim": data_fim,
-                "ordem": "DESC",
-                "ordenarPor": "id",
-                "pagina": pagina,
-                "itens": 100
-            }
+        for ano in anos:
+            print(f"   🔍 Buscando {tipo} de {ano}...")
+            pagina = 1
+            props_tipo_ano = 0
             
-            try:
-                resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
+            while True:
+                url = f"{BASE_URL}/proposicoes"
+                params = {
+                    "siglaTipo": tipo,
+                    "ano": ano,
+                    "ordem": "DESC",
+                    "ordenarPor": "id",
+                    "pagina": pagina,
+                    "itens": 100
+                }
                 
-                items = data.get("dados", [])
-                if not items:
+                try:
+                    resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    
+                    items = data.get("dados", [])
+                    if not items:
+                        break
+                    
+                    proposicoes.extend(items)
+                    props_tipo_ano += len(items)
+                    
+                    # Limitar páginas por tipo/ano para não demorar demais
+                    links = data.get("links", [])
+                    tem_proxima = any(l.get("rel") == "next" for l in links)
+                    
+                    # Limitar a 3 páginas por tipo/ano (300 props) para manter rápido
+                    if not tem_proxima or pagina >= 3:
+                        break
+                    
+                    pagina += 1
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    print(f"      ❌ Erro: {e}")
                     break
-                
-                proposicoes.extend(items)
-                print(f"      Página {pagina}: {len(items)} proposições")
-                
-                # Verificar se há mais páginas
-                links = data.get("links", [])
-                tem_proxima = any(l.get("rel") == "next" for l in links)
-                
-                if not tem_proxima or len(proposicoes) >= MAX_PROPOSICOES_POR_BUSCA:
-                    break
-                
-                pagina += 1
-                time.sleep(0.2)
-                
-            except Exception as e:
-                print(f"      ❌ Erro: {e}")
-                break
+            
+            if props_tipo_ano > 0:
+                print(f"      → {props_tipo_ano} proposições")
     
-    print(f"✅ Total de proposições encontradas: {len(proposicoes)}")
+    print(f"✅ Total de proposições para analisar: {len(proposicoes)}")
     
     # Debug: mostrar estrutura do primeiro objeto
     if proposicoes:
         first = proposicoes[0]
-        print(f"   📝 Exemplo de proposição: id={first.get('id')}, uri={first.get('uri')}")
-        print(f"      Campos: {list(first.keys())[:8]}...")
+        print(f"   📝 Exemplo: {first.get('siglaTipo')} {first.get('numero')}/{first.get('ano')}")
     
     return proposicoes
 
