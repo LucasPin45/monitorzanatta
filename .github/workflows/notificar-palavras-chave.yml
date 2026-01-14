@@ -57,8 +57,22 @@ jobs:
       
       - name: Enviar Bom Dia
         env:
+          # Telegram (pode usar tokens específicos ou os gerais)
           TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
           TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Email
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS_PALAVRAS: ${{ secrets.EMAIL_RECIPIENTS_PALAVRAS }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          # Controle de canais
+          NOTIFICAR_TELEGRAM: ${{ secrets.NOTIFICAR_TELEGRAM }}
+          NOTIFICAR_EMAIL: ${{ secrets.NOTIFICAR_EMAIL }}
+          # Modo
           MODO_EXECUCAO: bom_dia
         run: python notificar_palavras_chave.py
       
@@ -91,8 +105,22 @@ jobs:
       
       - name: Executar varredura
         env:
+          # Telegram
           TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
           TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Email
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS_PALAVRAS: ${{ secrets.EMAIL_RECIPIENTS_PALAVRAS }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          # Controle de canais
+          NOTIFICAR_TELEGRAM: ${{ secrets.NOTIFICAR_TELEGRAM }}
+          NOTIFICAR_EMAIL: ${{ secrets.NOTIFICAR_EMAIL }}
+          # Modo
           MODO_EXECUCAO: varredura
         run: python notificar_palavras_chave.py
       
@@ -125,8 +153,22 @@ jobs:
       
       - name: Enviar Resumo do Dia
         env:
+          # Telegram
           TELEGRAM_BOT_TOKEN_PALAVRAS: ${{ secrets.TELEGRAM_BOT_TOKEN_PALAVRAS }}
           TELEGRAM_CHAT_ID_PALAVRAS: ${{ secrets.TELEGRAM_CHAT_ID_PALAVRAS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Email
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS_PALAVRAS: ${{ secrets.EMAIL_RECIPIENTS_PALAVRAS }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          # Controle de canais
+          NOTIFICAR_TELEGRAM: ${{ secrets.NOTIFICAR_TELEGRAM }}
+          NOTIFICAR_EMAIL: ${{ secrets.NOTIFICAR_EMAIL }}
+          # Modo
           MODO_EXECUCAO: resumo
         run: python notificar_palavras_chave.py
       
