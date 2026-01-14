@@ -7,10 +7,11 @@ Monitor de PAUTAS por PALAVRAS-CHAVE
 Busca eventos/pautas de comissões e notifica quando encontrar
 matérias com palavras-chave de interesse.
 
-v4: Estratégia baseada em EVENTOS (como o Monitor Zanatta)
+v5: Estratégia baseada em EVENTOS + Notificação por EMAIL
 - Busca eventos dos próximos 7 dias
 - Analisa pautas de cada evento
 - Filtra por palavras-chave
+- Notifica via Telegram E Email
 """
 
 import os
@@ -21,6 +22,10 @@ import requests
 import time
 import unicodedata
 import re
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -31,6 +36,7 @@ from pathlib import Path
 BASE_URL = "https://dadosabertos.camara.leg.br/api/v2"
 HEADERS = {"User-Agent": "MonitorPalavrasChave/2.0 (gabinete-julia-zanatta)"}
 
+# Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_PALAVRAS")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_PALAVRAS")
 
@@ -39,6 +45,17 @@ if not TELEGRAM_BOT_TOKEN:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_CHAT_ID:
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Email (SMTP)
+EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
+EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+EMAIL_RECIPIENTS = os.getenv("EMAIL_RECIPIENTS_PALAVRAS", os.getenv("EMAIL_RECIPIENTS", ""))
+
+# Controle de canais habilitados
+NOTIFICAR_TELEGRAM = os.getenv("NOTIFICAR_TELEGRAM", "true").lower() == "true"
+NOTIFICAR_EMAIL = os.getenv("NOTIFICAR_EMAIL", "true").lower() == "true"
 
 MODO_EXECUCAO = os.getenv("MODO_EXECUCAO", "varredura")
 
@@ -101,8 +118,6 @@ FUSO_BRASILIA = timezone(timedelta(hours=-3))
 # ============================================================
 # RECESSO PARLAMENTAR
 # ============================================================
-# Dez 23 a Jan 31 (fim de ano)
-# Jul 18 a Jul 31 (meio de ano - aproximado)
 
 def esta_em_recesso():
     """Verifica se estamos em período de recesso parlamentar"""
@@ -129,13 +144,11 @@ def get_data_retorno_sessao():
     mes = agora.month
     
     if mes == 12 or mes == 1:
-        # Recesso de fim de ano -> volta em 02/fev
         ano = agora.year if mes == 12 else agora.year
         if mes == 12:
             ano += 1
         return f"02/02/{ano}"
     elif mes == 7:
-        # Recesso de meio de ano -> volta em 01/ago
         return f"01/08/{agora.year}"
     
     return "em breve"
@@ -356,7 +369,6 @@ def get_proposicao_id_from_item(item):
                 if prop.get("idProposicao"):
                     return str(prop["idProposicao"])
     
-    # Tentar extrair de codProposicao
     cod = item.get("codProposicao") or item.get("idProposicao")
     if cod:
         return str(cod)
@@ -389,7 +401,6 @@ def fetch_ids_autoria_deputada(id_deputada):
             if d.get("id"):
                 ids.add(str(d["id"]))
         
-        # Próxima página
         next_link = None
         for link in data.get("links", []):
             if link.get("rel") == "next":
@@ -414,15 +425,12 @@ def verificar_relatoria_deputada(item):
     partido = relator.get("siglaPartido") or ""
     uf = relator.get("siglaUf") or ""
     
-    # Verificar se o nome contém "Zanatta"
     if normalize_text(DEPUTADA_NOME) not in normalize_text(nome):
         return False
     
-    # Verificar partido se disponível
     if partido and normalize_text(DEPUTADA_PARTIDO) != normalize_text(partido):
         return False
     
-    # Verificar UF se disponível
     if uf and normalize_text(DEPUTADA_UF) != normalize_text(uf):
         return False
     
@@ -444,81 +452,53 @@ def preparar_palavras_chave():
 
 
 def buscar_palavras_no_item(item, palavras_normalizadas, prop_info=None):
-    """
-    Busca palavras-chave na ementa e descrição do item.
-    Retorna lista de (palavra_original, categoria)
-    """
-    textos = []
+    """Busca palavras-chave na ementa e descrição do item."""
     
-    # Campos do item da pauta
-    for chave in ("ementa", "ementaDetalhada", "titulo", "descricao", "descricaoTipo"):
-        v = item.get(chave)
-        if v:
-            textos.append(str(v))
+    textos_busca = []
     
-    # Campos da proposição interna
-    prop = item.get("proposicao") or {}
-    for chave in ("ementa", "ementaDetalhada", "titulo"):
-        v = prop.get(chave)
-        if v:
-            textos.append(str(v))
+    titulo = item.get("titulo") or ""
+    textos_busca.append(titulo)
     
-    # Proposição relacionada
-    prop_rel = item.get("proposicaoRelacionada") or {}
-    for chave in ("ementa", "ementaDetalhada", "titulo"):
-        v = prop_rel.get(chave)
-        if v:
-            textos.append(str(v))
+    descricao = item.get("descricao") or ""
+    textos_busca.append(descricao)
     
-    # Info da proposição buscada na API
     if prop_info:
-        if prop_info.get("ementa"):
-            textos.append(prop_info["ementa"])
+        ementa = prop_info.get("ementa") or ""
+        textos_busca.append(ementa)
     
-    texto_norm = normalize_text(" ".join(textos))
+    texto_completo = normalize_text(" ".join(textos_busca))
+    
     encontradas = []
-    palavras_ja = set()
-    
-    for kw_norm, kw_original, categoria in palavras_normalizadas:
-        if not kw_norm or kw_norm in palavras_ja:
-            continue
-        
-        # Regex com word boundary para palavra inteira
-        pattern = r'\b' + re.escape(kw_norm) + r'\b'
-        if re.search(pattern, texto_norm):
-            encontradas.append((kw_original, categoria))
-            palavras_ja.add(kw_norm)
+    for palavra_norm, palavra_original, categoria in palavras_normalizadas:
+        if palavra_norm in texto_completo:
+            encontradas.append((palavra_original, categoria))
     
     return encontradas
 
 
 # ============================================================
-# FORMATAÇÃO DE MENSAGENS
+# FORMATAÇÃO DE MENSAGENS (Telegram HTML)
 # ============================================================
 
 def formatar_mensagem_bom_dia():
-    data_hora = obter_data_hora_brasilia()
-    
-    mensagem = f"""📢 <b>Monitor Parlamentar Informa:</b>
+    return """☀️ <b>Bom dia!</b>
 
-☀️ Bom dia! Monitorando pautas das comissões.
+Sou o <b>Monitor de Pautas</b>, sistema que busca matérias de interesse nas pautas das comissões da Câmara dos Deputados.
 
-📋 <b>Monitoramento ativo:</b>
-• Matérias de <b>autoria</b> da Dep. Zanatta
-• Matérias com <b>relatoria</b> da Dep. Zanatta
+📋 <b>O que monitoro:</b>
+• Matérias de <b>autoria</b> da Dep. Júlia Zanatta
+• Matérias onde ela é <b>relatora</b>
 • Matérias com <b>palavras-chave</b> de interesse
 
-⏰ <i>{data_hora}</i>"""
-    
-    return mensagem
+Vamos acompanhar as pautas dos próximos 7 dias! 🔍"""
 
 
 def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
-    """Formata mensagem de matéria encontrada com palavra-chave"""
+    """Formata mensagem de item com palavra-chave encontrada"""
     
-    # Dados do evento
     orgao = evento.get("orgaos", [{}])[0].get("sigla", "")
     data_evento = evento.get("dataHoraInicio", "")[:10]
+    
     if data_evento:
         try:
             dt = datetime.fromisoformat(data_evento)
@@ -528,7 +508,6 @@ def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
     else:
         data_formatada = "Data não informada"
     
-    # Dados da proposição
     if prop_info:
         sigla = prop_info.get("siglaTipo", "")
         numero = prop_info.get("numero", "")
@@ -536,16 +515,15 @@ def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
         ementa = escapar_html(prop_info.get("ementa", ""))
         prop_id = prop_info.get("id", "")
     else:
-        sigla = item.get("siglaTipo", "") or item.get("proposicao", {}).get("siglaTipo", "")
-        numero = item.get("numero", "") or item.get("proposicao", {}).get("numero", "")
-        ano = item.get("ano", "") or item.get("proposicao", {}).get("ano", "")
-        ementa = escapar_html(item.get("ementa", "") or item.get("titulo", ""))
-        prop_id = get_proposicao_id_from_item(item)
+        sigla = ""
+        numero = ""
+        ano = ""
+        ementa = escapar_html(item.get("titulo", ""))
+        prop_id = None
     
     if len(ementa) > 250:
         ementa = ementa[:247] + "..."
     
-    # Palavras-chave agrupadas por categoria
     por_categoria = {}
     for palavra, categoria in palavras_encontradas:
         if categoria not in por_categoria:
@@ -557,7 +535,6 @@ def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
         palavras_texto.append(f"<b>{cat}:</b> {', '.join(palavras)}")
     palavras_str = "\n".join(palavras_texto)
     
-    # Link
     if prop_id:
         link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}"
     else:
@@ -709,43 +686,25 @@ def formatar_mensagem_relatoria(evento, prop_info):
 
 
 def formatar_mensagem_resumo_dia(resumo):
-    data_hora = obter_data_hora_brasilia()
+    """Formata mensagem de resumo do dia"""
     
     tramitacoes = resumo.get("tramitacoes", [])
     por_categoria = resumo.get("por_categoria", {})
     total = len(tramitacoes)
+    data_hora = obter_data_hora_brasilia()
     
     if total == 0:
         return f"""📢 <b>Monitor Parlamentar Informa:</b>
 
 🌙 <b>Resumo do Dia</b>
 
-Hoje não houve matérias de interesse nas pautas.
+Não foram encontradas matérias de interesse nas pautas hoje.
 
 ⏰ <i>{data_hora}</i>"""
     
-    # Separar por tipo
-    autoria = por_categoria.get("Autoria", [])
-    relatoria = por_categoria.get("Relatoria", [])
-    
-    # Palavras-chave (todas as outras categorias)
-    palavras_categorias = {k: v for k, v in por_categoria.items() if k not in ["Autoria", "Relatoria"]}
-    
     detalhes = []
-    
-    if autoria:
-        detalhes.append(f"📝 <b>Autoria:</b> {', '.join(autoria[:5])}")
-    
-    if relatoria:
-        detalhes.append(f"📋 <b>Relatoria:</b> {', '.join(relatoria[:5])}")
-    
-    for categoria, props in palavras_categorias.items():
-        if props:
-            props_texto = ", ".join(props[:3])
-            if len(props) > 3:
-                props_texto += f" (+{len(props)-3})"
-            detalhes.append(f"🔑 <b>{categoria}:</b> {props_texto}")
-    
+    for cat, itens in por_categoria.items():
+        detalhes.append(f"<b>{cat}:</b> {len(itens)}")
     detalhes_str = "\n".join(detalhes)
     
     return f"""📢 <b>Monitor Parlamentar Informa:</b>
@@ -760,7 +719,74 @@ Hoje não houve matérias de interesse nas pautas.
 
 
 # ============================================================
-# TELEGRAM
+# CONVERSÃO TELEGRAM HTML → EMAIL HTML
+# ============================================================
+
+def telegram_para_email_html(mensagem_telegram, assunto):
+    """Converte mensagem do Telegram para email HTML bonito"""
+    
+    corpo = mensagem_telegram.replace("\n", "<br>")
+    
+    email_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{assunto}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td align="center" style="padding: 20px 0;">
+                <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #2d5016 0%, #4a7c23 100%); padding: 25px 30px; border-radius: 8px 8px 0 0;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">
+                                🔑 Monitor de Pautas
+                            </h1>
+                            <p style="margin: 5px 0 0 0; color: #c8e6a5; font-size: 14px;">
+                                Palavras-chave • Autoria • Relatoria
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 30px; line-height: 1.6; color: #333333; font-size: 15px;">
+                            {corpo}
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f8f9fa; padding: 20px 30px; border-radius: 0 0 8px 8px; border-top: 1px solid #e9ecef;">
+                            <p style="margin: 0; color: #6c757d; font-size: 12px; text-align: center;">
+                                📧 Notificação automática do Monitor de Pautas<br>
+                                Dep. Júlia Zanatta (PL-SC)
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+    
+    return email_html
+
+
+def extrair_texto_plano(mensagem_telegram):
+    """Extrai texto plano de mensagem HTML"""
+    texto = re.sub(r'<[^>]+>', '', mensagem_telegram)
+    texto = texto.replace('&amp;', '&')
+    texto = texto.replace('&lt;', '<')
+    texto = texto.replace('&gt;', '>')
+    texto = texto.replace('&quot;', '"')
+    return texto
+
+
+# ============================================================
+# ENVIO DE NOTIFICAÇÕES
 # ============================================================
 
 def enviar_telegram(mensagem):
@@ -779,11 +805,79 @@ def enviar_telegram(mensagem):
     try:
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
-        print("✅ Mensagem enviada!")
+        print("✅ Telegram: Mensagem enviada!")
         return True
     except Exception as e:
-        print(f"❌ Erro ao enviar: {e}")
+        print(f"❌ Telegram: Erro ao enviar: {e}")
         return False
+
+
+def enviar_email(mensagem_telegram, assunto):
+    """Envia email usando SMTP"""
+    
+    if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECIPIENTS:
+        print("⚠️ Email: Configuração incompleta")
+        return False
+    
+    recipients = [e.strip() for e in EMAIL_RECIPIENTS.split(",") if e.strip()]
+    
+    if not recipients:
+        print("⚠️ Email: Nenhum destinatário configurado")
+        return False
+    
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = assunto
+    msg["From"] = f"Monitor de Pautas <{EMAIL_SENDER}>"
+    msg["To"] = ", ".join(recipients)
+    
+    texto_plano = extrair_texto_plano(mensagem_telegram)
+    parte_texto = MIMEText(texto_plano, "plain", "utf-8")
+    
+    html_email = telegram_para_email_html(mensagem_telegram, assunto)
+    parte_html = MIMEText(html_email, "html", "utf-8")
+    
+    msg.attach(parte_texto)
+    msg.attach(parte_html)
+    
+    try:
+        context = ssl.create_default_context()
+        
+        with smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, recipients, msg.as_string())
+        
+        print(f"✅ Email: Enviado para {len(recipients)} destinatário(s)")
+        return True
+        
+    except smtplib.SMTPAuthenticationError:
+        print("❌ Email: Falha na autenticação")
+        return False
+    except Exception as e:
+        print(f"❌ Email: Erro ao enviar: {e}")
+        return False
+
+
+def notificar(mensagem, assunto="Monitor de Pautas - Notificação"):
+    """Envia notificação para todos os canais habilitados"""
+    
+    resultados = []
+    
+    if NOTIFICAR_TELEGRAM:
+        resultado_telegram = enviar_telegram(mensagem)
+        resultados.append(("Telegram", resultado_telegram))
+    else:
+        print("⏭️ Telegram: Desabilitado")
+    
+    if NOTIFICAR_EMAIL:
+        resultado_email = enviar_email(mensagem, assunto)
+        resultados.append(("Email", resultado_email))
+    else:
+        print("⏭️ Email: Desabilitado")
+    
+    return any(r[1] for r in resultados)
 
 
 # ============================================================
@@ -795,11 +889,10 @@ def executar_bom_dia():
     
     if esta_em_recesso():
         print("🏖️ Congresso em RECESSO - sem mensagem de bom dia")
-        print("   Mensagem será enviada apenas no resumo do dia.")
         return
     
     inicializar_resumo_dia()
-    enviar_telegram(formatar_mensagem_bom_dia())
+    notificar(formatar_mensagem_bom_dia(), "☀️ Monitor de Pautas - Bom Dia!")
     print("✅ Bom dia enviado!")
 
 
@@ -808,13 +901,12 @@ def executar_resumo_dia():
     
     if esta_em_recesso():
         print("🏖️ Congresso em RECESSO")
-        enviar_telegram(formatar_mensagem_recesso())
-        print("✅ Mensagem de recesso enviada!")
+        notificar(formatar_mensagem_recesso(), "🏖️ Monitor de Pautas - Recesso")
         return
     
     resumo = carregar_resumo_dia()
     print(f"📊 Tramitações do dia: {len(resumo.get('tramitacoes', []))}")
-    enviar_telegram(formatar_mensagem_resumo_dia(resumo))
+    notificar(formatar_mensagem_resumo_dia(resumo), "🌙 Monitor de Pautas - Resumo do Dia")
     print("✅ Resumo enviado!")
 
 
@@ -826,14 +918,10 @@ def executar_varredura():
     print(f"📅 Data/Hora: {data_hora}")
     print()
     
-    # Verificar se está em recesso
     if esta_em_recesso():
         print("🏖️ Congresso em RECESSO - pulando varredura")
-        print("   Não há reuniões de comissões neste período.")
-        print("✅ Nenhuma ação necessária.")
         return
     
-    # Carregar estados
     estado = carregar_estado()
     ultima_teve_novidade = estado.get("ultima_novidade", True)
     
@@ -847,14 +935,11 @@ def executar_varredura():
     if resumo.get("data") != data_hoje:
         resumo = {"data": data_hoje, "tramitacoes": [], "por_categoria": {}}
     
-    # Preparar palavras-chave
     palavras_norm = preparar_palavras_chave()
     print(f"🔑 Palavras-chave: {len(palavras_norm)} termos")
     
-    # Buscar IDs de proposições de autoria da deputada
     ids_autoria = fetch_ids_autoria_deputada(DEPUTADA_ID)
     
-    # Buscar eventos dos próximos 7 dias
     start_date = agora
     end_date = agora + timedelta(days=7)
     
@@ -865,15 +950,14 @@ def executar_varredura():
     if not eventos:
         print("⚠️ Nenhum evento encontrado")
         if ultima_teve_novidade:
-            enviar_telegram(formatar_mensagem_sem_novidades_completa())
+            notificar(formatar_mensagem_sem_novidades_completa(), "🔍 Monitor de Pautas - Varredura")
         else:
-            enviar_telegram(formatar_mensagem_sem_novidades_curta())
+            notificar(formatar_mensagem_sem_novidades_curta(), "🔍 Monitor de Pautas - Varredura")
         salvar_estado(False)
         salvar_historico(historico)
         salvar_resumo_dia(resumo)
         return
     
-    # Analisar pautas
     print("\n🔍 Analisando pautas...\n")
     
     itens_palavras_chave = []
@@ -889,7 +973,6 @@ def executar_varredura():
         if i % 20 == 0 or i == 1:
             print(f"📊 Progresso: {i}/{len(eventos)} eventos...")
         
-        # Buscar pauta do evento
         pauta = fetch_pauta_evento(evento_id)
         if not pauta:
             continue
@@ -899,34 +982,24 @@ def executar_varredura():
         for item in pauta:
             prop_id = get_proposicao_id_from_item(item)
             
-            # Buscar info da proposição para ter ementa completa
             prop_info = None
             if prop_id:
                 prop_info = fetch_proposicao_info(prop_id)
             
-            # Verificar AUTORIA
             is_autoria = prop_id and prop_id in ids_autoria
-            
-            # Verificar RELATORIA
             is_relatoria = verificar_relatoria_deputada(item)
-            
-            # Verificar PALAVRAS-CHAVE
             palavras_encontradas = buscar_palavras_no_item(item, palavras_norm, prop_info)
             
-            # Se não tem nenhum interesse, pular
             if not (is_autoria or is_relatoria or palavras_encontradas):
                 continue
             
-            # Montar sigla
             if prop_info:
                 sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
             else:
                 sigla = item.get("titulo", "Item")[:30]
             
-            # Verificar se já notificou (chave única por tipo)
             chave_base = f"{evento_id}_{prop_id or 'sem_id'}"
             
-            # AUTORIA
             if is_autoria:
                 chave_autoria = f"autoria_{chave_base}"
                 if ja_foi_notificada(historico, "autoria", chave_autoria):
@@ -942,7 +1015,6 @@ def executar_varredura():
                         "chave": chave_autoria
                     })
             
-            # RELATORIA
             if is_relatoria:
                 chave_relatoria = f"relatoria_{chave_base}"
                 if ja_foi_notificada(historico, "relatoria", chave_relatoria):
@@ -958,7 +1030,6 @@ def executar_varredura():
                         "chave": chave_relatoria
                     })
             
-            # PALAVRAS-CHAVE
             if palavras_encontradas:
                 chave_palavras = f"palavras_{chave_base}"
                 if ja_foi_notificada(historico, "palavras", chave_palavras):
@@ -979,7 +1050,6 @@ def executar_varredura():
         
         time.sleep(0.1)
     
-    # Resumo
     total_novos = len(itens_autoria) + len(itens_relatoria) + len(itens_palavras_chave)
     
     print(f"\n{'=' * 60}")
@@ -992,80 +1062,48 @@ def executar_varredura():
     print(f"   Já notificados: {itens_ja_notificados}")
     print(f"{'=' * 60}")
     
-    # Enviar notificações
     enviadas = 0
     
-    # 1. Notificações de AUTORIA (prioridade alta)
     if itens_autoria:
         print(f"\n📤 Enviando {len(itens_autoria)} notificação(ões) de AUTORIA...\n")
         for item_data in itens_autoria:
-            mensagem = formatar_mensagem_autoria(
-                item_data["evento"],
-                item_data["prop_info"] or {}
-            )
-            if enviar_telegram(mensagem):
-                historico = registrar_notificacao(
-                    historico,
-                    "autoria",
-                    item_data["chave"],
-                    item_data["sigla"],
-                    "Autoria"
-                )
+            mensagem = formatar_mensagem_autoria(item_data["evento"], item_data["prop_info"] or {})
+            assunto = f"📝 Autoria na Pauta: {item_data['sigla']}"
+            if notificar(mensagem, assunto):
+                historico = registrar_notificacao(historico, "autoria", item_data["chave"], item_data["sigla"], "Autoria")
                 resumo = adicionar_ao_resumo(resumo, item_data["sigla"], "Autoria")
                 enviadas += 1
             time.sleep(1)
     
-    # 2. Notificações de RELATORIA (prioridade alta)
     if itens_relatoria:
         print(f"\n📤 Enviando {len(itens_relatoria)} notificação(ões) de RELATORIA...\n")
         for item_data in itens_relatoria:
-            mensagem = formatar_mensagem_relatoria(
-                item_data["evento"],
-                item_data["prop_info"] or {}
-            )
-            if enviar_telegram(mensagem):
-                historico = registrar_notificacao(
-                    historico,
-                    "relatoria",
-                    item_data["chave"],
-                    item_data["sigla"],
-                    "Relatoria"
-                )
+            mensagem = formatar_mensagem_relatoria(item_data["evento"], item_data["prop_info"] or {})
+            assunto = f"📋 Relatoria na Pauta: {item_data['sigla']}"
+            if notificar(mensagem, assunto):
+                historico = registrar_notificacao(historico, "relatoria", item_data["chave"], item_data["sigla"], "Relatoria")
                 resumo = adicionar_ao_resumo(resumo, item_data["sigla"], "Relatoria")
                 enviadas += 1
             time.sleep(1)
     
-    # 3. Notificações de PALAVRAS-CHAVE
     if itens_palavras_chave:
         print(f"\n📤 Enviando {len(itens_palavras_chave)} notificação(ões) de PALAVRAS-CHAVE...\n")
         for item_data in itens_palavras_chave:
-            mensagem = formatar_mensagem_novidade(
-                item_data["evento"],
-                item_data["item"],
-                item_data["prop_info"],
-                item_data["palavras"]
-            )
-            if enviar_telegram(mensagem):
-                historico = registrar_notificacao(
-                    historico,
-                    "palavras",
-                    item_data["chave"],
-                    item_data["sigla"],
-                    item_data["categoria"]
-                )
+            mensagem = formatar_mensagem_novidade(item_data["evento"], item_data["item"], item_data["prop_info"], item_data["palavras"])
+            assunto = f"🔑 Palavra-chave: {item_data['sigla']}"
+            if notificar(mensagem, assunto):
+                historico = registrar_notificacao(historico, "palavras", item_data["chave"], item_data["sigla"], item_data["categoria"])
                 resumo = adicionar_ao_resumo(resumo, item_data["sigla"], item_data["categoria"])
                 enviadas += 1
             time.sleep(1)
     
-    # Se não teve nenhuma novidade
     if total_novos == 0:
         print("\n📤 Enviando mensagem de status...")
         if ultima_teve_novidade:
-            enviar_telegram(formatar_mensagem_sem_novidades_completa())
+            notificar(formatar_mensagem_sem_novidades_completa(), "🔍 Monitor de Pautas - Varredura")
         else:
-            enviar_telegram(formatar_mensagem_sem_novidades_curta())
+            notificar(formatar_mensagem_sem_novidades_curta(), "🔍 Monitor de Pautas - Varredura")
     
-    # Salvar estados
     salvar_estado(total_novos > 0)
     salvar_historico(historico)
     salvar_resumo_dia(resumo)
@@ -1079,21 +1117,32 @@ def executar_varredura():
 
 def main():
     print("=" * 60)
-    print("🔑 MONITOR DE PAUTAS v5")
+    print("🔑 MONITOR DE PAUTAS v5 + EMAIL")
     print("    Autoria + Relatoria + Palavras-chave")
     print("=" * 60)
     print()
     
-    if not TELEGRAM_BOT_TOKEN:
-        print("❌ TELEGRAM_BOT_TOKEN não configurado!")
-        sys.exit(1)
-    if not TELEGRAM_CHAT_ID:
-        print("❌ TELEGRAM_CHAT_ID não configurado!")
-        sys.exit(1)
+    # Status dos canais
+    print("📡 CANAIS DE NOTIFICAÇÃO:")
     
-    print(f"✅ Bot Token: {TELEGRAM_BOT_TOKEN[:15]}...")
-    print(f"✅ Chat ID: {TELEGRAM_CHAT_ID}")
-    print(f"📋 Modo: {MODO_EXECUCAO}")
+    if NOTIFICAR_TELEGRAM:
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            print(f"   ✅ Telegram: Habilitado")
+        else:
+            print("   ⚠️ Telegram: Habilitado mas credenciais faltando!")
+    else:
+        print("   ⏭️ Telegram: Desabilitado")
+    
+    if NOTIFICAR_EMAIL:
+        if EMAIL_SENDER and EMAIL_PASSWORD and EMAIL_RECIPIENTS:
+            recipients = EMAIL_RECIPIENTS.split(",")
+            print(f"   ✅ Email: Habilitado ({len(recipients)} destinatário(s))")
+        else:
+            print("   ⚠️ Email: Habilitado mas configuração incompleta!")
+    else:
+        print("   ⏭️ Email: Desabilitado")
+    
+    print(f"\n📋 Modo: {MODO_EXECUCAO}")
     print()
     
     if MODO_EXECUCAO == "bom_dia":
