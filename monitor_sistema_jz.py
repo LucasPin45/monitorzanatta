@@ -35,6 +35,119 @@ import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Backend não-interativo
 
+
+import base64
+
+# Função para cadastrar email via GitHub API
+def cadastrar_email_github(novo_email: str) -> tuple[bool, str]:
+    """
+    Adiciona um novo email à lista de destinatários no repositório GitHub.
+    Atualiza o arquivo emails_cadastrados.json no repositório.
+
+    Retorna: (sucesso: bool, mensagem: str)
+    """
+    try:
+        # Configurações do GitHub (adicionar em st.secrets)
+        github_config = st.secrets.get("github", {})
+        token = github_config.get("token")  # Personal Access Token
+        repo = github_config.get("repo", "LucasPin45/monitorzanatta")
+
+        if not token:
+            return False, "Token do GitHub não configurado"
+
+        # Validar email
+        import re
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", novo_email):
+            return False, "Email inválido"
+
+        # URL da API do GitHub
+        api_url = f"https://api.github.com/repos/{repo}/contents/emails_cadastrados.json"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+
+        # Buscar arquivo atual
+        response = requests.get(api_url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            # Arquivo existe - atualizar
+            data = response.json()
+            sha = data["sha"]
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            emails_data = json.loads(content)
+        elif response.status_code == 404:
+            # Arquivo não existe - criar
+            sha = None
+            emails_data = {"emails": [], "ultima_atualizacao": None}
+        else:
+            return False, f"Erro ao acessar GitHub: {response.status_code}"
+
+        # Verificar se email já está cadastrado
+        if novo_email.lower() in [e.lower() for e in emails_data.get("emails", [])]:
+            return False, "Este email já está cadastrado"
+
+        # Adicionar novo email
+        emails_data["emails"].append(novo_email)
+        emails_data["ultima_atualizacao"] = datetime.datetime.now().isoformat()
+
+        # Preparar conteúdo para upload
+        new_content = json.dumps(emails_data, indent=2, ensure_ascii=False)
+        new_content_b64 = base64.b64encode(new_content.encode("utf-8")).decode("utf-8")
+
+        # Fazer commit
+        commit_data = {
+            "message": f"📧 Novo email cadastrado via painel",
+            "content": new_content_b64,
+            "branch": "main"
+        }
+
+        if sha:
+            commit_data["sha"] = sha
+
+        response = requests.put(api_url, headers=headers, json=commit_data, timeout=10)
+
+        if response.status_code in [200, 201]:
+            return True, f"Email {novo_email} cadastrado com sucesso!"
+        else:
+            return False, f"Erro ao salvar: {response.status_code}"
+
+    except Exception as e:
+        return False, f"Erro: {str(e)}"
+
+
+def listar_emails_cadastrados() -> list:
+    """
+    Lista os emails cadastrados no arquivo emails_cadastrados.json
+    """
+    try:
+        github_config = st.secrets.get("github", {})
+        token = github_config.get("token")
+        repo = github_config.get("repo", "LucasPin45/monitorzanatta")
+
+        if not token:
+            return []
+
+        api_url = f"https://api.github.com/repos/{repo}/contents/emails_cadastrados.json"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+
+        response = requests.get(api_url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            emails_data = json.loads(content)
+            return emails_data.get("emails", [])
+
+        return []
+
+    except Exception:
+        return []
+
+
 # Tentar importar biblioteca de PDF (opcional)
 try:
     from pypdf import PdfReader
@@ -5460,14 +5573,15 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     # ABAS REORGANIZADAS (7 abas)
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
         "4️⃣ Comissões estratégicas",
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
-        "7️⃣ RICs (Requerimentos de Informação)"
+        "7️⃣ RICs (Requerimentos de Informação)",
+        "📧 Receber Notificações"
     ])
 
     # ============================================================
@@ -7252,6 +7366,109 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+
+
+    # ============================================================
+    # ABA 8 - RECEBER NOTIFICAÇÕES
+    # ============================================================
+    with tab8:
+        st.title("📧 Receber Notificações por Email")
+
+        st.markdown("""
+        ### 📬 Cadastre-se para receber alertas
+
+        Receba notificações por email sempre que houver:
+        - 📄 **Nova tramitação** em matérias da Dep. Júlia Zanatta
+        - 📋 **Matéria na pauta** de comissões (autoria ou relatoria)
+        - 🔑 **Palavras-chave** de interesse nas pautas
+        - 🌙 **Resumo do dia** com todas as movimentações
+
+        ---
+        """)
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            st.subheader("✍️ Cadastrar Email")
+
+            with st.form("form_cadastro_email", clear_on_submit=True):
+                novo_email = st.text_input(
+                    "Seu email",
+                    placeholder="exemplo@email.com",
+                    help="Digite seu email para receber as notificações"
+                )
+
+                aceite = st.checkbox(
+                    "Concordo em receber notificações do Monitor Parlamentar",
+                    value=False
+                )
+
+                submitted = st.form_submit_button("📩 Cadastrar", type="primary")
+
+                if submitted:
+                    if not novo_email:
+                        st.error("Por favor, digite seu email")
+                    elif not aceite:
+                        st.warning("Por favor, marque a caixa de concordância")
+                    else:
+                        with st.spinner("Cadastrando..."):
+                            sucesso, mensagem = cadastrar_email_github(novo_email.strip())
+
+                        if sucesso:
+                            st.success(f"✅ {mensagem}")
+                            st.balloons()
+                        else:
+                            st.error(f"❌ {mensagem}")
+
+        with col2:
+            st.subheader("ℹ️ Informações")
+
+            st.info("""
+            **O que você vai receber:**
+
+            📌 Emails apenas quando houver movimentação relevante
+
+            📌 Resumo diário às 20:30
+
+            📌 Link para o painel em cada email
+            """)
+
+        st.markdown("---")
+
+        # Mostrar emails cadastrados (apenas para admin)
+        if st.session_state.get("usuario_logado") == "admin":
+            with st.expander("👑 Emails cadastrados (Admin)"):
+                emails = listar_emails_cadastrados()
+                if emails:
+                    for i, email in enumerate(emails, 1):
+                        st.write(f"{i}. {email}")
+                    st.caption(f"Total: {len(emails)} emails cadastrados")
+                else:
+                    st.write("Nenhum email cadastrado ainda")
+
+        st.markdown("---")
+
+        st.markdown("""
+        ### 🔗 Outras formas de acompanhar
+
+        <table style="width:100%">
+        <tr>
+            <td style="text-align:center; padding:20px;">
+                <a href="https://t.me/+seu_grupo_telegram" target="_blank">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="50">
+                    <br><b>Grupo Telegram</b>
+                </a>
+            </td>
+            <td style="text-align:center; padding:20px;">
+                <a href="https://monitorzanatta.streamlit.app" target="_blank">
+                    <img src="https://streamlit.io/images/brand/streamlit-mark-color.png" width="50">
+                    <br><b>Painel Web</b>
+                </a>
+            </td>
+        </tr>
+        </table>
+        """, unsafe_allow_html=True)
+
 
     st.markdown("---")
 
