@@ -4,16 +4,15 @@
 notificar_tramitacoes.py
 ========================================
 Monitor de tramitações da Deputada Júlia Zanatta
-Verifica novas movimentações e notifica via Telegram
+Verifica novas movimentações e notifica via Telegram + Email
 
 Tipos monitorados: PL, PLP, PDL, RIC, REQ, PRL
 Período: Desde 2023 (início do mandato)
 Horário: 08:00 às 20:00 (Brasília) - Segunda a Sexta
 
-v3: 
-- Controle de duplicatas - não repete notificações já enviadas
-- Mensagem de bom dia às 07:55
-- Resumo do dia às 20:30
+v4: 
+- Adicionado suporte a notificações por EMAIL
+- Ambos os canais (Telegram + Email) são notificados
 """
 
 import os
@@ -22,6 +21,10 @@ import json
 import html
 import requests
 import time
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,8 +36,21 @@ BASE_URL = "https://dadosabertos.camara.leg.br/api/v2"
 HEADERS = {"User-Agent": "MonitorZanatta/24.0 (gabinete-julia-zanatta)"}
 
 DEPUTADA_ID = 220559  # Júlia Zanatta
+
+# Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Email (SMTP)
+EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
+EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")  # email que envia
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # senha de app (não a senha normal!)
+EMAIL_RECIPIENTS = os.getenv("EMAIL_RECIPIENTS", "")  # emails separados por vírgula
+
+# Controle de canais habilitados
+NOTIFICAR_TELEGRAM = os.getenv("NOTIFICAR_TELEGRAM", "true").lower() == "true"
+NOTIFICAR_EMAIL = os.getenv("NOTIFICAR_EMAIL", "true").lower() == "true"
 
 # Modo de execução (bom_dia, varredura, resumo)
 MODO_EXECUCAO = os.getenv("MODO_EXECUCAO", "varredura")
@@ -355,6 +371,10 @@ def tramitacao_recente(tramitacao, horas=48):
         return False
 
 
+# ============================================================
+# FORMATAÇÃO DE MENSAGENS (Telegram HTML)
+# ============================================================
+
 def formatar_mensagem_novidade(proposicao, tramitacao):
     """Formata mensagem de nova tramitação com escape de HTML"""
     
@@ -480,6 +500,91 @@ Até amanhã! 👋"""
     return mensagem
 
 
+# ============================================================
+# CONVERSÃO TELEGRAM HTML → EMAIL HTML
+# ============================================================
+
+def telegram_para_email_html(mensagem_telegram, assunto):
+    """
+    Converte uma mensagem formatada para Telegram (HTML simples)
+    em um email HTML bonito e responsivo.
+    """
+    
+    # Converte quebras de linha para <br>
+    corpo = mensagem_telegram.replace("\n", "<br>")
+    
+    # Template de email responsivo
+    email_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{assunto}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td align="center" style="padding: 20px 0;">
+                <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%); padding: 25px 30px; border-radius: 8px 8px 0 0;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">
+                                🏛️ Monitor Parlamentar
+                            </h1>
+                            <p style="margin: 5px 0 0 0; color: #b8d4e8; font-size: 14px;">
+                                Dep. Júlia Zanatta (PL-SC)
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 30px; line-height: 1.6; color: #333333; font-size: 15px;">
+                            {corpo}
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f8f9fa; padding: 20px 30px; border-radius: 0 0 8px 8px; border-top: 1px solid #e9ecef;">
+                            <p style="margin: 0; color: #6c757d; font-size: 12px; text-align: center;">
+                                📧 Esta é uma notificação automática do Monitor Parlamentar<br>
+                                Sistema de acompanhamento legislativo
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+    
+    return email_html
+
+
+def extrair_texto_plano(mensagem_telegram):
+    """
+    Extrai texto plano de uma mensagem HTML do Telegram.
+    Usado como fallback para clientes de email que não suportam HTML.
+    """
+    import re
+    
+    # Remove tags HTML
+    texto = re.sub(r'<[^>]+>', '', mensagem_telegram)
+    
+    # Substitui entidades HTML comuns
+    texto = texto.replace('&amp;', '&')
+    texto = texto.replace('&lt;', '<')
+    texto = texto.replace('&gt;', '>')
+    texto = texto.replace('&quot;', '"')
+    
+    return texto
+
+
+# ============================================================
+# ENVIO DE NOTIFICAÇÕES
+# ============================================================
+
 def enviar_telegram(mensagem):
     """Envia mensagem para o Telegram"""
     
@@ -499,10 +604,10 @@ def enviar_telegram(mensagem):
     try:
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
-        print("✅ Mensagem enviada com sucesso!")
+        print("✅ Telegram: Mensagem enviada com sucesso!")
         return True
     except requests.exceptions.HTTPError as e:
-        print(f"❌ Erro ao enviar mensagem: {e}")
+        print(f"❌ Telegram: Erro ao enviar mensagem: {e}")
         # Log adicional para debug
         try:
             error_detail = resp.json()
@@ -511,8 +616,92 @@ def enviar_telegram(mensagem):
             print(f"   Response: {resp.text}")
         return False
     except Exception as e:
-        print(f"❌ Erro ao enviar mensagem: {e}")
+        print(f"❌ Telegram: Erro ao enviar mensagem: {e}")
         return False
+
+
+def enviar_email(mensagem_telegram, assunto):
+    """
+    Envia email usando SMTP.
+    Converte a mensagem do formato Telegram para email HTML.
+    """
+    
+    if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECIPIENTS:
+        print("⚠️ Email: Configuração incompleta (EMAIL_SENDER, EMAIL_PASSWORD ou EMAIL_RECIPIENTS)")
+        return False
+    
+    # Lista de destinatários
+    recipients = [e.strip() for e in EMAIL_RECIPIENTS.split(",") if e.strip()]
+    
+    if not recipients:
+        print("⚠️ Email: Nenhum destinatário configurado")
+        return False
+    
+    # Criar mensagem
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = assunto
+    msg["From"] = f"Monitor Parlamentar <{EMAIL_SENDER}>"
+    msg["To"] = ", ".join(recipients)
+    
+    # Versão texto plano (fallback)
+    texto_plano = extrair_texto_plano(mensagem_telegram)
+    parte_texto = MIMEText(texto_plano, "plain", "utf-8")
+    
+    # Versão HTML
+    html_email = telegram_para_email_html(mensagem_telegram, assunto)
+    parte_html = MIMEText(html_email, "html", "utf-8")
+    
+    # Adiciona as partes (texto primeiro, HTML depois - prioridade)
+    msg.attach(parte_texto)
+    msg.attach(parte_html)
+    
+    try:
+        # Conexão segura com SMTP
+        context = ssl.create_default_context()
+        
+        with smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, recipients, msg.as_string())
+        
+        print(f"✅ Email: Enviado para {len(recipients)} destinatário(s)")
+        return True
+        
+    except smtplib.SMTPAuthenticationError:
+        print("❌ Email: Falha na autenticação. Verifique EMAIL_SENDER e EMAIL_PASSWORD")
+        print("   Dica: Para Gmail, use uma 'Senha de App' em vez da senha normal")
+        return False
+    except Exception as e:
+        print(f"❌ Email: Erro ao enviar: {e}")
+        return False
+
+
+def notificar(mensagem, assunto="Monitor Parlamentar - Notificação"):
+    """
+    Envia notificação para todos os canais habilitados (Telegram e/ou Email).
+    Retorna True se pelo menos um canal teve sucesso.
+    """
+    
+    resultados = []
+    
+    # Telegram
+    if NOTIFICAR_TELEGRAM:
+        resultado_telegram = enviar_telegram(mensagem)
+        resultados.append(("Telegram", resultado_telegram))
+    else:
+        print("⏭️ Telegram: Desabilitado")
+    
+    # Email
+    if NOTIFICAR_EMAIL:
+        resultado_email = enviar_email(mensagem, assunto)
+        resultados.append(("Email", resultado_email))
+    else:
+        print("⏭️ Email: Desabilitado")
+    
+    # Retorna True se pelo menos um canal teve sucesso
+    return any(r[1] for r in resultados)
 
 
 # ============================================================
@@ -531,7 +720,7 @@ def executar_bom_dia():
     
     # Enviar mensagem de bom dia
     mensagem = formatar_mensagem_bom_dia()
-    enviar_telegram(mensagem)
+    notificar(mensagem, assunto="☀️ Monitor Parlamentar - Bom Dia!")
     
     print("\n✅ Bom dia enviado!")
 
@@ -552,7 +741,7 @@ def executar_resumo_dia():
     
     # Enviar mensagem de resumo
     mensagem = formatar_mensagem_resumo_dia(tramitacoes)
-    enviar_telegram(mensagem)
+    notificar(mensagem, assunto="🌙 Monitor Parlamentar - Resumo do Dia")
     
     print("\n✅ Resumo do dia enviado!")
 
@@ -591,9 +780,9 @@ def executar_varredura():
     if not proposicoes:
         print("⚠️ Nenhuma proposição encontrada")
         if ultima_teve_novidade:
-            enviar_telegram(formatar_mensagem_sem_novidades_completa())
+            notificar(formatar_mensagem_sem_novidades_completa(), "🔍 Monitor Parlamentar - Varredura")
         else:
-            enviar_telegram(formatar_mensagem_sem_novidades_curta())
+            notificar(formatar_mensagem_sem_novidades_curta(), "🔍 Monitor Parlamentar - Varredura")
         salvar_estado(False)
         salvar_historico(historico)
         salvar_resumo_dia(resumo)
@@ -651,7 +840,9 @@ def executar_varredura():
         enviadas = 0
         for item in props_com_novidade:
             mensagem = formatar_mensagem_novidade(item["proposicao"], item["tramitacao"])
-            if enviar_telegram(mensagem):
+            assunto = f"📢 Nova Tramitação: {item['sigla']}"
+            
+            if notificar(mensagem, assunto):
                 # Registrar no histórico após envio bem-sucedido
                 historico = registrar_notificacao(
                     historico,
@@ -674,10 +865,10 @@ def executar_varredura():
         
         if ultima_teve_novidade:
             print("   → Mensagem COMPLETA (primeira do ciclo)")
-            enviar_telegram(formatar_mensagem_sem_novidades_completa())
+            notificar(formatar_mensagem_sem_novidades_completa(), "🔍 Monitor Parlamentar - Varredura")
         else:
             print("   → Mensagem CURTA (continuação)")
-            enviar_telegram(formatar_mensagem_sem_novidades_curta())
+            notificar(formatar_mensagem_sem_novidades_curta(), "🔍 Monitor Parlamentar - Varredura")
         
         salvar_estado(False)
         salvar_historico(historico)
@@ -698,17 +889,29 @@ def main():
     print("=" * 60)
     print()
     
-    # Verificar variáveis de ambiente
-    if not TELEGRAM_BOT_TOKEN:
-        print("❌ ERRO: TELEGRAM_BOT_TOKEN não configurado!")
-        sys.exit(1)
-    if not TELEGRAM_CHAT_ID:
-        print("❌ ERRO: TELEGRAM_CHAT_ID não configurado!")
-        sys.exit(1)
+    # Status dos canais de notificação
+    print("📡 CANAIS DE NOTIFICAÇÃO:")
     
-    print(f"✅ Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
-    print(f"✅ Chat ID: {TELEGRAM_CHAT_ID}")
-    print(f"📋 Modo de execução: {MODO_EXECUCAO}")
+    # Telegram
+    if NOTIFICAR_TELEGRAM:
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            print(f"   ✅ Telegram: Habilitado (Token: {TELEGRAM_BOT_TOKEN[:10]}...)")
+        else:
+            print("   ⚠️ Telegram: Habilitado mas credenciais faltando!")
+    else:
+        print("   ⏭️ Telegram: Desabilitado")
+    
+    # Email
+    if NOTIFICAR_EMAIL:
+        if EMAIL_SENDER and EMAIL_PASSWORD and EMAIL_RECIPIENTS:
+            recipients = EMAIL_RECIPIENTS.split(",")
+            print(f"   ✅ Email: Habilitado ({len(recipients)} destinatário(s))")
+        else:
+            print("   ⚠️ Email: Habilitado mas configuração incompleta!")
+    else:
+        print("   ⏭️ Email: Desabilitado")
+    
+    print(f"\n📋 Modo de execução: {MODO_EXECUCAO}")
     print()
     
     # Executar de acordo com o modo
