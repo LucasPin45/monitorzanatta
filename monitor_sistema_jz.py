@@ -1,4 +1,4 @@
-# monitor_sistema_jz.py - v26
+# monitor_sistema_jz.py - v27
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
 # - Saídas prontas (briefings, análises, checklists)
@@ -15,6 +15,9 @@
 # - RIC: extração de prazo de resposta, ministério, status respondido
 # - Monitoramento de logins (Telegram + Google Sheets)
 # - Suporte a múltiplas senhas por usuário
+# - [v27] PDF Linha do Tempo com identificação da matéria no topo
+# - [v27] Situação removida dos blocos individuais (fica só no cabeçalho)
+# - [v27] Registro de downloads de relatórios (Telegram + Google Sheets)
 # ============================================================
 
 import datetime
@@ -243,6 +246,93 @@ def registrar_gsheets(usuario: str, data_hora: str, ip: str = "N/A") -> bool:
         return True
     except Exception:
         return False
+
+
+def registrar_download_gsheets(usuario: str, data_hora: str, tipo_relatorio: str, proposicao: str = "") -> bool:
+    """
+    Registra download de relatório no Google Sheets (aba Downloads).
+    Retorna True se registrou com sucesso, False caso contrário.
+    """
+    if not GSHEETS_AVAILABLE:
+        return False
+    
+    try:
+        gsheets_config = st.secrets.get("gsheets", {})
+        spreadsheet_id = gsheets_config.get("spreadsheet_id")
+        credentials_json = gsheets_config.get("credentials")
+        
+        if not spreadsheet_id or not credentials_json:
+            return False
+        
+        # Carregar credenciais
+        if isinstance(credentials_json, str):
+            creds_dict = json.loads(credentials_json)
+        else:
+            creds_dict = dict(credentials_json)
+        
+        creds = Credentials.from_service_account_info(
+            creds_dict,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        
+        service = build("sheets", "v4", credentials=creds)
+        
+        # Dados a inserir: Data/Hora, Usuário, Tipo de Relatório, Proposição
+        valores = [[data_hora, usuario, tipo_relatorio, proposicao]]
+        
+        body = {"values": valores}
+        
+        # Registrar na aba "Downloads" (será criada automaticamente se não existir)
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range="Downloads!A:D",  # Aba: Downloads | Colunas: Data/Hora, Usuário, Tipo, Proposição
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body=body
+        ).execute()
+        
+        return True
+    except Exception:
+        return False
+
+
+def registrar_download(tipo_relatorio: str, proposicao: str = ""):
+    """
+    Registra o download de relatório no Telegram e Google Sheets.
+    Executado em background para não travar a interface.
+    
+    Args:
+        tipo_relatorio: Ex: "PDF Linha do Tempo", "XLSX Linha do Tempo", "PDF Matérias"
+        proposicao: Ex: "PL 5701/2025"
+    """
+    try:
+        # Obter usuário logado
+        usuario = st.session_state.get("usuario_logado", "Desconhecido")
+        
+        # Obter data/hora de Brasília
+        tz_brasilia = ZoneInfo("America/Sao_Paulo")
+        agora = datetime.datetime.now(tz_brasilia)
+        data_hora_str = agora.strftime("%d/%m/%Y %H:%M:%S")
+        
+        # Mensagem para o Telegram
+        mensagem = (
+            f"📥 <b>Download de Relatório</b>\n\n"
+            f"👤 <b>Usuário:</b> {usuario}\n"
+            f"📄 <b>Tipo:</b> {tipo_relatorio}\n"
+        )
+        if proposicao:
+            mensagem += f"📋 <b>Proposição:</b> {proposicao}\n"
+        mensagem += f"📅 <b>Data/Hora:</b> {data_hora_str}"
+        
+        # Enviar notificação Telegram
+        enviar_telegram(mensagem)
+        
+        # Registrar no Google Sheets
+        registrar_download_gsheets(usuario, data_hora_str, tipo_relatorio, proposicao)
+        
+    except Exception:
+        # Silenciosamente ignora erros para não travar a interface
+        pass
 
 
 def registrar_login(usuario: str):
@@ -2178,6 +2268,228 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         # Propagar o erro para debug - NÃO fazer fallback para CSV
         import traceback
         raise Exception(f"Erro ao gerar PDF: {str(e)} | Traceback: {traceback.format_exc()}")
+
+
+def to_pdf_linha_do_tempo(df: pd.DataFrame, proposicao_info: dict) -> tuple:
+    """
+    Exporta DataFrame de linha do tempo para PDF com cabeçalho destacando a proposição.
+    
+    Args:
+        df: DataFrame com as tramitações (Data, Hora, Órgão, Tramitação)
+        proposicao_info: Dict com informações da proposição:
+            - proposicao: "PL 5701/2025"
+            - situacao: "Aguardando Designação de Relator(a)"
+            - orgao: "CFT"
+            - regime: "Ordinário" (opcional)
+            - id: "2582078"
+    
+    Returns:
+        tuple: (bytes, mime_type, extensão)
+    """
+    try:
+        from fpdf import FPDF
+        
+        proposicao = proposicao_info.get("proposicao", "")
+        situacao = proposicao_info.get("situacao", "—")
+        orgao = proposicao_info.get("orgao", "—")
+        regime = proposicao_info.get("regime", "")
+        prop_id = proposicao_info.get("id", "")
+        
+        class RelatorioLinhaDoTempoPDF(FPDF):
+            def header(self):
+                self.set_fill_color(0, 51, 102)
+                self.rect(0, 0, 210, 25, 'F')
+                self.set_font('Helvetica', 'B', 18)
+                self.set_text_color(255, 255, 255)
+                self.set_y(8)
+                self.cell(0, 10, 'MONITOR PARLAMENTAR', align='C')
+                self.ln(20)
+                
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Helvetica', 'I', 8)
+                self.set_text_color(128, 128, 128)
+                self.set_x(10)
+                self.cell(60, 10, 'Desenvolvido por Lucas Pinheiro', align='L')
+                self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+        
+        pdf = RelatorioLinhaDoTempoPDF(orientation='P', unit='mm', format='A4')
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.add_page()
+        
+        # Título: Linha do Tempo
+        pdf.set_y(30)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 8, f"Linha do Tempo - ID {prop_id}", ln=True, align='C')
+        
+        # Data de geração
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Gerado em: {get_brasilia_now().strftime('%d/%m/%Y as %H:%M')} (Brasilia)", ln=True, align='C')
+        pdf.cell(0, 6, "Dep. Julia Zanatta (PL-SC)", ln=True, align='C')
+        
+        # Fonte
+        pdf.ln(2)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 4, "Fonte: dadosabertos.camara.leg.br | Ordenado por: Ultima tramitacao (mais recente primeiro)", ln=True, align='C')
+        
+        # Linha separadora
+        pdf.ln(3)
+        pdf.set_draw_color(0, 51, 102)
+        pdf.set_line_width(0.5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(6)
+        
+        # ============================================================
+        # BLOCO DE IDENTIFICAÇÃO DA MATÉRIA (EM DESTAQUE)
+        # ============================================================
+        
+        # Proposição (destaque principal)
+        pdf.set_font('Helvetica', 'B', 16)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 10, sanitize_text_pdf(proposicao) if proposicao else "—", ln=True, align='C')
+        
+        # Situação atual (em destaque)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, "Situacao atual:", ln=True, align='C')
+        
+        # Cor da situação baseada no texto
+        pdf.set_font('Helvetica', 'B', 11)
+        if 'Arquiv' in situacao:
+            pdf.set_text_color(150, 50, 50)  # Vermelho
+        elif 'Pronta' in situacao or 'Sancion' in situacao:
+            pdf.set_text_color(50, 150, 50)  # Verde
+        elif 'Aguardando' in situacao:
+            pdf.set_text_color(50, 50, 150)  # Azul
+        else:
+            pdf.set_text_color(80, 80, 80)  # Cinza
+        pdf.cell(0, 7, sanitize_text_pdf(situacao)[:80], ln=True, align='C')
+        
+        # Órgão atual
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 6, f"Orgao: {sanitize_text_pdf(orgao)}", ln=True, align='C')
+        
+        # Regime de tramitação (se disponível)
+        if regime:
+            pdf.cell(0, 6, f"Regime: {sanitize_text_pdf(regime)}", ln=True, align='C')
+        
+        pdf.ln(4)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.set_line_width(0.3)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(6)
+        
+        # ============================================================
+        # TRAMITAÇÕES (SEM CAMPO "SITUAÇÃO" EM CADA BLOCO)
+        # ============================================================
+        
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 6, f"Total de registros: {len(df)}", ln=True)
+        pdf.ln(3)
+        
+        for idx, (_, row) in enumerate(df.iterrows()):
+            if pdf.get_y() > 250:
+                pdf.add_page()
+                pdf.set_y(30)
+            
+            # Número do registro (badge)
+            pdf.set_fill_color(0, 51, 102)
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(8, 6, str(idx + 1), fill=True, align='C')
+            pdf.ln(8)
+            
+            pdf.set_x(20)
+            
+            # Última tramitação (data/hora)
+            data_val = row.get("Data", "—")
+            hora_val = row.get("Hora", "")
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(35, 5, "Ultima tramitacao: ", ln=False)
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(0, 0, 0)
+            data_hora_str = f"{data_val}"
+            if hora_val:
+                data_hora_str += f" {hora_val}"
+            pdf.cell(0, 5, sanitize_text_pdf(data_hora_str)[:30], ln=True)
+            pdf.set_x(20)
+            
+            # Calcular "Parado há (dias)" baseado na data
+            dias_parado = None
+            try:
+                if data_val and data_val != "—":
+                    dt_tram = datetime.datetime.strptime(data_val, "%d/%m/%Y")
+                    hoje = datetime.datetime.now()
+                    dias_parado = (hoje - dt_tram).days
+            except:
+                pass
+            
+            if dias_parado is not None:
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(28, 5, "Parado ha (dias): ", ln=False)
+                pdf.set_font('Helvetica', 'B', 9)
+                if dias_parado >= 30:
+                    pdf.set_text_color(180, 50, 50)  # Vermelho
+                elif dias_parado >= 15:
+                    pdf.set_text_color(200, 120, 0)  # Laranja
+                elif dias_parado >= 7:
+                    pdf.set_text_color(180, 180, 0)  # Amarelo
+                else:
+                    pdf.set_text_color(50, 150, 50)  # Verde
+                pdf.cell(0, 5, str(dias_parado), ln=True)
+                pdf.set_x(20)
+            
+            # Órgão
+            orgao_val = row.get("Órgão", "—")
+            if orgao_val and orgao_val != "—":
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(15, 5, "Orgao: ", ln=False)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 5, sanitize_text_pdf(str(orgao_val))[:50], ln=True)
+                pdf.set_x(20)
+            
+            # Relator - mantido como "Sem relator designado" por padrão na linha do tempo
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(20, 5, "Relator(a): ", ln=False)
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(150, 150, 150)
+            pdf.cell(0, 5, "Sem relator designado", ln=True)
+            pdf.set_x(20)
+            
+            # Descrição da tramitação (se houver)
+            tramitacao = row.get("Tramitação", "")
+            if tramitacao and str(tramitacao).strip():
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(100, 100, 100)
+                pdf.cell(22, 5, "Tramitacao: ", ln=False)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(60, 60, 60)
+                
+                # Quebrar texto longo
+                texto_tram = sanitize_text_pdf(str(tramitacao))[:200]
+                pdf.multi_cell(160, 4, texto_tram)
+            
+            pdf.ln(4)
+        
+        output = BytesIO()
+        pdf.output(output)
+        return (output.getvalue(), "application/pdf", "pdf")
+        
+    except ImportError:
+        raise Exception("Biblioteca fpdf2 não disponível. Instale com: pip install fpdf2")
+    except Exception as e:
+        import traceback
+        raise Exception(f"Erro ao gerar PDF da Linha do Tempo: {str(e)} | Traceback: {traceback.format_exc()}")
 
 
 def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
@@ -5216,25 +5528,39 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
         with col_xlsx:
             try:
                 bytes_out, mime, ext = to_xlsx_bytes(df_tram10, "LinhaDoTempo_10")
-                st.download_button(
+                
+                # Registrar download ao clicar
+                if st.download_button(
                     f"⬇️ Baixar XLSX",
                     data=bytes_out,
                     file_name=f"linha_do_tempo_10_{selected_id}.{ext}",
                     mime=mime,
                     key=f"{key_prefix}_download_timeline_xlsx_{selected_id}"
-                )
+                ):
+                    registrar_download("XLSX Linha do Tempo", proposicao_fmt)
             except Exception as e:
                 st.error(f"Erro ao gerar XLSX: {e}")
         with col_pdf:
             try:
-                pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_tram10, f"Linha do Tempo - ID {selected_id}")
-                st.download_button(
+                # Usar nova função específica para linha do tempo
+                proposicao_info = {
+                    "proposicao": proposicao_fmt,
+                    "situacao": situacao,
+                    "orgao": org_sigla,
+                    "regime": "",  # Pode ser adicionado futuramente se API fornecer
+                    "id": selected_id
+                }
+                pdf_bytes, pdf_mime, pdf_ext = to_pdf_linha_do_tempo(df_tram10, proposicao_info)
+                
+                # Registrar download ao clicar
+                if st.download_button(
                     f"⬇️ Baixar PDF",
                     data=pdf_bytes,
                     file_name=f"linha_do_tempo_10_{selected_id}.{pdf_ext}",
                     mime=pdf_mime,
                     key=f"{key_prefix}_download_timeline_pdf_{selected_id}"
-                )
+                ):
+                    registrar_download("PDF Linha do Tempo", proposicao_fmt)
             except Exception as e:
                 st.error(f"Erro ao gerar PDF: {e}")
 
