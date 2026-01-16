@@ -6,6 +6,11 @@ notificar_tramitacoes.py
 Monitor de tramitações da Deputada Júlia Zanatta
 Verifica novas movimentações e notifica via Telegram + Email
 
+v6: 
+- Modo aviso_manutencao: envia aviso quando Câmara está em manutenção
+- Modo sistema_normalizado: envia aviso quando sistema volta ao normal
+- Telegram + Email para ambos os avisos
+
 v5: 
 - Lógica diferenciada Telegram vs Email
 - Email só recebe: tramitações encontradas + resumo do dia
@@ -415,6 +420,36 @@ Hoje foram identificadas <b>{quantidade} tramitações</b>. Nas seguintes matér
 Até amanhã! 👋"""
 
 
+def formatar_mensagem_aviso_manutencao():
+    """Formata mensagem de aviso de manutenção da Câmara"""
+    return """⚠️ <b>AVISO: Sistemas da Câmara dos Deputados em Manutenção</b>
+
+A Diretoria de Inovação e Tecnologia da Informação (Ditec) da Câmara dos Deputados informou que está realizando uma <b>atualização no ambiente tecnológico do serviço de bancos de dados</b>.
+
+📅 <b>Início:</b> Sexta-feira (17/01) às 18h
+📅 <b>Previsão de retorno:</b> Final do domingo (19/01)
+
+Durante este período, o <b>Monitor Parlamentar da Dep. Júlia Zanatta</b> pode apresentar dados indisponíveis ou desatualizados, pois depende da API da Câmara.
+
+🔄 O sistema voltará ao normal automaticamente após o término da manutenção.
+
+📢 Avisaremos quando tudo estiver funcionando novamente!"""
+
+
+def formatar_mensagem_sistema_normalizado():
+    """Formata mensagem informando que o sistema voltou ao normal"""
+    data_hora = obter_data_hora_brasilia()
+    return f"""✅ <b>Sistemas da Câmara Normalizados!</b>
+
+A manutenção programada da Câmara dos Deputados foi concluída.
+
+O <b>Monitor Parlamentar da Dep. Júlia Zanatta</b> está funcionando normalmente! 🎉
+
+🔍 As varreduras de tramitações foram retomadas.
+
+⏰ <i>{data_hora}</i>"""
+
+
 # ============================================================
 # CONVERSÃO TELEGRAM HTML → EMAIL HTML
 # ============================================================
@@ -626,6 +661,30 @@ def executar_resumo_dia():
     print("\n✅ Resumo enviado!")
 
 
+def executar_aviso_manutencao():
+    """Aviso de manutenção - TELEGRAM + EMAIL"""
+    print("⚠️ MODO: AVISO DE MANUTENÇÃO")
+    print("=" * 60)
+    
+    mensagem = formatar_mensagem_aviso_manutencao()
+    print("\n📤 Enviando aviso de manutenção (Telegram + Email)...")
+    notificar_ambos(mensagem, "⚠️ Monitor Parlamentar - Aviso de Manutenção da Câmara")
+    
+    print("\n✅ Aviso de manutenção enviado!")
+
+
+def executar_sistema_normalizado():
+    """Aviso de sistema normalizado - TELEGRAM + EMAIL"""
+    print("✅ MODO: SISTEMA NORMALIZADO")
+    print("=" * 60)
+    
+    mensagem = formatar_mensagem_sistema_normalizado()
+    print("\n📤 Enviando aviso de normalização (Telegram + Email)...")
+    notificar_ambos(mensagem, "✅ Monitor Parlamentar - Sistema Normalizado")
+    
+    print("\n✅ Aviso de normalização enviado!")
+
+
 def executar_varredura():
     """Varredura - Email SÓ recebe se encontrar tramitação"""
     data_hora_brasilia = obter_data_hora_brasilia()
@@ -784,11 +843,17 @@ def main():
     # - varredura COM novidade: Telegram + Email
     # - varredura SEM novidade: APENAS Telegram
     # - resumo: Telegram + Email
+    # - aviso_manutencao: Telegram + Email
+    # - sistema_normalizado: Telegram + Email
     
     if MODO_EXECUCAO == "bom_dia":
         executar_bom_dia()
     elif MODO_EXECUCAO == "resumo":
         executar_resumo_dia()
+    elif MODO_EXECUCAO == "aviso_manutencao":
+        executar_aviso_manutencao()
+    elif MODO_EXECUCAO == "sistema_normalizado":
+        executar_sistema_normalizado()
     else:
         executar_varredura()
 
