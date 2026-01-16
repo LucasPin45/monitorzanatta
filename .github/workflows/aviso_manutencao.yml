@@ -1,0 +1,43 @@
+name: Aviso de Manutenção
+
+on:
+  workflow_dispatch:
+    inputs:
+      tipo_aviso:
+        description: 'Tipo de aviso'
+        required: true
+        default: 'aviso_manutencao'
+        type: choice
+        options:
+          - aviso_manutencao
+          - sistema_normalizado
+
+jobs:
+  enviar-aviso:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install requests
+
+      - name: Enviar aviso
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          NOTIFICAR_TELEGRAM: "true"
+          NOTIFICAR_EMAIL: "true"
+          MODO_EXECUCAO: ${{ inputs.tipo_aviso }}
+        run: python notificar_tramitacoes.py
