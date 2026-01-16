@@ -1,4 +1,4 @@
-# monitor_sistema_jz.py - v27
+# monitor_sistema_jz.py - v28
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
 # - Saídas prontas (briefings, análises, checklists)
@@ -18,6 +18,7 @@
 # - [v27] PDF Linha do Tempo com identificação da matéria no topo
 # - [v27] Situação removida dos blocos individuais (fica só no cabeçalho)
 # - [v27] Registro de downloads de relatórios (Telegram + Google Sheets)
+# - [v28] Banner de aviso: manutenção programada da Câmara dos Deputados
 # ============================================================
 
 import datetime
@@ -5922,6 +5923,24 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
     with tab1:
         st.title("📊 Dashboard Executivo")
+        
+        # ============================================================
+        # AVISO DE MANUTENÇÃO DA CÂMARA DOS DEPUTADOS
+        # ============================================================
+        st.warning("""
+        ⚠️ **AVISO: Sistemas da Câmara dos Deputados em Manutenção**
+        
+        A Diretoria de Inovação e Tecnologia da Informação (Ditec) da Câmara dos Deputados informou que está realizando uma **atualização no ambiente tecnológico do serviço de bancos de dados**.
+        
+        📅 **Início:** Sexta-feira (17/01) às 18h  
+        📅 **Previsão de retorno:** Final do domingo (19/01)
+        
+        Durante este período, os dados de proposições, tramitações e demais informações **podem estar indisponíveis ou desatualizados**.
+        
+        🔄 Tente novamente após o término da manutenção.
+        """)
+        
+        st.markdown("---")
         
         # ============================================================
         # HEADER SIMPLES (sem foto)
