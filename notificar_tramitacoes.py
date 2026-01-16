@@ -77,7 +77,10 @@ EMAIL_RECIPIENTS = ",".join(_todos_emails)
 NOTIFICAR_TELEGRAM = os.getenv("NOTIFICAR_TELEGRAM", "true").lower() == "true"
 NOTIFICAR_EMAIL = os.getenv("NOTIFICAR_EMAIL", "true").lower() == "true"
 
-# Modo de execução (bom_dia, varredura, resumo)
+# Incluir aviso de manutenção no resumo do dia (use "true" para ativar)
+INCLUIR_AVISO_MANUTENCAO = os.getenv("INCLUIR_AVISO_MANUTENCAO", "false").lower() == "true"
+
+# Modo de execução (bom_dia, varredura, resumo, aviso_manutencao, sistema_normalizado)
 MODO_EXECUCAO = os.getenv("MODO_EXECUCAO", "varredura")
 
 # Tipos de proposição a monitorar
@@ -389,15 +392,33 @@ Ao longo do dia, faremos uma varredura de 2 em 2h para identificar movimentaçõ
 Até daqui a pouco! 🔍"""
 
 
-def formatar_mensagem_resumo_dia(tramitacoes):
+def formatar_mensagem_resumo_dia(tramitacoes, incluir_aviso_manutencao=False):
     quantidade = len(tramitacoes)
     
+    # Aviso de manutenção para adicionar ao final (se habilitado)
+    aviso_manutencao = ""
+    if incluir_aviso_manutencao:
+        aviso_manutencao = """
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ <b>ATENÇÃO: Manutenção Programada</b>
+
+A Câmara dos Deputados está realizando manutenção no banco de dados.
+
+📅 <b>Início:</b> Sexta (17/01) às 18h
+📅 <b>Retorno:</b> Final do domingo (19/01)
+
+Durante este período, o Monitor pode apresentar dados indisponíveis.
+
+🔄 Avisaremos quando tudo voltar ao normal!"""
+    
     if quantidade == 0:
-        return """🌙 <b>Resumo do dia:</b>
+        return f"""🌙 <b>Resumo do dia:</b>
 
 Hoje não foram identificadas tramitações em matérias da Dep. Júlia Zanatta.
 
-Até amanhã! 👋"""
+Até amanhã! 👋{aviso_manutencao}"""
     
     elif quantidade == 1:
         lista = f"• {tramitacoes[0]}"
@@ -407,7 +428,7 @@ Hoje foi identificada <b>1 tramitação</b>. Na seguinte matéria:
 
 {lista}
 
-Até amanhã! 👋"""
+Até amanhã! 👋{aviso_manutencao}"""
     
     else:
         lista = "\n".join([f"• {t}" for t in tramitacoes])
@@ -417,7 +438,7 @@ Hoje foram identificadas <b>{quantidade} tramitações</b>. Nas seguintes matér
 
 {lista}
 
-Até amanhã! 👋"""
+Até amanhã! 👋{aviso_manutencao}"""
 
 
 def formatar_mensagem_aviso_manutencao():
@@ -654,7 +675,10 @@ def executar_resumo_dia():
     for t in tramitacoes:
         print(f"   • {t}")
     
-    mensagem = formatar_mensagem_resumo_dia(tramitacoes)
+    if INCLUIR_AVISO_MANUTENCAO:
+        print("⚠️ Aviso de manutenção será incluído no resumo")
+    
+    mensagem = formatar_mensagem_resumo_dia(tramitacoes, incluir_aviso_manutencao=INCLUIR_AVISO_MANUTENCAO)
     print("\n📤 Enviando resumo (Telegram + Email)...")
     notificar_ambos(mensagem, "🌙 Monitor Parlamentar - Resumo do Dia")
     
