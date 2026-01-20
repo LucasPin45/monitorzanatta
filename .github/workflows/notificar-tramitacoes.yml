@@ -162,8 +162,6 @@ jobs:
           # Controle de canais
           NOTIFICAR_TELEGRAM: ${{ secrets.NOTIFICAR_TELEGRAM }}
           NOTIFICAR_EMAIL: ${{ secrets.NOTIFICAR_EMAIL }}
-          # ⚠️ AVISO DE MANUTENÇÃO - Remover após domingo (19/01)
-          INCLUIR_AVISO_MANUTENCAO: "true"
           # Modo
           MODO_EXECUCAO: resumo
         run: python notificar_tramitacoes.py
