@@ -12,8 +12,13 @@ from typing import Optional, Dict, List, Tuple
 import streamlit as st
 import pandas as pd
 
-
-
+# Certificados SSL: em alguns ambientes (ex.: Streamlit Cloud), a cadeia de CAs do sistema pode não estar disponível.
+# Usamos o bundle do certifi quando possível para evitar SSL: CERTIFICATE_VERIFY_FAILED.
+try:
+    import certifi  # type: ignore
+    _REQUESTS_VERIFY = certifi.where()
+except Exception:
+    _REQUESTS_VERIFY = True
 def extrair_numero_pl_camera(proposicao: str) -> Optional[Tuple[str, str, str]]:
     """
     Extrai tipo, número e ano de uma proposição.
@@ -114,7 +119,8 @@ def buscar_tramitacao_senado_mesmo_numero(
             headers={
                 'User-Agent': 'Monitor-Zanatta/1.0',
                 'Accept': 'application/json'
-            }
+            },
+            verify=_REQUESTS_VERIFY
         )
         
         if response.status_code != 200:
