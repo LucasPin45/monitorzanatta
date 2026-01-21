@@ -1,4 +1,4 @@
-# monitor_sistema_jz.py - v29
+# monitor_sistema_jz.py - v30
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
 # - Saídas prontas (briefings, análises, checklists)
@@ -19,6 +19,11 @@
 # - [v27] Situação removida dos blocos individuais (fica só no cabeçalho)
 # - [v27] Registro de downloads de relatórios (Telegram + Google Sheets)
 # - [v29] Aviso de manutenção removido (sistema normalizado)
+# - [v30] 🎨 TELA DE LOGIN PROFISSIONAL com design moderno e gradiente
+# - [v30] 🏛️ INTEGRAÇÃO COMPLETA COM API DO SENADO FEDERAL  
+# - [v30] 📊 NOVA ABA: Monitoramento de matérias no Senado
+# - [v30] 🔍 Busca por menções, autoria e palavras-chave no Senado
+# - [v30] 📈 Filtros avançados e exportação (CSV/Excel) para dados do Senado
 # ============================================================
 
 import datetime
@@ -374,6 +379,156 @@ def registrar_login(usuario: str):
         # Silenciosamente ignora erros para não travar o login
         pass
 
+
+
+# ============================================================
+# FUNÇÕES DE INTEGRAÇÃO COM API DO SENADO FEDERAL - v30
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def buscar_materias_senado(termo_busca: str = "Julia Zanatta", limite: int = 50) -> pd.DataFrame:
+    """
+    Busca matérias no Senado Federal que mencionam o termo especificado.
+    
+    Args:
+        termo_busca: Termo para buscar (padrão: "Julia Zanatta")
+        limite: Número máximo de resultados
+        
+    Returns:
+        DataFrame com as matérias encontradas
+    """
+    try:
+        url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
+        
+        params = {
+            "texto": termo_busca,
+            "tramitando": "S",
+            "formato": "json"
+        }
+        
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        materias = []
+        
+        if "PesquisaBasicaMateria" in data:
+            pesquisa = data["PesquisaBasicaMateria"]
+            if "Materias" in pesquisa and "Materia" in pesquisa["Materias"]:
+                materias_raw = pesquisa["Materias"]["Materia"]
+                
+                if not isinstance(materias_raw, list):
+                    materias_raw = [materias_raw]
+                
+                for m in materias_raw[:limite]:
+                    try:
+                        identificacao = m.get("IdentificacaoMateria", {})
+                        dados_basicos = m.get("DadosBasicosMateria", {})
+                        
+                        materia_info = {
+                            "Codigo": identificacao.get("CodigoMateria", ""),
+                            "Sigla": identificacao.get("SiglaSubtipoMateria", ""),
+                            "Numero": identificacao.get("NumeroMateria", ""),
+                            "Ano": identificacao.get("AnoMateria", ""),
+                            "Ementa": dados_basicos.get("EmentaMateria", ""),
+                            "Autor": dados_basicos.get("AutoriaPrincipal", {}).get("NomeAutor", ""),
+                            "Data": dados_basicos.get("DataApresentacao", ""),
+                            "Casa": dados_basicos.get("NomeCasaIdentificacaoMateria", ""),
+                            "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
+                        }
+                        
+                        materias.append(materia_info)
+                    except Exception:
+                        continue
+        
+        if not materias:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(materias)
+        
+        if all(c in df.columns for c in ["Sigla", "Numero", "Ano"]):
+            df["Proposicao"] = df["Sigla"] + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Erro ao buscar matérias no Senado: {str(e)}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
+def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
+    """
+    Busca proposições de autoria específica no Senado.
+    
+    Args:
+        nome_autor: Nome do autor para buscar
+        
+    Returns:
+        DataFrame com proposições do autor
+    """
+    try:
+        url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
+        
+        params = {
+            "autor": nome_autor,
+            "tramitando": "S",
+            "formato": "json"
+        }
+        
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        materias = []
+        
+        if "PesquisaBasicaMateria" in data:
+            pesquisa = data["PesquisaBasicaMateria"]
+            if "Materias" in pesquisa and "Materia" in pesquisa["Materias"]:
+                materias_raw = pesquisa["Materias"]["Materia"]
+                
+                if not isinstance(materias_raw, list):
+                    materias_raw = [materias_raw]
+                
+                for m in materias_raw:
+                    try:
+                        identificacao = m.get("IdentificacaoMateria", {})
+                        dados_basicos = m.get("DadosBasicosMateria", {})
+                        
+                        materia_info = {
+                            "Codigo": identificacao.get("CodigoMateria", ""),
+                            "Tipo": identificacao.get("SiglaSubtipoMateria", ""),
+                            "Numero": identificacao.get("NumeroMateria", ""),
+                            "Ano": identificacao.get("AnoMateria", ""),
+                            "Ementa": dados_basicos.get("EmentaMateria", ""),
+                            "Data": dados_basicos.get("DataApresentacao", ""),
+                            "Situacao": dados_basicos.get("DescricaoIdentificacaoMateria", ""),
+                            "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
+                        }
+                        
+                        materias.append(materia_info)
+                    except Exception:
+                        continue
+        
+        if not materias:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(materias)
+        
+        if all(c in df.columns for c in ["Tipo", "Numero", "Ano"]):
+            df["Proposicao"] = df["Tipo"] + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Erro ao buscar autoria no Senado: {str(e)}")
+        return pd.DataFrame()
+
+
+# Fim das funções do Senado
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
 # ============================================================
@@ -394,61 +549,152 @@ if "autenticado" not in st.session_state:
     st.session_state.usuario_logado = None
 
 if not st.session_state.autenticado:
-    st.markdown("## 🔒 Acesso restrito – Gabinete da Deputada Júlia Zanatta")
-    st.markdown("Este sistema é de uso interno do gabinete.")
-
-    senha = st.text_input("Digite a senha de acesso", type="password")
-
+    # CSS para tela de login profissional
+    st.markdown("""
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .login-container {
+        background: white;
+        padding: 3rem 2rem;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        max-width: 450px;
+        margin: 4rem auto;
+    }
+    .login-icon {
+        text-align: center;
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+    .login-title {
+        text-align: center;
+        color: #2d3748;
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    .login-subtitle {
+        text-align: center;
+        color: #718096;
+        font-size: 1rem;
+        margin-bottom: 2rem;
+    }
+    .stTextInput input {
+        border-radius: 10px;
+        border: 2px solid #e2e8f0;
+        padding: 12px;
+        font-size: 1rem;
+    }
+    .stTextInput input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    .stButton button {
+        width: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    }
+    .block-container {
+        padding-top: 2rem;
+    }
+    .login-footer {
+        text-align: center;
+        color: white;
+        margin-top: 2rem;
+        font-size: 0.9rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="login-icon">🏛️</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-title">Monitor Parlamentar</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-subtitle">Deputada Júlia Zanatta</div>', unsafe_allow_html=True)
+    
     # Configuração de autenticação
     auth_config = st.secrets.get("auth", {})
-    
-    # FORMATO 1 (PREFERIDO): Usuários nomeados - [auth.usuarios]
-    # Exemplo: "Lucas" = "senha123"
     usuarios_config = auth_config.get("usuarios", {})
-    
-    # FORMATO 2: Lista de senhas - senhas = ["senha1", "senha2"]
     senhas_lista = list(auth_config.get("senhas", []))
-    
-    # FORMATO 3 (LEGADO): Senha única - senha = "senha123"
     senha_unica = auth_config.get("senha")
     
-    # Verificar se há pelo menos uma forma de autenticação configurada
     if not usuarios_config and not senhas_lista and not senha_unica:
         st.error("Erro de configuração: defina [auth.usuarios], [auth].senhas ou [auth].senha em Settings → Secrets.")
         st.stop()
-
-    if senha:
-        usuario_encontrado = None
-        autenticado = False
+    
+    with st.form("login_form", clear_on_submit=False):
+        usuario_input = st.text_input(
+            "👤 Usuário",
+            placeholder="Digite seu usuário",
+            key="input_usuario"
+        )
         
-        # Primeiro, verifica nos usuários nomeados
-        for nome_usuario, senha_usuario in usuarios_config.items():
-            if senha == senha_usuario:
-                usuario_encontrado = nome_usuario
-                autenticado = True
-                break
+        senha = st.text_input(
+            "🔒 Senha",
+            type="password",
+            placeholder="Digite sua senha",
+            key="input_senha"
+        )
         
-        # Se não encontrou, verifica na lista de senhas
-        if not autenticado and senha in senhas_lista:
-            usuario_encontrado = "Usuário (senha da lista)"
-            autenticado = True
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            submit = st.form_submit_button("🚀 Entrar", use_container_width=True)
         
-        # Se não encontrou, verifica senha única legada
-        if not autenticado and senha_unica and senha == senha_unica:
-            usuario_encontrado = "Usuário (senha principal)"
-            autenticado = True
-        
-        if autenticado:
-            st.session_state.autenticado = True
-            st.session_state.usuario_logado = usuario_encontrado
-            
-            # Registrar login (Telegram + Google Sheets)
-            registrar_login(usuario_encontrado)
-            
-            st.rerun()
-        else:
-            st.error("Senha incorreta")
-
+        if submit:
+            if not senha:
+                st.error("⚠️ Por favor, preencha a senha")
+            else:
+                usuario_encontrado = None
+                autenticado = False
+                
+                # Verificar usuários nomeados
+                for nome_usuario, senha_usuario in usuarios_config.items():
+                    if senha == senha_usuario:
+                        usuario_encontrado = nome_usuario
+                        autenticado = True
+                        break
+                
+                # Verificar lista de senhas
+                if not autenticado and senha in senhas_lista:
+                    usuario_encontrado = usuario_input if usuario_input else "Usuário (senha da lista)"
+                    autenticado = True
+                
+                # Verificar senha única
+                if not autenticado and senha_unica and senha == senha_unica:
+                    usuario_encontrado = usuario_input if usuario_input else "Usuário (senha principal)"
+                    autenticado = True
+                
+                if autenticado:
+                    st.session_state.autenticado = True
+                    st.session_state.usuario_logado = usuario_encontrado
+                    
+                    # Registrar login
+                    registrar_login(usuario_encontrado)
+                    
+                    st.success("✅ Login realizado com sucesso!")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("❌ Senha incorreta")
+    
+    st.markdown("""
+    <div class="login-footer">
+        💡 <b>Desenvolvido por Lucas Pinheiro</b><br>
+        Gabinete da Deputada Júlia Zanatta
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.stop()
 
 
@@ -5900,7 +6146,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     # ABAS REORGANIZADAS (7 abas)
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
@@ -5908,6 +6154,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
         "7️⃣ RICs (Requerimentos de Informação)",
+        "🏛️ Senado Federal",
         "📧 Receber Notificações"
     ])
 
@@ -7796,6 +8043,192 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         </table>
         """, unsafe_allow_html=True)
 
+
+
+
+    # ============================================================
+    # ABA 9 - SENADO FEDERAL (NOVA v30!)
+    # ============================================================
+    with tab9:
+        st.header("🏛️ Senado Federal - Monitoramento Julia Zanatta")
+        
+        st.markdown("""
+        Esta aba busca **automaticamente** no Senado Federal:
+        - 📄 Matérias que mencionam "Julia Zanatta"
+        - 🎤 Proposições com autoria relacionada
+        - 📊 Tramitações e situações atuais
+        """)
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            termo_busca = st.text_input(
+                "🔍 Termo de busca",
+                value="Julia Zanatta",
+                help="Buscar menções no Senado",
+                key="termo_busca_senado"
+            )
+        
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            btn_buscar = st.button("🔍 Buscar no Senado", type="primary", use_container_width=True, key="btn_buscar_senado")
+        
+        if btn_buscar or "df_senado" in st.session_state:
+            with st.spinner("🔄 Buscando matérias no Senado Federal..."):
+                df_senado = buscar_materias_senado(termo_busca, limite=100)
+                st.session_state.df_senado = df_senado
+            
+            if not df_senado.empty:
+                st.success(f"✅ Encontradas **{len(df_senado)}** matérias no Senado")
+                
+                # Estatísticas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total de Matérias", len(df_senado))
+                
+                with col2:
+                    if "Ano" in df_senado.columns:
+                        anos_unicos = df_senado["Ano"].nunique()
+                        st.metric("Anos", anos_unicos)
+                    else:
+                        st.metric("Anos", "N/A")
+                
+                with col3:
+                    if "Sigla" in df_senado.columns:
+                        tipos_unicos = df_senado["Sigla"].nunique()
+                        st.metric("Tipos", tipos_unicos)
+                    else:
+                        st.metric("Tipos", "N/A")
+                
+                with col4:
+                    if "Autor" in df_senado.columns:
+                        autores_unicos = df_senado["Autor"].nunique()
+                        st.metric("Autores", autores_unicos)
+                    else:
+                        st.metric("Autores", "N/A")
+                
+                st.markdown("---")
+                
+                # Filtros
+                with st.expander("🎛️ Filtros", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if "Ano" in df_senado.columns:
+                            anos = sorted(df_senado["Ano"].unique(), reverse=True)
+                            ano_selecionado = st.multiselect("📅 Ano", anos, default=anos[:3] if len(anos) >= 3 else anos, key="filtro_ano_senado")
+                        else:
+                            ano_selecionado = []
+                    
+                    with col2:
+                        if "Sigla" in df_senado.columns:
+                            tipos = sorted(df_senado["Sigla"].unique())
+                            tipo_selecionado = st.multiselect("📋 Tipo", tipos, key="filtro_tipo_senado")
+                        else:
+                            tipo_selecionado = []
+                    
+                    with col3:
+                        if "Autor" in df_senado.columns:
+                            autores = sorted(df_senado["Autor"].unique())
+                            autor_selecionado = st.multiselect("👤 Autor", autores, key="filtro_autor_senado")
+                        else:
+                            autor_selecionado = []
+                
+                # Aplicar filtros
+                df_filtrado = df_senado.copy()
+                
+                if ano_selecionado and "Ano" in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado["Ano"].isin(ano_selecionado)]
+                
+                if tipo_selecionado and "Sigla" in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado["Sigla"].isin(tipo_selecionado)]
+                
+                if autor_selecionado and "Autor" in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado["Autor"].isin(autor_selecionado)]
+                
+                # Tabela de resultados
+                st.subheader(f"📊 Matérias Encontradas ({len(df_filtrado)})")
+                
+                # Preparar colunas para exibição
+                colunas_exibir = ["Proposicao", "Ementa", "Autor", "Data", "Casa", "URL"]
+                colunas_exibir = [c for c in colunas_exibir if c in df_filtrado.columns]
+                
+                # Configurar dataframe
+                st.dataframe(
+                    df_filtrado[colunas_exibir],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "URL": st.column_config.LinkColumn("🔗 Link", display_text="Abrir no Senado"),
+                        "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                        "Proposicao": st.column_config.TextColumn("Proposição", width="medium"),
+                    },
+                    key="df_senado_display"
+                )
+                
+                # Download
+                st.markdown("---")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Preparar CSV
+                    csv = df_filtrado.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        "⬇️ Baixar CSV",
+                        data=csv,
+                        file_name=f"senado_julia_zanatta_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="download_senado_csv"
+                    )
+                
+                with col2:
+                    # Preparar Excel
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df_filtrado.to_excel(writer, index=False, sheet_name='Matérias Senado')
+                    excel_data = output.getvalue()
+                    
+                    st.download_button(
+                        "⬇️ Baixar Excel",
+                        data=excel_data,
+                        file_name=f"senado_julia_zanatta_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="download_senado_excel"
+                    )
+                
+                # Gráficos
+                st.markdown("---")
+                st.subheader("📊 Análises Visuais")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Gráfico por ano
+                    if "Ano" in df_filtrado.columns and not df_filtrado.empty:
+                        st.markdown("### 📅 Matérias por Ano")
+                        materias_ano = df_filtrado["Ano"].value_counts().sort_index()
+                        st.bar_chart(materias_ano)
+                
+                with col2:
+                    # Gráfico por tipo
+                    if "Sigla" in df_filtrado.columns and not df_filtrado.empty:
+                        st.markdown("### 📋 Matérias por Tipo")
+                        materias_tipo = df_filtrado["Sigla"].value_counts().head(10)
+                        st.bar_chart(materias_tipo)
+                
+            else:
+                st.warning("⚠️ Nenhuma matéria encontrada com o termo pesquisado")
+                st.info("💡 Tente termos mais genéricos ou verifique a ortografia")
+        
+        else:
+            st.info("👆 Clique em **Buscar no Senado** para começar")
+        
+        st.markdown("---")
+        st.caption("🏛️ Dados do Senado Federal | API oficial Dados Abertos")
 
     st.markdown("---")
 
