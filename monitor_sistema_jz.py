@@ -438,10 +438,21 @@ def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> boo
         "remetido ao senado", 
         "encaminhada ao senado",
         "enviada ao senado",
+        "enviado ao senado",
         "aprovada pela câmara",
         "senado federal",
         "enviado à revisão",
-        "casa revisora"
+        "casa revisora",
+        "aguardando apreciação pelo senado",  # ← NOVO! Detecta seu caso
+        "aguardando apreciacao pelo senado",  # ← Sem acento também
+        "apreciação pelo senado",
+        "apreciacao pelo senado",
+        "tramitando no senado",
+        "em tramitação no senado",
+        "em tramitacao no senado",
+        "remetida à revisão",
+        "revisão do senado",
+        "revisao do senado"
     ]
     
     return any(indicador in texto_completo for indicador in indicadores)
@@ -6282,7 +6293,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v32 – integração com Senado")
+    st.caption("v26 – versão estável (sem IA)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -7160,6 +7171,24 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if tipos_sel:
                 df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
+            # ═══════════════════════════════════════════════════════════
+            # NOVO v32: INTEGRAÇÃO COM SENADO FEDERAL
+            # ═══════════════════════════════════════════════════════════
+            col_senado_5, col_debug_5 = st.columns([4, 1])
+            with col_senado_5:
+                incluir_senado_tab5 = st.checkbox(
+                    "🏛️ Incluir tramitação no Senado Federal",
+                    value=False,
+                    key="incluir_senado_tab5",
+                    help="Busca proposições aprovadas que estão tramitando no Senado. Usa mesma numeração (ex: PLP 223/2023)"
+                )
+            with col_debug_5:
+                if st.session_state.get("usuario_logado", "").lower() == "admin":
+                    debug_senado_5 = st.checkbox("🔧 Debug", value=False, key="debug_senado_5")
+                else:
+                    debug_senado_5 = False
+            # ═══════════════════════════════════════════════════════════
+
             st.markdown("---")
 
             # Campo de busca
@@ -7205,6 +7234,18 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
             ).copy()
             
+            # ═══════════════════════════════════════════════════════════
+            # NOVO v32: PROCESSAR COM SENADO SE CHECKBOX MARCADO
+            # ═══════════════════════════════════════════════════════════
+            if incluir_senado_tab5:
+                with st.spinner("🔍 Buscando tramitação no Senado Federal..."):
+                    df_tbl = processar_lista_com_senado(
+                        df_tbl,
+                        debug=debug_senado_5,
+                        mostrar_progresso=len(df_tbl) > 3
+                    )
+            # ═══════════════════════════════════════════════════════════
+            
             df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
             df_tbl["Parado (dias)"] = df_rast_enriched.get("Parado (dias)", pd.Series([None]*len(df_rast_enriched)))
             df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
@@ -7222,12 +7263,25 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
             df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
 
-            show_cols_r = [
-                "Alerta", "Proposição", "Tipo", "Ano",
-                "Situação atual", "Órgão (sigla)", "Relator(a)",
-                "Último andamento", "Data do status", "Parado (dias)", "LinkTramitacao",
-                "Ementa", "ID",
-            ]
+            # ═══════════════════════════════════════════════════════════
+            # NOVO v32: COLUNAS DINÂMICAS DO SENADO
+            # ═══════════════════════════════════════════════════════════
+            if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
+                show_cols_r = [
+                    "Alerta", "Proposição", "Tipo", "Ano",
+                    "Situação atual", "Órgão (sigla)", "Relator(a)",
+                    "Último andamento", "Data do status", "Parado (dias)",
+                    "no_senado", "tipo_numero_senado", "situacao_senado", 
+                    "LinkTramitacao", "url_senado", "Ementa", "ID",
+                ]
+            else:
+                show_cols_r = [
+                    "Alerta", "Proposição", "Tipo", "Ano",
+                    "Situação atual", "Órgão (sigla)", "Relator(a)",
+                    "Último andamento", "Data do status", "Parado (dias)", "LinkTramitacao",
+                    "Ementa", "ID",
+                ]
+            # ═══════════════════════════════════════════════════════════
 
             for c in show_cols_r:
                 if c not in df_tbl.columns:
@@ -7282,8 +7336,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 selection_mode="single-row",
                 column_config={
                     "Alerta": st.column_config.TextColumn("", width="small", help="Urgência"),
-                    "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                    "LinkTramitacao": st.column_config.LinkColumn("🏛️ Câmara", display_text="Abrir"),
+                    "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
                     "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                    "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small", help="Tramitando no Senado"),
+                    "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium", help="Número no Senado"),
+                    "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium", help="Status atual no Senado"),
                 },
                 key="df_busca_tab5"
             )
@@ -7450,6 +7508,24 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if tipos_sel6:
                 df_base6 = df_base6[df_base6["siglaTipo"].isin(tipos_sel6)].copy()
 
+            # ═══════════════════════════════════════════════════════════
+            # NOVO v32: INTEGRAÇÃO COM SENADO FEDERAL
+            # ═══════════════════════════════════════════════════════════
+            col_senado_6, col_debug_6 = st.columns([4, 1])
+            with col_senado_6:
+                incluir_senado_tab6 = st.checkbox(
+                    "🏛️ Incluir tramitação no Senado Federal",
+                    value=False,
+                    key="incluir_senado_tab6",
+                    help="Busca proposições aprovadas que estão tramitando no Senado"
+                )
+            with col_debug_6:
+                if st.session_state.get("usuario_logado", "").lower() == "admin":
+                    debug_senado_6 = st.checkbox("🔧 Debug", value=False, key="debug_senado_6")
+                else:
+                    debug_senado_6 = False
+            # ═══════════════════════════════════════════════════════════
+
             st.markdown("---")
 
             cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
@@ -7555,6 +7631,19 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     ids_list = df_base6["id"].astype(str).head(int(max_status)).tolist()
                     status_map = build_status_map(ids_list)
                     df_status_view = enrich_with_status(df_base6.head(int(max_status)), status_map)
+                    
+                    # ═══════════════════════════════════════════════════════════
+                    # NOVO v32: PROCESSAR COM SENADO SE CHECKBOX MARCADO
+                    # ═══════════════════════════════════════════════════════════
+                    if incluir_senado_tab6:
+                        with st.spinner("🔍 Buscando tramitação no Senado Federal..."):
+                            df_status_view = processar_lista_com_senado(
+                                df_status_view,
+                                debug=debug_senado_6,
+                                mostrar_progresso=len(df_status_view) > 3
+                            )
+                    # ═══════════════════════════════════════════════════════════
+                    
                     st.session_state["df_status_last"] = df_status_view
 
             if df_status_view.empty:
