@@ -1,4 +1,314 @@
-# monitor_sistema_jz.py - v30
+# monitor_sistema_jz.py - v30.1 AUDITADA E CORRIGIDA
+
+# ============================================================
+# FUNÇÕES DE INTEGRAÇÃO COM SENADO FEDERAL - v32
+# Monitora proposições da Julia Zanatta que foram aprovadas
+# e estão tramitando no Senado Federal
+# ============================================================
+
+import re
+from typing import Optional, Dict, List, Tuple
+
+
+def extrair_numero_pl_camera(proposicao: str) -> Optional[Tuple[str, str, str]]:
+    """
+    Extrai tipo, número e ano de uma proposição.
+    
+    Exemplo: "PLP 223/2023" → ("PLP", "223", "2023")
+    
+    Returns:
+        (tipo, numero, ano) ou None se inválido
+    """
+    proposicao = proposicao.strip().upper()
+    match = re.match(r"([A-Z]+)\s+(\d+)/(\d{4})", proposicao)
+    if match:
+        return match.group(1), match.group(2), match.group(3)
+    return None
+
+
+def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> bool:
+    """
+    Verifica se a proposição foi remetida ao Senado.
+    
+    Args:
+        situacao_atual: Situação atual da proposição na Câmara
+        despacho: Último despacho (opcional)
+        
+    Returns:
+        True se foi para o Senado
+    """
+    texto_completo = f"{situacao_atual} {despacho}".lower()
+    
+    # Lista COMPLETA de indicadores
+    indicadores = [
+        "remetida ao senado",
+        "remetido ao senado", 
+        "encaminhada ao senado",
+        "enviada ao senado",
+        "enviado ao senado",
+        "aprovada pela câmara",
+        "senado federal",
+        "enviado à revisão",
+        "enviado a revisão",
+        "casa revisora",
+        "aguardando apreciação pelo senado",
+        "aguardando apreciacao pelo senado",
+        "apreciação pelo senado",
+        "apreciacao pelo senado",
+        "tramitando no senado",
+        "em tramitação no senado",
+        "em tramitacao no senado",
+        "remetida à revisão",
+        "remetida a revisão",
+        "revisão do senado",
+        "revisao do senado",
+        "para apreciação do senado",
+        "para apreciacao do senado"
+    ]
+    
+    return any(indicador in texto_completo for indicador in indicadores)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def buscar_tramitacao_senado_mesmo_numero(
+    tipo: str,
+    numero: str,
+    ano: str,
+    debug: bool = False
+) -> Optional[Dict]:
+    """
+    Busca a tramitação no Senado usando o MESMO número da Câmara.
+    
+    Args:
+        tipo: Tipo da proposição (ex: "PL", "PLP", "PEC")
+        numero: Número da proposição
+        ano: Ano da proposição
+        debug: Modo debug
+        
+    Returns:
+        Dict com dados do Senado ou None se não encontrado
+    """
+    try:
+        url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
+        
+        params = {
+            "sigla": tipo.upper(),
+            "numero": numero,
+            "ano": ano,
+            "formato": "json"
+        }
+        
+        if debug:
+            st.write(f"🔍 Buscando no Senado: {tipo} {numero}/{ano}")
+            st.write(f"URL: {url}")
+            st.write(f"Params: {params}")
+        
+        response = requests.get(
+            url, 
+            params=params, 
+            timeout=15,
+            headers={
+                'User-Agent': 'Monitor-Zanatta/1.0',
+                'Accept': 'application/json'
+            }
+        )
+        
+        if response.status_code != 200:
+            if debug:
+                st.warning(f"Status code: {response.status_code}")
+            return None
+        
+        content_type = response.headers.get('content-type', '')
+        if 'json' not in content_type.lower():
+            if debug:
+                st.warning(f"Content-type não é JSON: {content_type}")
+            return None
+        
+        data = response.json()
+        
+        if "PesquisaBasicaMateria" not in data:
+            if debug:
+                st.info("Campo PesquisaBasicaMateria não encontrado")
+            return None
+        
+        pesquisa = data["PesquisaBasicaMateria"]
+        
+        if "Materias" not in pesquisa or "Materia" not in pesquisa["Materias"]:
+            if debug:
+                st.info("Nenhuma matéria encontrada")
+            return None
+        
+        materias = pesquisa["Materias"]["Materia"]
+        if not isinstance(materias, list):
+            materias = [materias]
+        
+        if not materias:
+            return None
+        
+        materia = materias[0]
+        identificacao = materia.get("IdentificacaoMateria", {})
+        dados_basicos = materia.get("DadosBasicosMateria", {})
+        
+        codigo_materia = identificacao.get("CodigoMateria", "")
+        
+        resultado = {
+            "codigo_senado": codigo_materia,
+            "tipo_senado": identificacao.get("SiglaSubtipoMateria", ""),
+            "numero_senado": identificacao.get("NumeroMateria", ""),
+            "ano_senado": identificacao.get("AnoMateria", ""),
+            "situacao_senado": dados_basicos.get("DescricaoIdentificacaoMateria", ""),
+            "ementa_senado": dados_basicos.get("EmentaMateria", "")[:500] if dados_basicos.get("EmentaMateria") else "",
+            "url_senado": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}",
+        }
+        
+        if debug:
+            st.success(f"✅ Encontrado: {resultado['tipo_senado']} {resultado['numero_senado']}/{resultado['ano_senado']}")
+            st.write(f"Situação: {resultado['situacao_senado']}")
+        
+        return resultado
+        
+    except Exception as e:
+        if debug:
+            st.error(f"Erro ao buscar no Senado: {str(e)}")
+        return None
+
+
+def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False) -> Dict:
+    """
+    Adiciona informações do Senado a uma proposição da Câmara.
+    IMPORTANTE: Preserva TODAS as colunas originais!
+    
+    Args:
+        proposicao_dict: Dicionário com dados da proposição da Câmara
+        debug: Modo debug
+        
+    Returns:
+        Dicionário enriquecido com dados do Senado (colunas originais preservadas)
+    """
+    # Copiar dados originais (IMPORTANTE!)
+    resultado = proposicao_dict.copy()
+    
+    # Inicializar campos do Senado
+    resultado["no_senado"] = False
+    resultado["situacao_senado"] = ""
+    resultado["url_senado"] = ""
+    resultado["tipo_numero_senado"] = ""
+    
+    # Verificar se foi para o Senado
+    situacao = proposicao_dict.get("Situação atual", "")
+    despacho = proposicao_dict.get("despacho", "")
+    
+    if not verificar_se_foi_para_senado(situacao, despacho):
+        return resultado
+    
+    # Extrair identificação da proposição
+    proposicao_str = proposicao_dict.get("Proposição", "")
+    if not proposicao_str:
+        proposicao_str = proposicao_dict.get("Proposicao", "")
+    
+    if not proposicao_str:
+        return resultado
+    
+    partes = extrair_numero_pl_camera(proposicao_str)
+    if not partes:
+        return resultado
+    
+    tipo, numero, ano = partes
+    
+    # Buscar no Senado
+    dados_senado = buscar_tramitacao_senado_mesmo_numero(
+        tipo, numero, ano, debug=debug
+    )
+    
+    if dados_senado:
+        resultado["no_senado"] = True
+        resultado["situacao_senado"] = dados_senado["situacao_senado"]
+        resultado["url_senado"] = dados_senado["url_senado"]
+        resultado["tipo_numero_senado"] = (
+            f"{dados_senado['tipo_senado']} "
+            f"{dados_senado['numero_senado']}/"
+            f"{dados_senado['ano_senado']}"
+        )
+        
+        if debug:
+            st.success(f"✅ {proposicao_str} encontrado no Senado")
+    
+    return resultado
+
+
+def processar_lista_com_senado(
+    df_proposicoes: pd.DataFrame,
+    debug: bool = False,
+    mostrar_progresso: bool = True
+) -> pd.DataFrame:
+    """
+    Processa um DataFrame de proposições, adicionando informações do Senado.
+    IMPORTANTE: Preserva TODAS as colunas originais do DataFrame!
+    
+    Args:
+        df_proposicoes: DataFrame com proposições da Câmara
+        debug: Modo debug
+        mostrar_progresso: Mostrar barra de progresso
+        
+    Returns:
+        DataFrame enriquecido (colunas originais + colunas do Senado)
+    """
+    if df_proposicoes.empty:
+        return df_proposicoes
+    
+    # IMPORTANTE: Guardar lista de colunas originais
+    colunas_originais = df_proposicoes.columns.tolist()
+    
+    # Converter para lista de dicts
+    proposicoes_list = df_proposicoes.to_dict('records')
+    
+    # Processar
+    if mostrar_progresso and len(proposicoes_list) > 1:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+    else:
+        progress_bar = None
+        status_text = None
+    
+    proposicoes_enriquecidas = []
+    total = len(proposicoes_list)
+    
+    for i, prop in enumerate(proposicoes_list):
+        if progress_bar:
+            progress_bar.progress((i + 1) / total)
+            status_text.text(f"Verificando proposição {i+1} de {total}...")
+        
+        prop_enriquecida = enriquecer_proposicao_com_senado(prop, debug=debug)
+        proposicoes_enriquecidas.append(prop_enriquecida)
+        
+        if i < total - 1:
+            import time
+            time.sleep(0.1)
+    
+    if progress_bar:
+        progress_bar.empty()
+        status_text.empty()
+    
+    # Converter de volta
+    df_enriquecido = pd.DataFrame(proposicoes_enriquecidas)
+    
+    # IMPORTANTE: Garantir que todas as colunas originais estão presentes
+    for col in colunas_originais:
+        if col not in df_enriquecido.columns:
+            df_enriquecido[col] = ""
+    
+    # Contar
+    if "no_senado" in df_enriquecido.columns:
+        total_senado = df_enriquecido["no_senado"].sum()
+        if total_senado > 0:
+            st.success(f"✅ {total_senado} proposição(ões) encontrada(s) tramitando no Senado")
+        else:
+            st.info("ℹ️ Nenhuma proposição encontrada no Senado")
+    
+    return df_enriquecido
+
+# Fim das funções de integração com Senado Federal
+
 # ============================================================
 # Monitor Legislativo – Dep. Júlia Zanatta (Streamlit)
 # - Saídas prontas (briefings, análises, checklists)
@@ -24,6 +334,8 @@
 # - [v30] 📊 NOVA ABA: Monitoramento de matérias no Senado
 # - [v30] 🔍 Busca por menções, autoria e palavras-chave no Senado
 # - [v30] 📈 Filtros avançados e exportação (CSV/Excel) para dados do Senado
+# - [v30.1] 🔧 AUDITORIA COMPLETA: Tratamento robusto de erros API Senado
+# - [v30.1] ✅ Validação de respostas, timeouts, mensagens claras, modo debug
 # ============================================================
 
 import datetime
@@ -382,21 +694,63 @@ def registrar_login(usuario: str):
 
 
 # ============================================================
-# FUNÇÕES DE INTEGRAÇÃO COM API DO SENADO FEDERAL - v30
+# FUNÇÕES DE INTEGRAÇÃO COM API DO SENADO FEDERAL - v30.1 CORRIGIDA
+# Versão com tratamento robusto de erros e debug
 # ============================================================
 
-@st.cache_data(ttl=3600)
-def buscar_materias_senado(termo_busca: str = "Julia Zanatta", limite: int = 50) -> pd.DataFrame:
+import requests
+import pandas as pd
+import streamlit as st
+from typing import Optional, Dict, List
+
+def validar_resposta_api(response) -> tuple[bool, str]:
+    """
+    Valida se a resposta da API é válida.
+    
+    Returns:
+        (valida: bool, mensagem_erro: str)
+    """
+    # Verificar status code
+    if response.status_code != 200:
+        return False, f"API retornou status {response.status_code}"
+    
+    # Verificar content-type
+    content_type = response.headers.get('content-type', '')
+    if 'json' not in content_type.lower() and 'application/json' not in content_type.lower():
+        # Se não for JSON, pode ser HTML de erro
+        if 'html' in content_type.lower():
+            return False, "API retornou HTML ao invés de JSON (possível erro do servidor)"
+        return False, f"Tipo de conteúdo inesperado: {content_type}"
+    
+    # Verificar se tem conteúdo
+    if not response.text or len(response.text.strip()) == 0:
+        return False, "API retornou resposta vazia"
+    
+    # Verificar se é JSON válido
+    try:
+        response.json()
+        return True, ""
+    except ValueError as e:
+        return False, f"Resposta não é JSON válido: {str(e)}"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_materias_senado(termo_busca: str = "Julia Zanatta", limite: int = 50, debug: bool = False) -> pd.DataFrame:
     """
     Busca matérias no Senado Federal que mencionam o termo especificado.
+    VERSÃO AUDITADA E CORRIGIDA com tratamento robusto de erros.
     
     Args:
         termo_busca: Termo para buscar (padrão: "Julia Zanatta")
         limite: Número máximo de resultados
+        debug: Se True, mostra mensagens de debug
         
     Returns:
-        DataFrame com as matérias encontradas
+        DataFrame com as matérias encontradas (vazio se nenhuma encontrada ou erro)
     """
+    if debug:
+        st.info(f"🔍 Debug: Buscando '{termo_busca}' no Senado...")
+    
     try:
         url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
         
@@ -406,68 +760,148 @@ def buscar_materias_senado(termo_busca: str = "Julia Zanatta", limite: int = 50)
             "formato": "json"
         }
         
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        if debug:
+            st.write(f"URL: {url}")
+            st.write(f"Params: {params}")
         
-        data = response.json()
-        
-        materias = []
-        
-        if "PesquisaBasicaMateria" in data:
-            pesquisa = data["PesquisaBasicaMateria"]
-            if "Materias" in pesquisa and "Materia" in pesquisa["Materias"]:
-                materias_raw = pesquisa["Materias"]["Materia"]
-                
-                if not isinstance(materias_raw, list):
-                    materias_raw = [materias_raw]
-                
-                for m in materias_raw[:limite]:
-                    try:
-                        identificacao = m.get("IdentificacaoMateria", {})
-                        dados_basicos = m.get("DadosBasicosMateria", {})
-                        
-                        materia_info = {
-                            "Codigo": identificacao.get("CodigoMateria", ""),
-                            "Sigla": identificacao.get("SiglaSubtipoMateria", ""),
-                            "Numero": identificacao.get("NumeroMateria", ""),
-                            "Ano": identificacao.get("AnoMateria", ""),
-                            "Ementa": dados_basicos.get("EmentaMateria", ""),
-                            "Autor": dados_basicos.get("AutoriaPrincipal", {}).get("NomeAutor", ""),
-                            "Data": dados_basicos.get("DataApresentacao", ""),
-                            "Casa": dados_basicos.get("NomeCasaIdentificacaoMateria", ""),
-                            "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
-                        }
-                        
-                        materias.append(materia_info)
-                    except Exception:
-                        continue
-        
-        if not materias:
+        # Fazer requisição com timeout adequado
+        try:
+            response = requests.get(url, params=params, timeout=30, headers={
+                'User-Agent': 'Monitor-Zanatta/1.0',
+                'Accept': 'application/json'
+            })
+        except requests.exceptions.Timeout:
+            st.warning("⏱️ A API do Senado demorou muito para responder. Tente novamente.")
+            return pd.DataFrame()
+        except requests.exceptions.ConnectionError:
+            st.warning("🌐 Não foi possível conectar à API do Senado. Verifique sua conexão.")
+            return pd.DataFrame()
+        except Exception as e:
+            st.warning(f"❌ Erro de conexão: {str(e)}")
             return pd.DataFrame()
         
+        # Validar resposta
+        valida, msg_erro = validar_resposta_api(response)
+        if not valida:
+            st.warning(f"⚠️ Problema com a resposta da API: {msg_erro}")
+            if debug:
+                st.write(f"Status: {response.status_code}")
+                st.write(f"Headers: {dict(response.headers)}")
+                st.write(f"Content (primeiros 500 chars): {response.text[:500]}")
+            return pd.DataFrame()
+        
+        # Parsear JSON
+        try:
+            data = response.json()
+        except ValueError as e:
+            st.warning(f"❌ Erro ao processar resposta do Senado: {str(e)}")
+            return pd.DataFrame()
+        
+        if debug:
+            st.write(f"Estrutura JSON recebida: {list(data.keys())}")
+        
+        # Processar resultados
+        materias = []
+        
+        # Verificar estrutura esperada
+        if "PesquisaBasicaMateria" not in data:
+            st.info("ℹ️ A API do Senado não retornou resultados no formato esperado.")
+            if debug:
+                st.json(data)
+            return pd.DataFrame()
+        
+        pesquisa = data["PesquisaBasicaMateria"]
+        
+        # Verificar se há matérias
+        if "Materias" not in pesquisa:
+            st.info(f"ℹ️ Nenhuma matéria encontrada para '{termo_busca}'")
+            return pd.DataFrame()
+        
+        if "Materia" not in pesquisa["Materias"]:
+            st.info(f"ℹ️ Nenhuma matéria encontrada para '{termo_busca}'")
+            return pd.DataFrame()
+        
+        materias_raw = pesquisa["Materias"]["Materia"]
+        
+        # Garantir que é lista
+        if not isinstance(materias_raw, list):
+            materias_raw = [materias_raw]
+        
+        if debug:
+            st.write(f"Total de matérias encontradas: {len(materias_raw)}")
+        
+        # Processar cada matéria
+        for i, m in enumerate(materias_raw[:limite]):
+            try:
+                identificacao = m.get("IdentificacaoMateria", {})
+                dados_basicos = m.get("DadosBasicosMateria", {})
+                
+                # Extrair autoria com segurança
+                autoria = dados_basicos.get("AutoriaPrincipal", {})
+                nome_autor = ""
+                if isinstance(autoria, dict):
+                    nome_autor = autoria.get("NomeAutor", "")
+                
+                materia_info = {
+                    "Codigo": str(identificacao.get("CodigoMateria", "")),
+                    "Sigla": str(identificacao.get("SiglaSubtipoMateria", "")).upper(),
+                    "Numero": str(identificacao.get("NumeroMateria", "")),
+                    "Ano": str(identificacao.get("AnoMateria", "")),
+                    "Ementa": str(dados_basicos.get("EmentaMateria", ""))[:500],  # Limitar tamanho
+                    "Autor": nome_autor,
+                    "Data": str(dados_basicos.get("DataApresentacao", "")),
+                    "Casa": str(dados_basicos.get("NomeCasaIdentificacaoMateria", "")),
+                    "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
+                }
+                
+                materias.append(materia_info)
+                
+            except Exception as e:
+                if debug:
+                    st.warning(f"Erro ao processar matéria {i+1}: {str(e)}")
+                continue
+        
+        # Verificar se encontrou algo
+        if not materias:
+            st.info(f"ℹ️ Nenhuma matéria processada com sucesso para '{termo_busca}'")
+            return pd.DataFrame()
+        
+        # Criar DataFrame
         df = pd.DataFrame(materias)
         
+        # Criar coluna de proposição
         if all(c in df.columns for c in ["Sigla", "Numero", "Ano"]):
-            df["Proposicao"] = df["Sigla"] + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+            df["Proposicao"] = df["Sigla"] + " " + df["Numero"] + "/" + df["Ano"]
+        
+        if debug:
+            st.success(f"✅ {len(df)} matérias processadas com sucesso")
         
         return df
         
     except Exception as e:
-        st.error(f"Erro ao buscar matérias no Senado: {str(e)}")
+        # Erro genérico - não mostrar detalhes técnicos ao usuário
+        st.error(f"❌ Erro inesperado ao buscar no Senado: {type(e).__name__}")
+        if debug:
+            st.exception(e)
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
-def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_autoria_senado(nome_autor: str = "Julia Zanatta", debug: bool = False) -> pd.DataFrame:
     """
     Busca proposições de autoria específica no Senado.
+    VERSÃO AUDITADA E CORRIGIDA.
     
     Args:
         nome_autor: Nome do autor para buscar
+        debug: Se True, mostra mensagens de debug
         
     Returns:
         DataFrame com proposições do autor
     """
+    if debug:
+        st.info(f"🔍 Debug: Buscando autoria de '{nome_autor}' no Senado...")
+    
     try:
         url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
         
@@ -477,57 +911,89 @@ def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
             "formato": "json"
         }
         
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        # Fazer requisição
+        try:
+            response = requests.get(url, params=params, timeout=30, headers={
+                'User-Agent': 'Monitor-Zanatta/1.0',
+                'Accept': 'application/json'
+            })
+        except requests.exceptions.Timeout:
+            st.warning("⏱️ A API do Senado demorou muito para responder.")
+            return pd.DataFrame()
+        except requests.exceptions.ConnectionError:
+            st.warning("🌐 Não foi possível conectar à API do Senado.")
+            return pd.DataFrame()
+        except Exception as e:
+            st.warning(f"❌ Erro de conexão: {str(e)}")
+            return pd.DataFrame()
         
+        # Validar resposta
+        valida, msg_erro = validar_resposta_api(response)
+        if not valida:
+            st.warning(f"⚠️ {msg_erro}")
+            return pd.DataFrame()
+        
+        # Parsear JSON
         data = response.json()
         
+        # Processar resultados (similar à função anterior)
         materias = []
         
-        if "PesquisaBasicaMateria" in data:
-            pesquisa = data["PesquisaBasicaMateria"]
-            if "Materias" in pesquisa and "Materia" in pesquisa["Materias"]:
-                materias_raw = pesquisa["Materias"]["Materia"]
+        if "PesquisaBasicaMateria" not in data:
+            st.info(f"ℹ️ Nenhuma proposição de autoria encontrada para '{nome_autor}'")
+            return pd.DataFrame()
+        
+        pesquisa = data["PesquisaBasicaMateria"]
+        
+        if "Materias" not in pesquisa or "Materia" not in pesquisa["Materias"]:
+            st.info(f"ℹ️ Nenhuma proposição de autoria encontrada para '{nome_autor}'")
+            return pd.DataFrame()
+        
+        materias_raw = pesquisa["Materias"]["Materia"]
+        
+        if not isinstance(materias_raw, list):
+            materias_raw = [materias_raw]
+        
+        for m in materias_raw:
+            try:
+                identificacao = m.get("IdentificacaoMateria", {})
+                dados_basicos = m.get("DadosBasicosMateria", {})
                 
-                if not isinstance(materias_raw, list):
-                    materias_raw = [materias_raw]
+                materia_info = {
+                    "Codigo": str(identificacao.get("CodigoMateria", "")),
+                    "Tipo": str(identificacao.get("SiglaSubtipoMateria", "")).upper(),
+                    "Numero": str(identificacao.get("NumeroMateria", "")),
+                    "Ano": str(identificacao.get("AnoMateria", "")),
+                    "Ementa": str(dados_basicos.get("EmentaMateria", ""))[:500],
+                    "Data": str(dados_basicos.get("DataApresentacao", "")),
+                    "Situacao": str(dados_basicos.get("DescricaoIdentificacaoMateria", "")),
+                    "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
+                }
                 
-                for m in materias_raw:
-                    try:
-                        identificacao = m.get("IdentificacaoMateria", {})
-                        dados_basicos = m.get("DadosBasicosMateria", {})
-                        
-                        materia_info = {
-                            "Codigo": identificacao.get("CodigoMateria", ""),
-                            "Tipo": identificacao.get("SiglaSubtipoMateria", ""),
-                            "Numero": identificacao.get("NumeroMateria", ""),
-                            "Ano": identificacao.get("AnoMateria", ""),
-                            "Ementa": dados_basicos.get("EmentaMateria", ""),
-                            "Data": dados_basicos.get("DataApresentacao", ""),
-                            "Situacao": dados_basicos.get("DescricaoIdentificacaoMateria", ""),
-                            "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
-                        }
-                        
-                        materias.append(materia_info)
-                    except Exception:
-                        continue
+                materias.append(materia_info)
+            except Exception:
+                continue
         
         if not materias:
+            st.info(f"ℹ️ Nenhuma proposição de autoria processada para '{nome_autor}'")
             return pd.DataFrame()
         
         df = pd.DataFrame(materias)
         
         if all(c in df.columns for c in ["Tipo", "Numero", "Ano"]):
-            df["Proposicao"] = df["Tipo"] + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+            df["Proposicao"] = df["Tipo"] + " " + df["Numero"] + "/" + df["Ano"]
         
         return df
         
     except Exception as e:
-        st.error(f"Erro ao buscar autoria no Senado: {str(e)}")
+        st.error(f"❌ Erro inesperado: {type(e).__name__}")
+        if debug:
+            st.exception(e)
         return pd.DataFrame()
 
 
-# Fim das funções do Senado
+# Fim das funções corrigidas
+
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
@@ -6082,7 +6548,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v26 – versão estável (sem IA)")
+    st.caption("v32 - Integração com Senado)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -6961,6 +7427,21 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if tipos_sel:
                 df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
+            # Checkbox do Senado
+            col_sen5, col_dbg5 = st.columns([4, 1])
+            with col_sen5:
+                incluir_senado_tab5 = st.checkbox(
+                    "🏛️ Incluir tramitação no Senado Federal",
+                    value=False,
+                    key="incluir_senado_tab5",
+                    help="Verifica proposições que foram aprovadas e tramitam no Senado"
+                )
+            with col_dbg5:
+                if st.session_state.get("usuario_logado", "").lower() == "admin":
+                    debug_senado_5 = st.checkbox("🔧 Debug", value=False, key="debug_senado_5")
+                else:
+                    debug_senado_5 = False
+
             st.markdown("---")
 
             # Campo de busca
@@ -7010,6 +7491,15 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             df_tbl["Parado (dias)"] = df_rast_enriched.get("Parado (dias)", pd.Series([None]*len(df_rast_enriched)))
             df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
             
+            # PROCESSAR COM SENADO (APÓS todas as colunas estarem criadas)
+            if incluir_senado_tab5:
+                with st.spinner("🔍 Buscando tramitação no Senado..."):
+                    df_tbl = processar_lista_com_senado(
+                        df_tbl,
+                        debug=debug_senado_5,
+                        mostrar_progresso=len(df_tbl) > 3
+                    )
+            
             def get_alerta_emoji(dias):
                 if pd.isna(dias):
                     return ""
@@ -7023,12 +7513,22 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
             df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
 
-            show_cols_r = [
-                "Alerta", "Proposição", "Tipo", "Ano",
-                "Situação atual", "Órgão (sigla)", "Relator(a)",
-                "Último andamento", "Data do status", "Parado (dias)", "LinkTramitacao",
-                "Ementa", "ID",
-            ]
+            # Colunas dinâmicas
+            if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
+                show_cols_r = [
+                    "Alerta", "Proposição", "Tipo", "Ano",
+                    "Situação atual", "Órgão (sigla)", "Relator(a)",
+                    "Último andamento", "Data do status", "Parado (dias)",
+                    "no_senado", "tipo_numero_senado", "situacao_senado",
+                    "LinkTramitacao", "url_senado", "Ementa", "ID",
+                ]
+            else:
+                show_cols_r = [
+                    "Alerta", "Proposição", "Tipo", "Ano",
+                    "Situação atual", "Órgão (sigla)", "Relator(a)",
+                    "Último andamento", "Data do status", "Parado (dias)", "LinkTramitacao",
+                    "Ementa", "ID",
+                ]
 
             for c in show_cols_r:
                 if c not in df_tbl.columns:
@@ -7083,8 +7583,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 selection_mode="single-row",
                 column_config={
                     "Alerta": st.column_config.TextColumn("", width="small", help="Urgência"),
-                    "LinkTramitacao": st.column_config.LinkColumn("Link", display_text="abrir"),
+                    "LinkTramitacao": st.column_config.LinkColumn("🏛️ Câmara", display_text="Abrir"),
                     "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                    "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
+                    "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
+                    "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium"),
+                    "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
                 },
                 key="df_busca_tab5"
             )
@@ -7251,6 +7755,21 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if tipos_sel6:
                 df_base6 = df_base6[df_base6["siglaTipo"].isin(tipos_sel6)].copy()
 
+            # Checkbox do Senado
+            col_sen6, col_dbg6 = st.columns([4, 1])
+            with col_sen6:
+                incluir_senado_tab6 = st.checkbox(
+                    "🏛️ Incluir tramitação no Senado Federal",
+                    value=False,
+                    key="incluir_senado_tab6",
+                    help="Verifica proposições que foram aprovadas e tramitam no Senado"
+                )
+            with col_dbg6:
+                if st.session_state.get("usuario_logado", "").lower() == "admin":
+                    debug_senado_6 = st.checkbox("🔧 Debug", value=False, key="debug_senado_6")
+                else:
+                    debug_senado_6 = False
+
             st.markdown("---")
 
             cS1, cS2, cS3, cS4 = st.columns([1.2, 1.2, 1.6, 1.0])
@@ -7356,6 +7875,16 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     ids_list = df_base6["id"].astype(str).head(int(max_status)).tolist()
                     status_map = build_status_map(ids_list)
                     df_status_view = enrich_with_status(df_base6.head(int(max_status)), status_map)
+                    
+                    # Processar com Senado
+                    if incluir_senado_tab6:
+                        with st.spinner("🔍 Buscando tramitação no Senado..."):
+                            df_status_view = processar_lista_com_senado(
+                                df_status_view,
+                                debug=debug_senado_6,
+                                mostrar_progresso=len(df_status_view) > 3
+                            )
+                    
                     st.session_state["df_status_last"] = df_status_view
 
             if df_status_view.empty:
@@ -8059,6 +8588,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         - 📊 Tramitações e situações atuais
         """)
         
+        # Modo debug (admin only)
+        debug_mode = False
+        if st.session_state.get("usuario_logado") == "admin":
+            debug_mode = st.checkbox("🔧 Modo Debug (apenas admin)", value=False, key="debug_senado")
+        
         col1, col2 = st.columns([3, 1])
         
         with col1:
@@ -8075,7 +8609,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         if btn_buscar or "df_senado" in st.session_state:
             with st.spinner("🔄 Buscando matérias no Senado Federal..."):
-                df_senado = buscar_materias_senado(termo_busca, limite=100)
+                df_senado = buscar_materias_senado(termo_busca, limite=100, debug=debug_mode)
                 st.session_state.df_senado = df_senado
             
             if not df_senado.empty:
