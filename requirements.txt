@@ -12,3 +12,74 @@ Sheets
 google-auth>=2.0.0
 google-auth-oauthlib>=1.0.0
 google-api-python-client>=2.0.0
+
+# ============================================================
+# DEPENDÊNCIAS - Monitor Parlamentar JZ v30
+# ============================================================
+# 
+# Instalação:
+# pip install -r requirements.txt
+# ============================================================
+
+# Core
+streamlit>=1.30.0
+pandas>=2.0.0
+requests>=2.31.0
+
+# Visualização
+matplotlib>=3.7.0
+
+# Excel/Planilhas
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# PDF (opcional - para leitura de PDFs)
+pypdf>=3.17.0
+
+# Google Sheets (opcional - para logs)
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# Utilitários
+python-dateutil>=2.8.2
+
+# ============================================================
+# VERSÕES TESTADAS E RECOMENDADAS
+# ============================================================
+# 
+# streamlit==1.30.0
+# pandas==2.1.3
+# requests==2.31.0
+# matplotlib==3.8.2
+# openpyxl==3.1.2
+# xlsxwriter==3.1.9
+# pypdf==3.17.4
+# 
+# ============================================================
+
+# ============================================================
+# INSTALAÇÃO POR AMBIENTE
+# ============================================================
+
+# Desenvolvimento Local:
+# pip install -r requirements.txt
+
+# Produção (Streamlit Cloud):
+# Adicione este arquivo ao repositório
+# O Streamlit Cloud instalará automaticamente
+
+# Docker:
+# RUN pip install --no-cache-dir -r requirements.txt
+
+# ============================================================
+# NOTAS
+# ============================================================
+
+# 1. Mantenha as versões atualizadas para correções de segurança
+# 2. Teste localmente antes de fazer deploy
+# 3. Use venv ou conda para isolar dependências
+# 4. Versões mínimas garantem compatibilidade
+
+# ============================================================
