@@ -10,6 +10,7 @@ import re
 from typing import Optional, Dict, List, Tuple
 # IMPORTANTE: o Streamlit precisa estar importado ANTES do primeiro @st.cache_data
 import streamlit as st
+import pandas as pd
 
 
 
