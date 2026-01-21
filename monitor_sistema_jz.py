@@ -385,10 +385,10 @@ def registrar_login(usuario: str):
 # FUNÇÕES DE INTEGRAÇÃO COM API DO SENADO FEDERAL - v30
 # ============================================================
 
-@st.cache_data(ttl=3600)
 def buscar_materias_senado(termo_busca: str = "Julia Zanatta", limite: int = 50) -> pd.DataFrame:
     """
     Busca matérias no Senado Federal que mencionam o termo especificado.
+    VERSÃO CORRIGIDA com logging robusto e tratamento de erros.
     
     Args:
         termo_busca: Termo para buscar (padrão: "Julia Zanatta")
@@ -397,70 +397,194 @@ def buscar_materias_senado(termo_busca: str = "Julia Zanatta", limite: int = 50)
     Returns:
         DataFrame com as matérias encontradas
     """
+    from urllib.parse import quote_plus
+    import logging
+    
+    # Setup de logging
+    logger = logging.getLogger(__name__)
+    
     try:
-        url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
+        # URL encoding do termo de busca
+        termo_encoded = quote_plus(termo_busca)
+        
+        base_url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
         
         params = {
-            "texto": termo_busca,
+            "texto": termo_busca,  # API do Senado aceita sem encoding também
             "tramitando": "S",
             "formato": "json"
         }
         
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        # Headers robustos
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "MonitorZanatta/30.0 (gabinete-julia-zanatta)",
+            "Accept-Encoding": "gzip, deflate"
+        }
         
-        data = response.json()
+        # Log da URL que será consultada
+        url_completa = f"{base_url}?texto={termo_encoded}&tramitando=S&formato=json"
+        
+        # Mostrar em expander de debug no Streamlit
+        with st.expander("🔍 DEBUG: Consulta ao Senado", expanded=False):
+            st.code(f"URL: {url_completa}")
+            st.write("Parâmetros:", params)
+        
+        # Fazer request com retry
+        max_retries = 3
+        for tentativa in range(max_retries):
+            try:
+                response = requests.get(
+                    base_url, 
+                    params=params, 
+                    headers=headers,
+                    timeout=30
+                )
+                
+                # Log de diagnóstico
+                status = response.status_code
+                content_type = response.headers.get('Content-Type', 'unknown')
+                body_size = len(response.content)
+                
+                with st.expander("🔍 DEBUG: Resposta do Senado", expanded=False):
+                    st.write(f"**Status Code**: {status}")
+                    st.write(f"**Content-Type**: {content_type}")
+                    st.write(f"**Body Size**: {body_size} bytes")
+                    
+                    if body_size < 1000:
+                        st.code(response.text[:800])
+                
+                # Validar response
+                if status == 200:
+                    break
+                elif status >= 500:
+                    if tentativa < max_retries - 1:
+                        time.sleep(2 ** tentativa)  # Backoff exponencial
+                        continue
+                    else:
+                        st.error(f"❌ Senado retornou erro {status} após {max_retries} tentativas")
+                        return pd.DataFrame()
+                else:
+                    st.error(f"❌ Senado retornou status {status}")
+                    return pd.DataFrame()
+                    
+            except requests.Timeout:
+                if tentativa < max_retries - 1:
+                    st.warning(f"⏱️ Timeout na tentativa {tentativa + 1}/{max_retries}, tentando novamente...")
+                    time.sleep(2 ** tentativa)
+                    continue
+                else:
+                    st.error(f"❌ Timeout após {max_retries} tentativas")
+                    return pd.DataFrame()
+            except requests.RequestException as e:
+                st.error(f"❌ Erro de conexão: {str(e)}")
+                return pd.DataFrame()
+        
+        # Validar content-type
+        if 'application/json' not in content_type:
+            st.error(f"❌ Content-Type inesperado: {content_type}")
+            st.code(response.text[:500])
+            return pd.DataFrame()
+        
+        # Parse JSON
+        try:
+            data = response.json()
+        except json.JSONDecodeError as e:
+            st.error(f"❌ Erro ao decodificar JSON: {str(e)}")
+            st.code(response.text[:500])
+            return pd.DataFrame()
         
         materias = []
         
+        # Navegação robusta na estrutura JSON
         if "PesquisaBasicaMateria" in data:
             pesquisa = data["PesquisaBasicaMateria"]
-            if "Materias" in pesquisa and "Materia" in pesquisa["Materias"]:
-                materias_raw = pesquisa["Materias"]["Materia"]
-                
-                if not isinstance(materias_raw, list):
-                    materias_raw = [materias_raw]
-                
-                for m in materias_raw[:limite]:
-                    try:
-                        identificacao = m.get("IdentificacaoMateria", {})
-                        dados_basicos = m.get("DadosBasicosMateria", {})
-                        
-                        materia_info = {
-                            "Codigo": identificacao.get("CodigoMateria", ""),
-                            "Sigla": identificacao.get("SiglaSubtipoMateria", ""),
-                            "Numero": identificacao.get("NumeroMateria", ""),
-                            "Ano": identificacao.get("AnoMateria", ""),
-                            "Ementa": dados_basicos.get("EmentaMateria", ""),
-                            "Autor": dados_basicos.get("AutoriaPrincipal", {}).get("NomeAutor", ""),
-                            "Data": dados_basicos.get("DataApresentacao", ""),
-                            "Casa": dados_basicos.get("NomeCasaIdentificacaoMateria", ""),
-                            "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
-                        }
-                        
-                        materias.append(materia_info)
-                    except Exception:
-                        continue
+            
+            # Verificar se tem resultados
+            if "Materias" not in pesquisa:
+                st.warning("⚠️ API retornou sucesso mas sem campo 'Materias'")
+                with st.expander("🔍 DEBUG: Estrutura JSON recebida"):
+                    st.json(data)
+                return pd.DataFrame()
+            
+            materias_obj = pesquisa["Materias"]
+            
+            # Verificar se Materias está vazio
+            if not materias_obj or "Materia" not in materias_obj:
+                st.info(f"ℹ️ Nenhuma matéria encontrada com o termo '{termo_busca}'")
+                return pd.DataFrame()
+            
+            materias_raw = materias_obj["Materia"]
+            
+            # Garantir que é lista
+            if not isinstance(materias_raw, list):
+                materias_raw = [materias_raw]
+            
+            st.info(f"✓ API retornou {len(materias_raw)} matérias, processando até {limite}...")
+            
+            # Processar cada matéria
+            for idx, m in enumerate(materias_raw[:limite]):
+                try:
+                    identificacao = m.get("IdentificacaoMateria", {})
+                    dados_basicos = m.get("DadosBasicosMateria", {})
+                    
+                    # Extrair autoria (pode ser objeto ou string)
+                    autoria_obj = dados_basicos.get("AutoriaPrincipal", {})
+                    if isinstance(autoria_obj, dict):
+                        autor = autoria_obj.get("NomeAutor", "")
+                    else:
+                        autor = str(autoria_obj) if autoria_obj else ""
+                    
+                    materia_info = {
+                        "Codigo": identificacao.get("CodigoMateria", ""),
+                        "Sigla": identificacao.get("SiglaSubtipoMateria", ""),
+                        "Numero": identificacao.get("NumeroMateria", ""),
+                        "Ano": identificacao.get("AnoMateria", ""),
+                        "Ementa": dados_basicos.get("EmentaMateria", ""),
+                        "Autor": autor,
+                        "Data": dados_basicos.get("DataApresentacao", ""),
+                        "Casa": dados_basicos.get("NomeCasaIdentificacaoMateria", ""),
+                        "URL": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{identificacao.get('CodigoMateria', '')}"
+                    }
+                    
+                    materias.append(materia_info)
+                    
+                except Exception as e:
+                    st.warning(f"⚠️ Erro ao processar matéria {idx + 1}: {str(e)}")
+                    continue
+        else:
+            st.error("❌ Estrutura JSON inesperada: faltando 'PesquisaBasicaMateria'")
+            with st.expander("🔍 DEBUG: JSON completo recebido"):
+                st.json(data)
+            return pd.DataFrame()
         
+        # Criar DataFrame
         if not materias:
+            st.info(f"ℹ️ Nenhuma matéria foi processada com sucesso")
             return pd.DataFrame()
         
         df = pd.DataFrame(materias)
         
+        # Criar coluna de proposição
         if all(c in df.columns for c in ["Sigla", "Numero", "Ano"]):
-            df["Proposicao"] = df["Sigla"] + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+            df["Proposicao"] = df["Sigla"].astype(str) + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+        
+        st.success(f"✅ Processadas {len(df)} matérias com sucesso!")
         
         return df
         
     except Exception as e:
-        st.error(f"Erro ao buscar matérias no Senado: {str(e)}")
+        st.error(f"❌ Erro geral ao buscar matérias no Senado: {str(e)}")
+        import traceback
+        with st.expander("🔍 DEBUG: Stack trace completo"):
+            st.code(traceback.format_exc())
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
 def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
     """
     Busca proposições de autoria específica no Senado.
+    VERSÃO CORRIGIDA com logging robusto.
     
     Args:
         nome_autor: Nome do autor para buscar
@@ -468,8 +592,12 @@ def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
     Returns:
         DataFrame com proposições do autor
     """
+    from urllib.parse import quote_plus
+    
     try:
-        url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
+        nome_encoded = quote_plus(nome_autor)
+        
+        base_url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
         
         params = {
             "autor": nome_autor,
@@ -477,11 +605,23 @@ def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
             "formato": "json"
         }
         
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "MonitorZanatta/30.0 (gabinete-julia-zanatta)"
+        }
+        
+        url_completa = f"{base_url}?autor={nome_encoded}&tramitando=S&formato=json"
+        
+        with st.expander("🔍 DEBUG: Consulta Autoria Senado", expanded=False):
+            st.code(f"URL: {url_completa}")
+        
+        response = requests.get(base_url, params=params, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            st.error(f"❌ Erro {response.status_code} ao buscar autoria")
+            return pd.DataFrame()
         
         data = response.json()
-        
         materias = []
         
         if "PesquisaBasicaMateria" in data:
@@ -513,196 +653,19 @@ def buscar_autoria_senado(nome_autor: str = "Julia Zanatta") -> pd.DataFrame:
                         continue
         
         if not materias:
+            st.info(f"ℹ️ Nenhuma proposição de autoria de '{nome_autor}' encontrada")
             return pd.DataFrame()
         
         df = pd.DataFrame(materias)
         
         if all(c in df.columns for c in ["Tipo", "Numero", "Ano"]):
-            df["Proposicao"] = df["Tipo"] + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
+            df["Proposicao"] = df["Tipo"].astype(str) + " " + df["Numero"].astype(str) + "/" + df["Ano"].astype(str)
         
         return df
         
     except Exception as e:
-        st.error(f"Erro ao buscar autoria no Senado: {str(e)}")
+        st.error(f"❌ Erro ao buscar autoria no Senado: {str(e)}")
         return pd.DataFrame()
-
-
-# Fim das funções do Senado
-
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA (OBRIGATORIAMENTE PRIMEIRA CHAMADA ST)
-# ============================================================
-
-st.set_page_config(
-    page_title="Monitor Legislativo – Dep. Júlia Zanatta",
-    page_icon="🏛️",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-# ============================================================
-# CONTROLE DE ACESSO — ACESSO RESTRITO AO GABINETE
-# ============================================================
-
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-    st.session_state.usuario_logado = None
-
-if not st.session_state.autenticado:
-    # CSS para tela de login profissional
-    st.markdown("""
-    <style>
-    .stApp {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    .login-container {
-        background: white;
-        padding: 3rem 2rem;
-        border-radius: 20px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        max-width: 450px;
-        margin: 4rem auto;
-    }
-    .login-icon {
-        text-align: center;
-        font-size: 4rem;
-        margin-bottom: 1rem;
-    }
-    .login-title {
-        text-align: center;
-        color: #2d3748;
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-    }
-    .login-subtitle {
-        text-align: center;
-        color: #718096;
-        font-size: 1rem;
-        margin-bottom: 2rem;
-    }
-    .stTextInput input {
-        border-radius: 10px;
-        border: 2px solid #e2e8f0;
-        padding: 12px;
-        font-size: 1rem;
-    }
-    .stTextInput input:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    .stButton button {
-        width: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 12px;
-        border-radius: 10px;
-        font-size: 1rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s;
-    }
-    .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-    }
-    .block-container {
-        padding-top: 2rem;
-    }
-    .login-footer {
-        text-align: center;
-        color: white;
-        margin-top: 2rem;
-        font-size: 0.9rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="login-icon">🏛️</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">Monitor Parlamentar</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-subtitle">Deputada Júlia Zanatta</div>', unsafe_allow_html=True)
-    
-    # Configuração de autenticação
-    auth_config = st.secrets.get("auth", {})
-    usuarios_config = auth_config.get("usuarios", {})
-    senhas_lista = list(auth_config.get("senhas", []))
-    senha_unica = auth_config.get("senha")
-    
-    if not usuarios_config and not senhas_lista and not senha_unica:
-        st.error("Erro de configuração: defina [auth.usuarios], [auth].senhas ou [auth].senha em Settings → Secrets.")
-        st.stop()
-    
-    with st.form("login_form", clear_on_submit=False):
-        usuario_input = st.text_input(
-            "👤 Usuário",
-            placeholder="Digite seu usuário",
-            key="input_usuario"
-        )
-        
-        senha = st.text_input(
-            "🔒 Senha",
-            type="password",
-            placeholder="Digite sua senha",
-            key="input_senha"
-        )
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            submit = st.form_submit_button("🚀 Entrar", use_container_width=True)
-        
-        if submit:
-            if not senha:
-                st.error("⚠️ Por favor, preencha a senha")
-            else:
-                usuario_encontrado = None
-                autenticado = False
-                
-                # Verificar usuários nomeados
-                for nome_usuario, senha_usuario in usuarios_config.items():
-                    if senha == senha_usuario:
-                        usuario_encontrado = nome_usuario
-                        autenticado = True
-                        break
-                
-                # Verificar lista de senhas
-                if not autenticado and senha in senhas_lista:
-                    usuario_encontrado = usuario_input if usuario_input else "Usuário (senha da lista)"
-                    autenticado = True
-                
-                # Verificar senha única
-                if not autenticado and senha_unica and senha == senha_unica:
-                    usuario_encontrado = usuario_input if usuario_input else "Usuário (senha principal)"
-                    autenticado = True
-                
-                if autenticado:
-                    st.session_state.autenticado = True
-                    st.session_state.usuario_logado = usuario_encontrado
-                    
-                    # Registrar login
-                    registrar_login(usuario_encontrado)
-                    
-                    st.success("✅ Login realizado com sucesso!")
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.error("❌ Senha incorreta")
-    
-    st.markdown("""
-    <div class="login-footer">
-        💡 <b>Desenvolvido por Lucas Pinheiro</b><br>
-        Gabinete da Deputada Júlia Zanatta
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.stop()
-
-
-# ============================================================
-# TIMEZONE DE BRASÍLIA
-# ============================================================
-
-TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 
 def get_brasilia_now():
@@ -7946,110 +7909,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 8 - RECEBER NOTIFICAÇÕES
     # ============================================================
     with tab8:
-        st.title("📧 Receber Notificações por Email")
-
-        st.markdown("""
-        ### 📬 Cadastre-se para receber alertas
-
-        Receba notificações por email sempre que houver:
-        - 📄 **Nova tramitação** em matérias da Dep. Júlia Zanatta
-        - 📋 **Matéria na pauta** de comissões (autoria ou relatoria)
-        - 🔑 **Palavras-chave** de interesse nas pautas
-        - 🌙 **Resumo do dia** com todas as movimentações
-
-        ---
-        """)
-
-        col1, col2 = st.columns([2, 1])
-
-        with col1:
-            st.subheader("✍️ Cadastrar Email")
-
-            with st.form("form_cadastro_email", clear_on_submit=True):
-                novo_email = st.text_input(
-                    "Seu email",
-                    placeholder="exemplo@email.com",
-                    help="Digite seu email para receber as notificações"
-                )
-
-                aceite = st.checkbox(
-                    "Concordo em receber notificações do Monitor Parlamentar",
-                    value=False
-                )
-
-                submitted = st.form_submit_button("📩 Cadastrar", type="primary")
-
-                if submitted:
-                    if not novo_email:
-                        st.error("Por favor, digite seu email")
-                    elif not aceite:
-                        st.warning("Por favor, marque a caixa de concordância")
-                    else:
-                        with st.spinner("Cadastrando..."):
-                            sucesso, mensagem = cadastrar_email_github(novo_email.strip())
-
-                        if sucesso:
-                            st.success(f"✅ {mensagem}")
-                            st.balloons()
-                        else:
-                            st.error(f"❌ {mensagem}")
-
-        with col2:
-            st.subheader("ℹ️ Informações")
-
-            st.info("""
-            **O que você vai receber:**
-
-            📌 Emails apenas quando houver movimentação relevante
-
-            📌 Resumo diário às 20:30
-
-            📌 Link para o painel em cada email
-            """)
-
-        st.markdown("---")
-
-        # Mostrar emails cadastrados (apenas para admin)
-        if st.session_state.get("usuario_logado") == "admin":
-            with st.expander("👑 Emails cadastrados (Admin)"):
-                emails = listar_emails_cadastrados()
-                if emails:
-                    for i, email in enumerate(emails, 1):
-                        st.write(f"{i}. {email}")
-                    st.caption(f"Total: {len(emails)} emails cadastrados")
-                else:
-                    st.write("Nenhum email cadastrado ainda")
-
-        st.markdown("---")
-
-        st.markdown("""
-        ### 🔗 Outras formas de acompanhar
-
-        <table style="width:100%">
-        <tr>
-            <td style="text-align:center; padding:20px;">
-                <a href="https://t.me/+seu_grupo_telegram" target="_blank">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="50">
-                    <br><b>Grupo Telegram</b>
-                </a>
-            </td>
-            <td style="text-align:center; padding:20px;">
-                <a href="https://monitorzanatta.streamlit.app" target="_blank">
-                    <img src="https://streamlit.io/images/brand/streamlit-mark-color.png" width="50">
-                    <br><b>Painel Web</b>
-                </a>
-            </td>
-        </tr>
-        </table>
-        """, unsafe_allow_html=True)
-
-
-
-
-    # ============================================================
-    # ABA 9 - SENADO FEDERAL (NOVA v30!)
-    # ============================================================
-    with tab9:
         st.header("🏛️ Senado Federal - Monitoramento Julia Zanatta")
         
         st.markdown("""
@@ -8168,7 +8027,112 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 )
                 
                 # Download
-                st.markdown("---")
+            
+    with tab9:
+        st.title("📧 Receber Notificações por Email")
+
+        st.markdown("""
+        ### 📬 Cadastre-se para receber alertas
+
+        Receba notificações por email sempre que houver:
+        - 📄 **Nova tramitação** em matérias da Dep. Júlia Zanatta
+        - 📋 **Matéria na pauta** de comissões (autoria ou relatoria)
+        - 🔑 **Palavras-chave** de interesse nas pautas
+        - 🌙 **Resumo do dia** com todas as movimentações
+
+        ---
+        """)
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            st.subheader("✍️ Cadastrar Email")
+
+            with st.form("form_cadastro_email", clear_on_submit=True):
+                novo_email = st.text_input(
+                    "Seu email",
+                    placeholder="exemplo@email.com",
+                    help="Digite seu email para receber as notificações"
+                )
+
+                aceite = st.checkbox(
+                    "Concordo em receber notificações do Monitor Parlamentar",
+                    value=False
+                )
+
+                submitted = st.form_submit_button("📩 Cadastrar", type="primary")
+
+                if submitted:
+                    if not novo_email:
+                        st.error("Por favor, digite seu email")
+                    elif not aceite:
+                        st.warning("Por favor, marque a caixa de concordância")
+                    else:
+                        with st.spinner("Cadastrando..."):
+                            sucesso, mensagem = cadastrar_email_github(novo_email.strip())
+
+                        if sucesso:
+                            st.success(f"✅ {mensagem}")
+                            st.balloons()
+                        else:
+                            st.error(f"❌ {mensagem}")
+
+        with col2:
+            st.subheader("ℹ️ Informações")
+
+            st.info("""
+            **O que você vai receber:**
+
+            📌 Emails apenas quando houver movimentação relevante
+
+            📌 Resumo diário às 20:30
+
+            📌 Link para o painel em cada email
+            """)
+
+        st.markdown("---")
+
+        # Mostrar emails cadastrados (apenas para admin)
+        if st.session_state.get("usuario_logado") == "admin":
+            with st.expander("👑 Emails cadastrados (Admin)"):
+                emails = listar_emails_cadastrados()
+                if emails:
+                    for i, email in enumerate(emails, 1):
+                        st.write(f"{i}. {email}")
+                    st.caption(f"Total: {len(emails)} emails cadastrados")
+                else:
+                    st.write("Nenhum email cadastrado ainda")
+
+        st.markdown("---")
+
+        st.markdown("""
+        ### 🔗 Outras formas de acompanhar
+
+        <table style="width:100%">
+        <tr>
+            <td style="text-align:center; padding:20px;">
+                <a href="https://t.me/+seu_grupo_telegram" target="_blank">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="50">
+                    <br><b>Grupo Telegram</b>
+                </a>
+            </td>
+            <td style="text-align:center; padding:20px;">
+                <a href="https://monitorzanatta.streamlit.app" target="_blank">
+                    <img src="https://streamlit.io/images/brand/streamlit-mark-color.png" width="50">
+                    <br><b>Painel Web</b>
+                </a>
+            </td>
+        </tr>
+        </table>
+        """, unsafe_allow_html=True)
+
+
+
+
+    # ============================================================
+    # ABA 9 - SENADO FEDERAL (NOVA v30!)
+    # ============================================================
+    st.markdown("---")
                 
                 col1, col2 = st.columns(2)
                 
