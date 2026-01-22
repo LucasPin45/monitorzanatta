@@ -7502,14 +7502,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
             
             # PROCESSAR COM SENADO (APÓS todas as colunas estarem criadas)
-            if incluir_senado_tab5:
-                with st.spinner("🔍 Buscando tramitação no Senado..."):
-                    df_tbl = processar_lista_com_senado(
-                        df_tbl,
-                        debug=debug_senado_5,
-                        mostrar_progresso=len(df_tbl) > 3
-                    )
-            
             def get_alerta_emoji(dias):
                 if pd.isna(dias):
                     return ""
@@ -7518,10 +7510,20 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 if dias <= 5:
                     return "⚠️"
                 if dias <= 15:
+
+            df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
+
+            if incluir_senado_tab5:
+                with st.spinner("🔍 Buscando tramitação no Senado..."):
+                    df_tbl = processar_lista_com_senado(
+                        df_tbl,
+                        debug=debug_senado_5,
+                        mostrar_progresso=len(df_tbl) > 3
+                    )
+            
                     return "🔔"
                 return ""
             
-            df_tbl["Alerta"] = df_rast_enriched["Parado (dias)"].apply(get_alerta_emoji)
 
             # Colunas dinâmicas
             if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
