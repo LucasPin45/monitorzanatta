@@ -1,11 +1,10 @@
-# monitor_sistema_jz.py - v31.2 CORREÇÃO PARSEAMENTO XML SENADO
+# monitor_sistema_jz.py - v31.3 RELATOR/ÓRGÃO EXTRAÍDOS NA BUSCA PRINCIPAL
 # 
-# ALTERAÇÕES v31.2:
-# - Correção: Remove zeros à esquerda do número da matéria
-# - Correção: Garante ano com 4 dígitos
-# - Nova coluna: codigo_materia_senado (para verificação)
-# - Deep link SEMPRE no formato: /materia/{CodigoMateria}
-# - Exemplo: PLP 223/2023 → código 167367 → https://www25.senado.leg.br/web/atividade/materias/-/materia/167367
+# ALTERAÇÕES v31.3:
+# - Relator e Órgão extraídos diretamente do XML da busca principal
+# - Removidas chamadas separadas a buscar_detalhes_senado/buscar_movimentacoes_senado
+# - Iteração por todas as tags do XML para encontrar relator
+# - Logs detalhados de relator/órgão encontrados
 #
 # ALTERAÇÕES v31.1:
 # - Busca RELATOR do Senado (não mostra mais relator da Câmara para matérias no Senado)
@@ -244,6 +243,65 @@ def buscar_tramitacao_senado_mesmo_numero(
             ""
         )
         
+        # ========== EXTRAIR RELATOR DIRETAMENTE ==========
+        relator_nome = ""
+        relator_partido = ""
+        relator_uf = ""
+        
+        # Procurar em todos os caminhos possíveis
+        for elem in root.iter():
+            tag_lower = elem.tag.lower() if elem.tag else ""
+            if 'relator' in tag_lower:
+                # Encontrou um elemento relacionado a relator
+                nome_elem = elem.find('.//NomeParlamentar')
+                if nome_elem is None:
+                    nome_elem = elem.find('.//NomeAutor')
+                if nome_elem is None:
+                    nome_elem = elem.find('.//Nome')
+                if nome_elem is not None and nome_elem.text:
+                    relator_nome = nome_elem.text.strip()
+                    # Buscar partido e UF
+                    partido_elem = elem.find('.//SiglaPartido')
+                    if partido_elem is not None and partido_elem.text:
+                        relator_partido = partido_elem.text.strip()
+                    uf_elem = elem.find('.//UfParlamentar')
+                    if uf_elem is None:
+                        uf_elem = elem.find('.//SiglaUf')
+                    if uf_elem is not None and uf_elem.text:
+                        relator_uf = uf_elem.text.strip()
+                    if relator_nome:
+                        break
+        
+        # Formatar relator
+        if relator_nome:
+            if relator_partido and relator_uf:
+                relator_formatado = f"{relator_nome} ({relator_partido}/{relator_uf})"
+            elif relator_partido:
+                relator_formatado = f"{relator_nome} ({relator_partido})"
+            else:
+                relator_formatado = relator_nome
+        else:
+            relator_formatado = ""
+        
+        print(f"[SENADO]    Relator encontrado: {relator_formatado or 'não encontrado'}")
+        
+        # ========== EXTRAIR ÓRGÃO ATUAL ==========
+        orgao_sigla = ""
+        orgao_nome = ""
+        
+        # Procurar Local/Órgão atual
+        for path in ['.//SituacaoAtual/Autuacoes/Autuacao/Local', './/Local', './/Orgao']:
+            local_elem = materia.find(path)
+            if local_elem is not None:
+                sigla = get_xml_text(local_elem, './/SiglaLocal') or get_xml_text(local_elem, './/SiglaOrgao')
+                nome = get_xml_text(local_elem, './/NomeLocal') or get_xml_text(local_elem, './/NomeOrgao')
+                if sigla:
+                    orgao_sigla = sigla
+                    orgao_nome = nome
+                    break
+        
+        print(f"[SENADO]    Órgão encontrado: {orgao_sigla or 'não encontrado'}")
+        
         # Ementa
         ementa = (
             get_xml_text(materia, './/EmentaMateria') or
@@ -264,6 +322,9 @@ def buscar_tramitacao_senado_mesmo_numero(
             "situacao_senado": situacao,
             "ementa_senado": ementa,
             "url_senado": url_senado,
+            "relator_senado": relator_formatado,
+            "orgao_senado_sigla": orgao_sigla,
+            "orgao_senado_nome": orgao_nome,
         }
         
         # LOG: Resultado encontrado
@@ -737,20 +798,10 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
             f"{dados_senado['ano_senado']}"
         )
         
-        codigo_materia = dados_senado.get("codigo_senado", "")
-        
-        # 2. Buscar detalhes (relator e órgão do Senado)
-        if codigo_materia:
-            detalhes = buscar_detalhes_senado(codigo_materia, debug=debug)
-            if detalhes:
-                resultado["Relator_Senado"] = detalhes.get("relator_senado", "")
-                resultado["Orgao_Senado_Sigla"] = detalhes.get("orgao_senado_sigla", "")
-                resultado["Orgao_Senado_Nome"] = detalhes.get("orgao_senado_nome", "")
-            
-            # 3. Buscar movimentações do Senado
-            movimentacoes = buscar_movimentacoes_senado(codigo_materia, limite=10, debug=debug)
-            if movimentacoes:
-                resultado["UltimasMov_Senado"] = formatar_movimentacoes_senado(movimentacoes)
+        # Usar relator e órgão que já vieram da busca principal
+        resultado["Relator_Senado"] = dados_senado.get("relator_senado", "")
+        resultado["Orgao_Senado_Sigla"] = dados_senado.get("orgao_senado_sigla", "")
+        resultado["Orgao_Senado_Nome"] = dados_senado.get("orgao_senado_nome", "")
         
         if debug:
             st.success(f"✅ {proposicao_str} encontrado no Senado")
