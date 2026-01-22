@@ -195,6 +195,7 @@ def buscar_tramitacao_senado_mesmo_numero(
             escolhido = itens[0]
 
         codigo_materia = str(escolhido.get("codigoMateria") or "").strip()
+        id_processo = str(escolhido.get("id") or "").strip()
         situacao = (
             str(escolhido.get("situacao") or escolhido.get("situacaoAtual") or "").strip()
             if isinstance(escolhido, dict)
@@ -217,6 +218,7 @@ def buscar_tramitacao_senado_mesmo_numero(
             "numero_senado": numero_norm,
             "ano_senado": ano_norm,
             "codigo_senado": codigo_materia,
+            "id_processo_senado": id_processo,
             "situacao_senado": situacao,
             "url_senado": url_deep,
         }
@@ -390,149 +392,199 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
 
     return resultado
 
-def buscar_movimentacoes_senado(codigo_materia: str, limite: int = 10, debug: bool = False) -> List[Dict]:
+def buscar_movimentacoes_senado(
+    codigo_materia: str,
+    id_processo_senado: str = "",
+    limite: int = 10,
+    debug: bool = False
+) -> List[Dict]:
     """
-    Busca as últimas movimentações/tramitações de uma matéria do Senado.
-    
-    ENDPOINT: https://legis.senado.leg.br/dadosabertos/materia/movimentacoes/{codigo}
-    FORMATO: XML
-    
-    Args:
-        codigo_materia: Código numérico da matéria no Senado
-        limite: Número máximo de movimentações a retornar
-        debug: Modo debug
-        
-    Returns:
-        Lista de dicts com movimentações (mais recentes primeiro)
+    Busca as últimas movimentações (informes legislativos) do Senado de forma robusta.
+
+    Fonte principal (Swagger):
+      GET https://legis.senado.leg.br/dadosabertos/processo/{id}?v=1
+
+    Onde {id} é o id do processo (vem no retorno do /processo?sigla=...).
+    A resposta normalmente vem em JSON, mas pode vir em XML mesmo com Accept: application/json.
     """
+    import requests
     import xml.etree.ElementTree as ET
-    
-    if not codigo_materia:
-        return []
-    
-    url = f"https://legis.senado.leg.br/dadosabertos/materia/movimentacoes/{codigo_materia}"
-    
-    print(f"[SENADO-MOV] ========================================")
-    print(f"[SENADO-MOV] Buscando movimentações para CodigoMateria={codigo_materia}")
-    print(f"[SENADO-MOV] URL: {url}")
-    
-    if debug:
-        st.write(f"🔍 Buscando movimentações no Senado: código {codigo_materia}")
-    
-    try:
-        response = requests.get(
-            url, 
-            timeout=15,
-            headers={
-                'User-Agent': 'Monitor-Zanatta/1.0',
-                'Accept': 'application/xml'
-            },
-            verify=_REQUESTS_VERIFY
-        )
-        
-        print(f"[SENADO-MOV] Status HTTP: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"[SENADO-MOV] ⚠️ Status code: {response.status_code}")
-            return []
-        
-        # Parsear XML
-        try:
-            root = ET.fromstring(response.content)
-        except ET.ParseError as e:
-            print(f"[SENADO-MOV] ❌ Erro ao parsear XML: {str(e)}")
-            return []
-        
-        # Função auxiliar
-        def get_xml_text(element, tag_path, default=""):
-            el = element.find(tag_path)
-            if el is not None and el.text:
-                return el.text.strip()
-            return default
-        
-        movimentacoes = []
-        
-        # Procurar movimentações - tentar vários caminhos
-        mov_paths = [
-            './/Movimentacoes/Movimentacao',
-            './/Tramitacoes/Tramitacao',
-            './/Movimentacao',
-            './/Tramitacao'
-        ]
-        
-        for path in mov_paths:
-            movs = root.findall(path)
-            if movs:
-                for mov in movs:
-                    data = (
-                        get_xml_text(mov, './/DataMovimentacao') or
-                        get_xml_text(mov, './/DataTramitacao') or
-                        get_xml_text(mov, './/Data') or
-                        ""
-                    )
-                    
-                    descricao = (
-                        get_xml_text(mov, './/DescricaoMovimentacao') or
-                        get_xml_text(mov, './/DescricaoTramitacao') or
-                        get_xml_text(mov, './/Descricao') or
-                        get_xml_text(mov, './/TextoTramitacao') or
-                        ""
-                    )
-                    
-                    orgao = (
-                        get_xml_text(mov, './/SiglaLocal') or
-                        get_xml_text(mov, './/Local/SiglaLocal') or
-                        get_xml_text(mov, './/Origem/SiglaLocal') or
-                        get_xml_text(mov, './/Destino/SiglaLocal') or
-                        ""
-                    )
-                    
-                    if data or descricao:
-                        movimentacoes.append({
-                            "data": data,
-                            "descricao": descricao,
-                            "orgao": orgao
-                        })
-                
-                if movimentacoes:
-                    break
-        
-        # Ordenar por data (mais recente primeiro) e limitar
-        # Tentar parsear datas para ordenação
-        def parse_date_key(mov):
-            data = mov.get("data", "")
-            if data:
-                # Formato esperado: YYYY-MM-DD ou DD/MM/YYYY
-                try:
-                    if "-" in data:
-                        return data
-                    elif "/" in data:
-                        parts = data.split("/")
-                        if len(parts) == 3:
-                            return f"{parts[2]}-{parts[1]}-{parts[0]}"
-                except:
-                    pass
-            return "0000-00-00"
-        
-        movimentacoes.sort(key=parse_date_key, reverse=True)
-        movimentacoes = movimentacoes[:limite]
-        
-        print(f"[SENADO-MOV] ✅ Encontradas {len(movimentacoes)} movimentações (limitado a {limite})")
-        for i, mov in enumerate(movimentacoes[:3]):  # Log das 3 primeiras
-            print(f"[SENADO-MOV]    {i+1}. {mov['data']} - {mov['descricao'][:50]}...")
-        print(f"[SENADO-MOV] ========================================")
-        
-        if debug:
-            st.write(f"Encontradas {len(movimentacoes)} movimentações")
-        
-        return movimentacoes
-        
-    except Exception as e:
-        print(f"[SENADO-MOV] ❌ ERRO: {str(e)}")
-        if debug:
-            st.error(f"Erro ao buscar movimentações: {str(e)}")
+    from datetime import datetime
+
+    if not id_processo_senado:
         return []
 
+    url = f"https://legis.senado.leg.br/dadosabertos/processo/{id_processo_senado}?v=1"
+    print(f"[SENADO-PROCESSO] Buscando processo (movimentações): {url}")
+    if debug:
+        st.write(f"🔎 Buscando processo (Senado): {url}")
+
+    try:
+        resp = requests.get(
+            url,
+            timeout=25,
+            headers={"User-Agent": "Monitor-Zanatta/1.0", "Accept": "application/json"},
+            verify=_REQUESTS_VERIFY,
+        )
+    except Exception as e:
+        print(f"[SENADO-PROCESSO] ERRO request: {e}")
+        if debug:
+            st.error(f"Erro consultando processo do Senado: {e}")
+        return []
+
+    if resp.status_code != 200 or not resp.content:
+        return []
+
+    # ---------- JSON ----------
+    informes = []
+    try:
+        proc = resp.json()
+    except Exception:
+        proc = None
+
+    if isinstance(proc, dict):
+        try:
+            autuacoes = proc.get("autuacoes") or []
+            if autuacoes and isinstance(autuacoes, list):
+                informes = autuacoes[0].get("informesLegislativos") or []
+        except Exception:
+            informes = []
+
+    # ---------- XML fallback ----------
+    if not informes:
+        try:
+            root = ET.fromstring(resp.content)
+            informes_xml = root.findall(".//informesLegislativos//informeLegislativo")
+            for it in informes_xml:
+                data_txt = (it.findtext("data") or "").strip()
+                desc = (it.findtext("descricao") or "").strip()
+                coleg_sigla = (it.findtext(".//colegiado/sigla") or "").strip()
+                informes.append({"data": data_txt, "descricao": desc, "colegiado": {"sigla": coleg_sigla}})
+        except Exception:
+            informes = []
+
+    movs = []
+    for it in informes:
+        data_txt = (it.get("data") or "").strip()
+        desc = (it.get("descricao") or "").strip()
+        org_sigla = ""
+        coleg = it.get("colegiado") or {}
+        if isinstance(coleg, dict):
+            org_sigla = (coleg.get("sigla") or "").strip()
+
+        dt = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S.%f"):
+            try:
+                dt = datetime.strptime(data_txt[:26], fmt)
+                break
+            except Exception:
+                continue
+
+        if dt:
+            data_br = dt.strftime("%d/%m/%Y")
+            hora = dt.strftime("%H:%M")
+            sort_key = dt
+        else:
+            data_br = data_txt
+            hora = ""
+            sort_key = datetime.min
+
+        movs.append({"data": data_br, "hora": hora, "orgao": org_sigla, "descricao": desc, "_sort": sort_key})
+
+    movs.sort(key=lambda x: x.get("_sort"), reverse=True)
+    movs = movs[:limite]
+    for m in movs:
+        m.pop("_sort", None)
+    return movs
+
+
+def buscar_status_senado_por_processo(
+    id_processo_senado: str,
+    debug: bool = False
+) -> Dict:
+    """
+    Obtém SITUAÇÃO ATUAL e ÓRGÃO ATUAL no Senado via:
+      GET https://legis.senado.leg.br/dadosabertos/processo/{id}?v=1
+
+    Retorna dict:
+      - situacao_senado
+      - orgao_senado_sigla
+      - orgao_senado_nome
+    """
+    import requests
+    import xml.etree.ElementTree as ET
+
+    out = {"situacao_senado": "", "orgao_senado_sigla": "", "orgao_senado_nome": ""}
+    if not id_processo_senado:
+        return out
+
+    url = f"https://legis.senado.leg.br/dadosabertos/processo/{id_processo_senado}?v=1"
+    print(f"[SENADO-PROCESSO] Buscando processo (status): {url}")
+    if debug:
+        st.write(f"🔎 Buscando processo (status Senado): {url}")
+
+    try:
+        resp = requests.get(
+            url,
+            timeout=25,
+            headers={"User-Agent": "Monitor-Zanatta/1.0", "Accept": "application/json"},
+            verify=_REQUESTS_VERIFY,
+        )
+    except Exception as e:
+        print(f"[SENADO-PROCESSO] ERRO request: {e}")
+        if debug:
+            st.error(f"Erro consultando processo do Senado: {e}")
+        return out
+
+    if resp.status_code != 200 or not resp.content:
+        return out
+
+    # JSON primeiro
+    try:
+        proc = resp.json()
+    except Exception:
+        proc = None
+
+    if isinstance(proc, dict):
+        autuacoes = proc.get("autuacoes") or []
+        if autuacoes and isinstance(autuacoes, list):
+            a0 = autuacoes[0] or {}
+            out["orgao_senado_sigla"] = (a0.get("siglaColegiadoControleAtual") or "").strip()
+            out["orgao_senado_nome"] = (a0.get("nomeColegiadoControleAtual") or "").strip()
+
+            situacoes = a0.get("situacoes") or []
+            if isinstance(situacoes, list) and situacoes:
+                ativa = None
+                for s in reversed(situacoes):
+                    if not s.get("fim"):
+                        ativa = s
+                        break
+                if not ativa:
+                    ativa = situacoes[-1]
+                out["situacao_senado"] = (ativa.get("descricao") or "").strip()
+        return out
+
+    # XML fallback
+    try:
+        root = ET.fromstring(resp.content)
+        out["orgao_senado_sigla"] = (root.findtext(".//autuacao/siglaColegiadoControleAtual") or "").strip()
+        out["orgao_senado_nome"] = (root.findtext(".//autuacao/nomeColegiadoControleAtual") or "").strip()
+
+        situacoes = root.findall(".//autuacao/situacoes/situacao")
+        if situacoes:
+            ativa = None
+            for s in reversed(situacoes):
+                fim = (s.findtext("fim") or "").strip()
+                if not fim:
+                    ativa = s
+                    break
+            if not ativa:
+                ativa = situacoes[-1]
+            out["situacao_senado"] = (ativa.findtext("descricao") or "").strip()
+    except Exception:
+        pass
+
+    return out
 
 def formatar_movimentacoes_senado(movimentacoes: List[Dict]) -> str:
     """
@@ -636,7 +688,29 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
             f"{dados_senado['tipo_senado']} "
             f"{dados_senado['numero_senado']}/"
             f"{dados_senado['ano_senado']}"
-        )
+        
+        # 1.1 Buscar status atual e movimentações do Senado via /processo/{id}
+        id_proc_sen = dados_senado.get("id_processo_senado", "")
+        if id_proc_sen:
+            status_sen = buscar_status_senado_por_processo(id_proc_sen, debug=debug)
+            if status_sen:
+                # Situação atual no Senado (ex: "PRONTA PARA A PAUTA NA COMISSÃO")
+                if status_sen.get("situacao_senado"):
+                    resultado["situacao_senado"] = status_sen.get("situacao_senado", "")
+                # Órgão atual (Senado) — pode sobrescrever o do endpoint de relatoria
+                if status_sen.get("orgao_senado_sigla"):
+                    resultado["Orgao_Senado_Sigla"] = status_sen.get("orgao_senado_sigla", "")
+                if status_sen.get("orgao_senado_nome"):
+                    resultado["Orgao_Senado_Nome"] = status_sen.get("orgao_senado_nome", "")
+
+            movs = buscar_movimentacoes_senado(codigo_materia, id_processo_senado=id_proc_sen, limite=10, debug=debug)
+            if movs:
+                # Texto pronto para expander
+                linhas = []
+                for mv in movs:
+                    linhas.append(f"{mv.get('data','')} {mv.get('hora','')}".strip() + " | " + (mv.get('orgao','') or "—") + " | " + (mv.get('descricao','') or ""))
+                resultado["UltimasMov_Senado"] = "\n".join(linhas)
+)
         
         # 2. Buscar detalhes em endpoints separados (/relatorias e /situacao)
         codigo_materia = dados_senado.get("codigo_senado", "")
@@ -6557,10 +6631,26 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
             st.info("🔔 **TRAMITAÇÃO RECENTE** - Movimentação nos últimos 15 dias")
     
     st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
-    st.markdown(f"**Órgão:** {org_sigla}")
+    
+    # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
+    no_senado_flag = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
+    if no_senado_flag:
+        org_sigla = (prop.get("Orgao_Senado_Sigla") or org_sigla or "").strip()
+        situacao_sen = (prop.get("situacao_senado") or "").strip()
+        if situacao_sen:
+            situacao = situacao_sen
+
+st.markdown(f"**Órgão:** {org_sigla}")
     st.markdown(f"**Situação atual:** {situacao}")
     
-    if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
+    
+    # Relator: se no Senado, preferir Relator_Senado (texto pronto), sem link/foto da Câmara
+    if no_senado_flag and (prop.get("Relator_Senado") or "").strip():
+        st.markdown("**Relator(a):**")
+        st.markdown(f"**{prop.get('Relator_Senado')}**")
+        relator = None  # evita render do relator da Câmara
+
+if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
         rel_nome = relator.get('nome','—')
         rel_partido = relator.get('partido','')
         rel_uf = relator.get('uf','')
