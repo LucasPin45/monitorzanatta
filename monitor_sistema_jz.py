@@ -685,9 +685,11 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
         resultado["situacao_senado"] = dados_senado.get("situacao_senado", "")
         resultado["url_senado"] = dados_senado.get("url_senado", "")
         resultado["tipo_numero_senado"] = (
-            f"{dados_senado['tipo_senado']} "
-            f"{dados_senado['numero_senado']}/"
-            f"{dados_senado['ano_senado']}"
+            f"{dados_senado.get('tipo_senado', '')} "
+            f"{dados_senado.get('numero_senado', '')}/"
+            f"{dados_senado.get('ano_senado', '')}"
+        ).strip()
+
         
         # 1.1 Buscar status atual e movimentações do Senado via /processo/{id}
         id_proc_sen = dados_senado.get("id_processo_senado", "")
