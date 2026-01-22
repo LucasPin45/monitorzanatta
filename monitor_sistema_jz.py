@@ -1,11 +1,17 @@
-# monitor_sistema_jz.py - v31.4 ENDPOINTS CORRETOS PARA RELATOR/ÓRGÃO
+# monitor_sistema_jz.py - v32.0 INTEGRAÇÃO TOTAL CÂMARA + SENADO
 # 
-# ALTERAÇÕES v31.4:
-# - buscar_detalhes_senado agora usa endpoints separados:
-#   - /materia/{codigo}/relatorias → Relator
-#   - /materia/{codigo}/situacao → Órgão atual
-# - Função principal só busca código/situação/URL
-# - Debug mostra tags encontradas em cada endpoint
+# ALTERAÇÕES v32.0 - INTEGRAÇÃO TOTAL:
+# - AUTOMÁTICO: Detecta se matéria está no Senado pela situação
+# - SEM CHECKBOX: Tudo automático, não precisa marcar nada
+# - ENDPOINT ÚNICO: /dadosabertos/processo/{codigo} retorna TUDO
+# - TRAMITAÇÕES UNIFICADAS: Câmara + Senado na mesma lista, por data
+# - FOTO DO RELATOR: Automática do Senado quando matéria está lá
+# - DETALHAMENTO ÚNICO: Uma visão integrada da matéria
+# - ÓRGÃO/RELATOR: Exibe do Senado automaticamente quando aplicável
+#
+# Fluxo: Matéria com "Apreciação pelo Senado" → busca automática no Senado
+#        → exibe dados do Senado nas colunas Órgão/Relator
+#        → tramitações unificadas no detalhe
 #
 # ALTERAÇÕES v31.1:
 # - Busca RELATOR do Senado (não mostra mais relator da Câmara para matérias no Senado)
@@ -592,6 +598,174 @@ def formatar_movimentacoes_senado(movimentacoes: List[Dict]) -> str:
     """
     if not movimentacoes:
         return "Sem movimentações disponíveis"
+
+
+def unificar_tramitacoes_camara_senado(
+    df_tramitacoes_camara: pd.DataFrame,
+    movimentacoes_senado: List[Dict],
+    limite: int = 10
+) -> pd.DataFrame:
+    """
+    Unifica tramitações da Câmara e Senado em uma única lista ordenada por data.
+    
+    Args:
+        df_tramitacoes_camara: DataFrame com tramitações da Câmara
+        movimentacoes_senado: Lista de dicts com movimentações do Senado
+        limite: Número máximo de tramitações a retornar
+        
+    Returns:
+        DataFrame unificado com coluna 'Casa' indicando origem
+    """
+    from datetime import datetime
+    
+    todas_tramitacoes = []
+    
+    # Processar tramitações da Câmara
+    if not df_tramitacoes_camara.empty:
+        for _, row in df_tramitacoes_camara.iterrows():
+            data_str = str(row.get("Data", "") or row.get("data", ""))
+            descricao = str(row.get("Descrição", "") or row.get("descricao", "") or row.get("descricaoTramitacao", ""))
+            orgao = str(row.get("Órgão", "") or row.get("orgao", "") or row.get("siglaOrgao", ""))
+            
+            # Parsear data
+            dt_sort = None
+            for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%Y-%m-%dT%H:%M:%S"]:
+                try:
+                    dt_sort = datetime.strptime(data_str[:19], fmt)
+                    break
+                except:
+                    continue
+            
+            todas_tramitacoes.append({
+                "Data": data_str,
+                "Casa": "🏛️ CD",  # Câmara dos Deputados
+                "Órgão": orgao,
+                "Descrição": descricao[:200] if descricao else "",
+                "_sort": dt_sort or datetime.min
+            })
+    
+    # Processar movimentações do Senado
+    for mov in movimentacoes_senado:
+        data_str = mov.get("data", "")
+        hora = mov.get("hora", "")
+        orgao = mov.get("orgao", "")
+        descricao = mov.get("descricao", "")
+        
+        data_completa = f"{data_str} {hora}".strip() if hora else data_str
+        
+        # Parsear data para ordenação
+        dt_sort = None
+        for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"]:
+            try:
+                dt_sort = datetime.strptime(data_completa[:16], fmt)
+                break
+            except:
+                continue
+        
+        todas_tramitacoes.append({
+            "Data": data_completa,
+            "Casa": "🏛️ SF",  # Senado Federal
+            "Órgão": orgao,
+            "Descrição": descricao[:200] if descricao else "",
+            "_sort": dt_sort or datetime.min
+        })
+    
+    if not todas_tramitacoes:
+        return pd.DataFrame()
+    
+    # Criar DataFrame e ordenar por data (mais recente primeiro)
+    df = pd.DataFrame(todas_tramitacoes)
+    df = df.sort_values("_sort", ascending=False)
+    df = df.drop(columns=["_sort"])
+    df = df.head(limite)
+    
+    return df
+
+
+@st.cache_data(ttl=86400, show_spinner=False)  # Cache de 24h
+def buscar_codigo_senador_por_nome(nome_senador: str) -> Optional[str]:
+    """
+    Busca o código do senador pelo nome para obter a foto.
+    
+    Endpoint: https://legis.senado.leg.br/dadosabertos/senador/lista/atual
+    
+    Returns:
+        Código do senador ou None
+    """
+    import requests
+    
+    if not nome_senador:
+        return None
+    
+    # Normalizar nome para busca
+    nome_busca = nome_senador.lower().strip()
+    # Remover "Senador " ou "Senadora " do início
+    for prefixo in ["senador ", "senadora "]:
+        if nome_busca.startswith(prefixo):
+            nome_busca = nome_busca[len(prefixo):]
+    
+    url = "https://legis.senado.leg.br/dadosabertos/senador/lista/atual"
+    
+    try:
+        resp = requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "Monitor-Zanatta/1.0", "Accept": "application/json"},
+            verify=_REQUESTS_VERIFY,
+        )
+        
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        
+        # Estrutura: {"ListaParlamentarEmExercicio": {"Parlamentares": {"Parlamentar": [...]}}}
+        parlamentares = []
+        if isinstance(data, dict):
+            lista = data.get("ListaParlamentarEmExercicio", {})
+            parls = lista.get("Parlamentares", {})
+            parlamentares = parls.get("Parlamentar", [])
+            if not isinstance(parlamentares, list):
+                parlamentares = [parlamentares] if parlamentares else []
+        
+        for p in parlamentares:
+            ident = p.get("IdentificacaoParlamentar", {})
+            nome_parl = (ident.get("NomeParlamentar") or "").lower()
+            nome_completo = (ident.get("NomeCompletoParlamentar") or "").lower()
+            codigo = ident.get("CodigoParlamentar")
+            
+            # Comparar com nome buscado
+            if nome_busca in nome_parl or nome_busca in nome_completo or nome_parl in nome_busca:
+                return str(codigo)
+        
+        return None
+        
+    except Exception as e:
+        print(f"[SENADOR-FOTO] Erro ao buscar código: {e}")
+        return None
+
+
+def get_foto_senador(nome_senador: str, codigo_senador: str = None) -> Optional[str]:
+    """
+    Retorna a URL da foto do senador.
+    
+    Tenta primeiro pelo código, depois busca pelo nome.
+    
+    Args:
+        nome_senador: Nome do senador (ex: "Izalci Lucas")
+        codigo_senador: Código do senador (opcional)
+        
+    Returns:
+        URL da foto ou None
+    """
+    if not codigo_senador and nome_senador:
+        codigo_senador = buscar_codigo_senador_por_nome(nome_senador)
+    
+    if codigo_senador:
+        # URL padrão de fotos do Senado
+        return f"https://www.senado.leg.br/senadores/img/fotos-oficiais/senador{codigo_senador}.jpg"
+    
+    return None
     
     linhas = []
     for mov in movimentacoes:
@@ -640,6 +814,7 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     # Inicializar campos do Senado
     resultado["no_senado"] = False
     resultado["codigo_materia_senado"] = ""
+    resultado["id_processo_senado"] = ""  # NOVO v32.0
     resultado["situacao_senado"] = ""
     resultado["url_senado"] = ""
     resultado["tipo_numero_senado"] = ""
@@ -682,6 +857,7 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     if dados_senado:
         resultado["no_senado"] = True
         resultado["codigo_materia_senado"] = dados_senado.get("codigo_senado", "")
+        resultado["id_processo_senado"] = dados_senado.get("id_processo_senado", "")  # NOVO v32.0
         resultado["situacao_senado"] = dados_senado.get("situacao_senado", "")
         resultado["url_senado"] = dados_senado.get("url_senado", "")
         resultado["tipo_numero_senado"] = (
@@ -6612,6 +6788,21 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
         alerta_relator = relator_adversario_alert(relator) if relator else ""
         df_tram10 = get_tramitacoes_ultimas10(selected_id)
         
+        # INTEGRAÇÃO v32.0: Se estiver no Senado, unificar tramitações
+        no_senado_check = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
+        if no_senado_check:
+            id_proc_sen = prop.get("id_processo_senado", "")
+            codigo_sen = prop.get("codigo_materia_senado", "")
+            if id_proc_sen or codigo_sen:
+                movs_senado = buscar_movimentacoes_senado(
+                    codigo_sen, 
+                    id_processo_senado=id_proc_sen, 
+                    limite=10, 
+                    debug=False
+                )
+                if movs_senado:
+                    df_tram10 = unificar_tramitacoes_camara_senado(df_tram10, movs_senado, limite=10)
+        
         status_dt = parse_dt(status.get("status_dataHora") or "")
         ultima_dt, parado_dias = calc_ultima_mov(df_tram10, status.get("status_dataHora") or "")
 
@@ -6645,10 +6836,33 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     st.markdown(f"**Situação atual:** {situacao}")
     
     
-    # Relator: se no Senado, preferir Relator_Senado (texto pronto), sem link/foto da Câmara
+    # Relator: se no Senado, preferir Relator_Senado COM FOTO
     if no_senado_flag and (prop.get("Relator_Senado") or "").strip():
-        st.markdown("**Relator(a):**")
-        st.markdown(f"**{prop.get('Relator_Senado')}**")
+        relator_senado_txt = prop.get('Relator_Senado', '').strip()
+        
+        # Extrair nome do relator (antes do parêntese)
+        relator_nome_sen = relator_senado_txt.split('(')[0].strip()
+        
+        # Buscar foto do senador
+        foto_senador_url = get_foto_senador(relator_nome_sen)
+        
+        if foto_senador_url:
+            col_foto_sen, col_info_sen = st.columns([1, 3])
+            with col_foto_sen:
+                try:
+                    st.image(foto_senador_url, width=120, caption=relator_nome_sen)
+                except:
+                    st.markdown("📷")
+            with col_info_sen:
+                st.markdown("**Relator(a) no Senado:**")
+                # Link para o senador no site do Senado
+                st.markdown(f"**{relator_senado_txt}**")
+                st.caption("🏛️ Tramitando no Senado Federal")
+        else:
+            st.markdown("**Relator(a) no Senado:**")
+            st.markdown(f"**{relator_senado_txt}**")
+            st.caption("🏛️ Tramitando no Senado Federal")
+        
         relator = None  # evita render do relator da Câmara
 
     if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
@@ -6752,7 +6966,13 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
         st.markdown("**Inteiro teor**")
         st.write(status["urlInteiroTeor"])
 
-    st.markdown(f"[Tramitação]({camara_link_tramitacao(selected_id)})")
+    # Links de tramitação - integrado Câmara + Senado
+    col_link_cam, col_link_sen = st.columns(2)
+    with col_link_cam:
+        st.markdown(f"[🏛️ Tramitação na Câmara]({camara_link_tramitacao(selected_id)})")
+    with col_link_sen:
+        if no_senado_flag and prop.get("url_senado"):
+            st.markdown(f"[🏛️ Tramitação no Senado]({prop.get('url_senado')})")
 
     st.markdown("---")
     st.markdown("### 🧠 Estratégia")
@@ -6761,7 +6981,14 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     st.dataframe(df_estr, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
+    
+    # Verificar se tem dados do Senado para indicar que é unificado
+    # no_senado_flag foi definido acima na mesma função
+    if no_senado_flag:
+        st.markdown("### 🕒 Linha do Tempo Unificada (Câmara + Senado)")
+        st.caption("🏛️ CD = Câmara dos Deputados | 🏛️ SF = Senado Federal")
+    else:
+        st.markdown("### 🕒 Linha do Tempo (últimas 10 movimentações)")
 
     if df_tram10.empty:
         st.info("Sem tramitações retornadas.")
@@ -7958,20 +8185,19 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if tipos_sel:
                 df_base = df_base[df_base["siglaTipo"].isin(tipos_sel)].copy()
 
-            # Checkbox do Senado
+            # INTEGRAÇÃO SENADO AUTOMÁTICA (v32.0)
+            # Sempre processa - a função só busca efetivamente se situação indica Senado
             col_sen5, col_dbg5 = st.columns([4, 1])
             with col_sen5:
-                incluir_senado_tab5 = st.checkbox(
-                    "🏛️ Incluir tramitação no Senado Federal",
-                    value=False,
-                    key="incluir_senado_tab5",
-                    help="Verifica proposições que foram aprovadas e tramitam no Senado"
-                )
+                st.info("🏛️ Integração Senado: **Automática** - detecta quando matéria está no Senado")
             with col_dbg5:
                 if st.session_state.get("usuario_logado", "").lower() == "admin":
                     debug_senado_5 = st.checkbox("🔧 Debug", value=False, key="debug_senado_5")
                 else:
                     debug_senado_5 = False
+            
+            # Sempre ativo (automático)
+            incluir_senado_tab5 = True
 
             st.markdown("---")
 
@@ -8065,8 +8291,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     "Alerta", "Proposição", "Tipo", "Ano",
                     "Situação atual", "Orgao_Exibido", "Relator_Exibido",
                     "Último andamento", "Data do status", "Parado (dias)",
-                    "no_senado", "codigo_materia_senado", "tipo_numero_senado", "situacao_senado",
-                    "LinkTramitacao", "url_senado", "Ementa", "ID",
+                    "no_senado", "url_senado", "LinkTramitacao",
+                    "Ementa", "ID", "id_processo_senado", "codigo_materia_senado",
                 ]
             else:
                 show_cols_r = [
@@ -8340,20 +8566,19 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if tipos_sel6:
                 df_base6 = df_base6[df_base6["siglaTipo"].isin(tipos_sel6)].copy()
 
-            # Checkbox do Senado
+            # INTEGRAÇÃO SENADO AUTOMÁTICA (v32.0)
+            # Sempre processa - a função só busca efetivamente se situação indica Senado
             col_sen6, col_dbg6 = st.columns([4, 1])
             with col_sen6:
-                incluir_senado_tab6 = st.checkbox(
-                    "🏛️ Incluir tramitação no Senado Federal",
-                    value=False,
-                    key="incluir_senado_tab6",
-                    help="Verifica proposições que foram aprovadas e tramitam no Senado"
-                )
+                st.info("🏛️ Integração Senado: **Automática** - detecta quando matéria está no Senado")
             with col_dbg6:
                 if st.session_state.get("usuario_logado", "").lower() == "admin":
                     debug_senado_6 = st.checkbox("🔧 Debug", value=False, key="debug_senado_6")
                 else:
                     debug_senado_6 = False
+            
+            # Sempre ativo (automático)
+            incluir_senado_tab6 = True
 
             st.markdown("---")
 
@@ -8586,8 +8811,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     show_cols = [
                         "Proposição", "Tipo", "Ano", "Situação atual", "Orgao_Exibido", "Relator_Exibido",
                         "Última tramitação", "Sinal", "Parado há", "Tema", 
-                        "no_senado", "codigo_materia_senado", "tipo_numero_senado", "situacao_senado", "url_senado",
-                        "id", "LinkTramitacao", "LinkRelator", "Ementa"
+                        "no_senado", "url_senado",
+                        "id", "LinkTramitacao", "LinkRelator", "Ementa", "id_processo_senado", "codigo_materia_senado"
                     ]
                 else:
                     show_cols = [
