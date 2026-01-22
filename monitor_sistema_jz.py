@@ -6634,16 +6634,18 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     
     st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
     
-    # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
-    no_senado_flag = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
-    if no_senado_flag:
-        org_sigla = (prop.get("Orgao_Senado_Sigla") or org_sigla or "").strip()
-        situacao_sen = (prop.get("situacao_senado") or "").strip()
-        if situacao_sen:
-            situacao = situacao_sen
+                # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
+        no_senado_flag = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
 
-st.markdown(f"**Órgão:** {org_sigla}")
-    st.markdown(f"**Situação atual:** {situacao}")
+        if no_senado_flag:
+            org_sigla = (prop.get("Orgao_Senado_Sigla") or org_sigla or "").strip()
+            situacao_sen = (prop.get("situacao_senado") or "").strip()
+            if situacao_sen:
+                situacao = situacao_sen
+
+            st.markdown(f"**Órgão:** {org_sigla}")
+            st.markdown(f"**Situação atual:** {situacao}")
+
     
     
     # Relator: se no Senado, preferir Relator_Senado (texto pronto), sem link/foto da Câmara
