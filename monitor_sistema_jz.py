@@ -689,8 +689,7 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
             f"{dados_senado.get('numero_senado', '')}/"
             f"{dados_senado.get('ano_senado', '')}"
         ).strip()
-
-        
+        codigo_materia = dados_senado.get("codigo_senado", "")
         # 1.1 Buscar status atual e movimentações do Senado via /processo/{id}
         id_proc_sen = dados_senado.get("id_processo_senado", "")
         if id_proc_sen:
@@ -713,7 +712,6 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
                     linhas.append(f"{mv.get('data','')} {mv.get('hora','')}".strip() + " | " + (mv.get('orgao','') or "—") + " | " + (mv.get('descricao','') or ""))
                 resultado["UltimasMov_Senado"] = "\n".join(linhas)
 
-        
         # 2. Buscar detalhes em endpoints separados (/relatorias e /situacao)
         codigo_materia = dados_senado.get("codigo_senado", "")
         if codigo_materia:
@@ -6586,8 +6584,8 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     """
     with st.spinner("Carregando informações completas..."):
         dados_completos = fetch_proposicao_completa(selected_id)
-        prop = dados_completos  # alias (linha do DF) para campos extra do Senado
         
+        prop = dados_completos  # alias para compatibilidade
         status = {
             "status_dataHora": dados_completos.get("status_dataHora"),
             "status_siglaOrgao": dados_completos.get("status_siglaOrgao"),
@@ -6636,17 +6634,19 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
     
     # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
-    no_senado_flag = bool(prop.get('no_senado') or prop.get('No Senado?') or prop.get('No Senado'))
+    no_senado_flag = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
     if no_senado_flag:
-        org_sigla = (prop.get('Orgao_Senado_Sigla') or org_sigla or '').strip()
-        situacao_sen = (prop.get('situacao_senado') or '').strip()
+        org_sigla = (prop.get("Orgao_Senado_Sigla") or org_sigla or "").strip()
+        situacao_sen = (prop.get("situacao_senado") or "").strip()
         if situacao_sen:
             situacao = situacao_sen
-        st.markdown(f"**Órgão:** {org_sigla}")
-        st.markdown(f"**Situação atual:** {situacao}")
 
+    st.markdown(f"**Órgão:** {org_sigla}")
+    st.markdown(f"**Situação atual:** {situacao}")
+    
+    
     # Relator: se no Senado, preferir Relator_Senado (texto pronto), sem link/foto da Câmara
-    if no_senado_flag and (prop.get('Relator_Senado') or '').strip():
+    if no_senado_flag and (prop.get("Relator_Senado") or "").strip():
         st.markdown("**Relator(a):**")
         st.markdown(f"**{prop.get('Relator_Senado')}**")
         relator = None  # evita render do relator da Câmara
