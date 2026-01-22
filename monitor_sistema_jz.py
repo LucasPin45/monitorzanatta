@@ -1,5 +1,12 @@
-# monitor_sistema_jz.py - v32.0 INTEGRAÇÃO TOTAL CÂMARA + SENADO
+# monitor_sistema_jz.py - v32.1 INTEGRAÇÃO TOTAL CÂMARA + SENADO
 # 
+# ALTERAÇÕES v32.1 - CORREÇÃO DA INTEGRAÇÃO:
+# - exibir_detalhes_proposicao() recebe dados do Senado via parâmetro
+# - Dados do Senado (órgão, relator, situação) agora aparecem no detalhe
+# - Removido expander separado "Detalhes do Senado Federal"
+# - Tramitações unificadas Câmara + Senado na mesma lista
+# - Foto do relator do Senado quando matéria está lá
+#
 # ALTERAÇÕES v32.0 - INTEGRAÇÃO TOTAL:
 # - AUTOMÁTICO: Detecta se matéria está no Senado pela situação
 # - SEM CHECKBOX: Tudo automático, não precisa marcar nada
@@ -624,7 +631,9 @@ def unificar_tramitacoes_camara_senado(
     if not df_tramitacoes_camara.empty:
         for _, row in df_tramitacoes_camara.iterrows():
             data_str = str(row.get("Data", "") or row.get("data", ""))
-            descricao = str(row.get("Descrição", "") or row.get("descricao", "") or row.get("descricaoTramitacao", ""))
+            hora_str = str(row.get("Hora", "") or row.get("hora", "") or "")
+            # Aceitar tanto "Tramitação" quanto "Descrição"
+            descricao = str(row.get("Tramitação", "") or row.get("Descrição", "") or row.get("descricao", "") or row.get("descricaoTramitacao", ""))
             orgao = str(row.get("Órgão", "") or row.get("orgao", "") or row.get("siglaOrgao", ""))
             
             # Parsear data
@@ -638,9 +647,10 @@ def unificar_tramitacoes_camara_senado(
             
             todas_tramitacoes.append({
                 "Data": data_str,
+                "Hora": hora_str,
                 "Casa": "🏛️ CD",  # Câmara dos Deputados
                 "Órgão": orgao,
-                "Descrição": descricao[:200] if descricao else "",
+                "Tramitação": descricao[:200] if descricao else "",
                 "_sort": dt_sort or datetime.min
             })
     
@@ -651,10 +661,9 @@ def unificar_tramitacoes_camara_senado(
         orgao = mov.get("orgao", "")
         descricao = mov.get("descricao", "")
         
-        data_completa = f"{data_str} {hora}".strip() if hora else data_str
-        
         # Parsear data para ordenação
         dt_sort = None
+        data_completa = f"{data_str} {hora}".strip() if hora else data_str
         for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"]:
             try:
                 dt_sort = datetime.strptime(data_completa[:16], fmt)
@@ -663,10 +672,11 @@ def unificar_tramitacoes_camara_senado(
                 continue
         
         todas_tramitacoes.append({
-            "Data": data_completa,
+            "Data": data_str,
+            "Hora": hora,
             "Casa": "🏛️ SF",  # Senado Federal
             "Órgão": orgao,
-            "Descrição": descricao[:200] if descricao else "",
+            "Tramitação": descricao[:200] if descricao else "",
             "_sort": dt_sort or datetime.min
         })
     
@@ -678,6 +688,10 @@ def unificar_tramitacoes_camara_senado(
     df = df.sort_values("_sort", ascending=False)
     df = df.drop(columns=["_sort"])
     df = df.head(limite)
+    
+    # Reordenar colunas
+    cols_order = ["Data", "Hora", "Casa", "Órgão", "Tramitação"]
+    df = df[[c for c in cols_order if c in df.columns]]
     
     return df
 
@@ -6754,14 +6768,24 @@ def estrategia_por_situacao(situacao: str) -> list[str]:
     return ["—"]
 
 
-def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
+def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_data: dict = None):
     """
     Função reutilizável para exibir detalhes completos de uma proposição.
+    
+    Args:
+        selected_id: ID da proposição na Câmara
+        key_prefix: Prefixo para keys do Streamlit
+        senado_data: Dict com dados do Senado (opcional) - se fornecido, usa esses dados
     """
     with st.spinner("Carregando informações completas..."):
         dados_completos = fetch_proposicao_completa(selected_id)
         
-        prop = dados_completos  # alias para compatibilidade
+        prop = dados_completos.copy()  # alias para compatibilidade
+        
+        # INTEGRAÇÃO v32.0: Mesclar dados do Senado se fornecidos
+        if senado_data:
+            prop.update(senado_data)
+        
         status = {
             "status_dataHora": dados_completos.get("status_dataHora"),
             "status_siglaOrgao": dados_completos.get("status_siglaOrgao"),
@@ -8377,34 +8401,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
             st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
             
-            # Exibir detalhes do Senado para proposição selecionada
-            if incluir_senado_tab5:
-                try:
-                    if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
-                        row_idx_senado = sel["selection"]["rows"][0]
-                        row_senado = df_tbl.iloc[row_idx_senado]
-                        
-                        if row_senado.get("no_senado"):
-                            with st.expander("🏛️ **Detalhes do Senado Federal**", expanded=True):
-                                st.markdown(f"**Matéria:** {row_senado.get('tipo_numero_senado', '')}")
-                                st.markdown(f"**Situação no Senado:** {row_senado.get('situacao_senado', 'N/A')}")
-                                st.markdown(f"**Relator no Senado:** {row_senado.get('Relator_Senado', 'Não designado')}")
-                                st.markdown(f"**Órgão atual:** {row_senado.get('Orgao_Senado_Sigla', '')} - {row_senado.get('Orgao_Senado_Nome', '')}")
-                                
-                                url_senado = row_senado.get('url_senado', '')
-                                if url_senado:
-                                    st.markdown(f"[🔗 Abrir no portal do Senado]({url_senado})")
-                                
-                                # Movimentações do Senado
-                                movs = row_senado.get('UltimasMov_Senado', '')
-                                if movs and movs != "Sem movimentações disponíveis":
-                                    st.markdown("---")
-                                    st.markdown("**📋 Últimas 10 movimentações no Senado:**")
-                                    st.text(movs)
-                                else:
-                                    st.info("Movimentações não disponíveis")
-                except Exception:
-                    pass
+            # REMOVIDO v32.0: Expander separado do Senado
+            # Os dados do Senado agora são exibidos INTEGRADOS nos detalhes da proposição
             
             # Exportação
             col_x4, col_p4 = st.columns(2)
@@ -8435,12 +8433,27 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
             # Detalhes da proposição selecionada
             selected_id = None
+            senado_data_row = None
             try:
                 if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
                     row_idx = sel["selection"]["rows"][0]
-                    selected_id = str(df_tbl.iloc[row_idx]["ID"])
+                    row_data = df_tbl.iloc[row_idx]
+                    selected_id = str(row_data["ID"])
+                    
+                    # Extrair dados do Senado da linha selecionada
+                    senado_data_row = {
+                        "no_senado": row_data.get("no_senado", False),
+                        "codigo_materia_senado": row_data.get("codigo_materia_senado", ""),
+                        "id_processo_senado": row_data.get("id_processo_senado", ""),
+                        "situacao_senado": row_data.get("situacao_senado", ""),
+                        "url_senado": row_data.get("url_senado", ""),
+                        "Relator_Senado": row_data.get("Relator_Senado", ""),
+                        "Orgao_Senado_Sigla": row_data.get("Orgao_Senado_Sigla", ""),
+                        "Orgao_Senado_Nome": row_data.get("Orgao_Senado_Nome", ""),
+                    }
             except Exception:
                 selected_id = None
+                senado_data_row = None
 
             st.markdown("---")
             st.markdown("#### 📋 Detalhes da Proposição Selecionada")
@@ -8448,7 +8461,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             if not selected_id:
                 st.info("Clique em uma proposição acima para ver detalhes completos.")
             else:
-                exibir_detalhes_proposicao(selected_id, key_prefix="tab5")
+                exibir_detalhes_proposicao(selected_id, key_prefix="tab5", senado_data=senado_data_row)
         st.markdown("---")
         # IMPORTANTE: Ler o filtro DIRETAMENTE do widget de busca (key="busca_tab5")
         # Isso garante que o filtro esteja sempre sincronizado
@@ -8878,30 +8891,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     )
                 
                 # Seção especial para detalhes do Senado
-                if incluir_senado_tab6 and "no_senado" in df_tbl_status.columns:
-                    df_senado_tab6 = df_tbl_status[df_tbl_status["no_senado"] == True].copy()
-                    if not df_senado_tab6.empty:
-                        with st.expander(f"🏛️ **Detalhes do Senado** ({len(df_senado_tab6)} matérias)", expanded=False):
-                            for idx, row in df_senado_tab6.iterrows():
-                                st.markdown(f"**{row.get('Proposição', '')}** → {row.get('tipo_numero_senado', '')}")
-                                
-                                col_info1, col_info2 = st.columns(2)
-                                with col_info1:
-                                    st.markdown(f"- **Relator Senado:** {row.get('Relator_Senado', 'Não designado')}")
-                                    st.markdown(f"- **Órgão:** {row.get('Orgao_Senado_Sigla', '')} - {row.get('Orgao_Senado_Nome', '')}")
-                                with col_info2:
-                                    st.markdown(f"- **Situação:** {row.get('situacao_senado', 'N/A')}")
-                                    url_sen = row.get('url_senado', '')
-                                    if url_sen:
-                                        st.markdown(f"- [🔗 Abrir no Senado]({url_sen})")
-                                
-                                # Movimentações
-                                movs = row.get('UltimasMov_Senado', '')
-                                if movs and movs != "Sem movimentações disponíveis":
-                                    with st.expander("📋 Últimas movimentações no Senado", expanded=False):
-                                        st.text(movs)
-                                
-                                st.markdown("---")
+                # REMOVIDO v32.0: Expander separado do Senado
+                # Os dados do Senado agora são exibidos INTEGRADOS nos detalhes da proposição
                 
                 # Seção especial para RICs se houver
                 df_rics = df_tbl_status[df_tbl_status["Tipo"] == "RIC"].copy() if "Tipo" in df_tbl_status.columns else pd.DataFrame()
