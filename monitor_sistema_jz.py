@@ -89,6 +89,9 @@ def buscar_tramitacao_senado_mesmo_numero(
     Exemplo: PLP 223/2024 na Câmara → busca PLP 223/2024 no Senado.
     NÃO existe numeração diferente.
     
+    ENDPOINT: https://legis.senado.leg.br/dadosabertos/materia/{sigla}/{numero}/{ano}
+    FORMATO: XML (não JSON)
+    
     Args:
         tipo: Tipo da proposição (ex: "PL", "PLP", "PEC")
         numero: Número da proposição
@@ -98,101 +101,174 @@ def buscar_tramitacao_senado_mesmo_numero(
     Returns:
         Dict com dados do Senado ou None se não encontrado
     """
+    import xml.etree.ElementTree as ET
+    
+    # Normalizar sigla (minúsculo para URL)
+    sigla_url = tipo.lower()
+    
+    # Construir URL do webservice
+    url = f"https://legis.senado.leg.br/dadosabertos/materia/{sigla_url}/{numero}/{ano}"
+    
     # LOG: Início da busca
+    print(f"[SENADO] ========================================")
     print(f"[SENADO] Buscando: {tipo} {numero}/{ano}")
+    print(f"[SENADO] URL: {url}")
+    
+    if debug:
+        st.write(f"🔍 Buscando no Senado: {tipo} {numero}/{ano}")
+        st.write(f"URL: {url}")
     
     try:
-        url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
-        
-        params = {
-            "sigla": tipo.upper(),
-            "numero": numero,
-            "ano": ano,
-            "formato": "json"
-        }
-        
-        if debug:
-            st.write(f"🔍 Buscando no Senado: {tipo} {numero}/{ano}")
-            st.write(f"URL: {url}")
-            st.write(f"Params: {params}")
-        
         response = requests.get(
             url, 
-            params=params, 
             timeout=15,
             headers={
                 'User-Agent': 'Monitor-Zanatta/1.0',
-                'Accept': 'application/json'
+                'Accept': 'application/xml'
             },
             verify=_REQUESTS_VERIFY
         )
         
+        # LOG: Status HTTP
+        print(f"[SENADO] Status HTTP: {response.status_code}")
+        
+        if response.status_code == 404:
+            print(f"[SENADO] ℹ️ Matéria não encontrada (404)")
+            if debug:
+                st.info(f"Matéria {tipo} {numero}/{ano} não encontrada no Senado")
+            return None
+        
         if response.status_code != 200:
-            # LOG: Status code não-OK
-            print(f"[SENADO] ⚠️ Status code: {response.status_code}")
+            print(f"[SENADO] ⚠️ Status code inesperado: {response.status_code}")
             if debug:
                 st.warning(f"Status code: {response.status_code}")
             return None
         
-        content_type = response.headers.get('content-type', '')
-        if 'json' not in content_type.lower():
-            print(f"[SENADO] ⚠️ Content-type não é JSON: {content_type}")
+        # Parsear XML
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as e:
+            print(f"[SENADO] ❌ Erro ao parsear XML: {str(e)}")
             if debug:
-                st.warning(f"Content-type não é JSON: {content_type}")
+                st.error(f"Erro ao parsear XML: {str(e)}")
             return None
         
-        data = response.json()
+        # Procurar o elemento Materia (pode estar em diferentes níveis)
+        materia = root.find('.//Materia')
+        if materia is None:
+            # Tentar encontrar diretamente na raiz se a estrutura for diferente
+            materia = root
         
-        if "PesquisaBasicaMateria" not in data:
-            print(f"[SENADO] ℹ️ Campo PesquisaBasicaMateria não encontrado na resposta")
+        # Função auxiliar para extrair texto de tag XML
+        def get_xml_text(element, tag_path, default=""):
+            """Extrai texto de uma tag XML, retornando default se não existir."""
+            el = element.find(tag_path)
+            if el is not None and el.text:
+                return el.text.strip()
+            return default
+        
+        # Extrair CodigoMateria - tentar vários caminhos possíveis
+        codigo_materia = (
+            get_xml_text(materia, './/CodigoMateria') or
+            get_xml_text(materia, './/IdentificacaoMateria/CodigoMateria') or
+            get_xml_text(root, './/CodigoMateria')
+        )
+        
+        # Verificar se há matéria antecessora (para casos de emendas/substitutivos)
+        cod_antecessora = get_xml_text(materia, './/CodMateriaAntecessoraNoSenado')
+        url_antecessora = get_xml_text(materia, './/UrlMateriaAntecessoraNoSenado')
+        
+        # Se houver matéria antecessora, usar ela como referência principal
+        if cod_antecessora:
+            print(f"[SENADO] 📌 Encontrada matéria antecessora: {cod_antecessora}")
+            codigo_materia = cod_antecessora
+            if url_antecessora:
+                print(f"[SENADO]    URL antecessora: {url_antecessora}")
+        
+        if not codigo_materia:
+            print(f"[SENADO] ⚠️ CodigoMateria não encontrado no XML")
             if debug:
-                st.info("Campo PesquisaBasicaMateria não encontrado")
+                st.warning("CodigoMateria não encontrado no XML")
+                st.code(response.text[:2000], language="xml")
             return None
         
-        pesquisa = data["PesquisaBasicaMateria"]
+        # Extrair outros dados
+        sigla_materia = (
+            get_xml_text(materia, './/SiglaSubtipoMateria') or
+            get_xml_text(materia, './/IdentificacaoMateria/SiglaSubtipoMateria') or
+            get_xml_text(materia, './/SiglaMateria') or
+            tipo.upper()
+        )
         
-        if "Materias" not in pesquisa or "Materia" not in pesquisa["Materias"]:
-            print(f"[SENADO] ℹ️ Nenhuma matéria encontrada para essa busca")
-            if debug:
-                st.info("Nenhuma matéria encontrada")
-            return None
+        numero_materia = (
+            get_xml_text(materia, './/NumeroMateria') or
+            get_xml_text(materia, './/IdentificacaoMateria/NumeroMateria') or
+            numero
+        )
         
-        materias = pesquisa["Materias"]["Materia"]
-        if not isinstance(materias, list):
-            materias = [materias]
+        ano_materia = (
+            get_xml_text(materia, './/AnoMateria') or
+            get_xml_text(materia, './/IdentificacaoMateria/AnoMateria') or
+            ano
+        )
         
-        if not materias:
-            print(f"[SENADO] ℹ️ Lista de matérias vazia")
-            return None
+        # Situação/Descrição
+        situacao = (
+            get_xml_text(materia, './/DescricaoIdentificacaoMateria') or
+            get_xml_text(materia, './/DadosBasicosMateria/DescricaoIdentificacaoMateria') or
+            get_xml_text(materia, './/SituacaoAtual/Autuacoes/Autuacao/Situacao/DescricaoSituacao') or
+            get_xml_text(materia, './/Situacao/DescricaoSituacao') or
+            ""
+        )
         
-        materia = materias[0]
-        identificacao = materia.get("IdentificacaoMateria", {})
-        dados_basicos = materia.get("DadosBasicosMateria", {})
+        # Ementa
+        ementa = (
+            get_xml_text(materia, './/EmentaMateria') or
+            get_xml_text(materia, './/DadosBasicosMateria/EmentaMateria') or
+            ""
+        )
+        if len(ementa) > 500:
+            ementa = ementa[:500]
         
-        codigo_materia = identificacao.get("CodigoMateria", "")
+        # Montar deep link CORRETO
+        url_senado = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}"
         
         resultado = {
             "codigo_senado": codigo_materia,
-            "tipo_senado": identificacao.get("SiglaSubtipoMateria", ""),
-            "numero_senado": identificacao.get("NumeroMateria", ""),
-            "ano_senado": identificacao.get("AnoMateria", ""),
-            "situacao_senado": dados_basicos.get("DescricaoIdentificacaoMateria", ""),
-            "ementa_senado": dados_basicos.get("EmentaMateria", "")[:500] if dados_basicos.get("EmentaMateria") else "",
-            "url_senado": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}",
+            "tipo_senado": sigla_materia,
+            "numero_senado": numero_materia,
+            "ano_senado": ano_materia,
+            "situacao_senado": situacao,
+            "ementa_senado": ementa,
+            "url_senado": url_senado,
         }
         
         # LOG: Resultado encontrado
-        print(f"[SENADO] ✅ ENCONTRADO: {resultado['tipo_senado']} {resultado['numero_senado']}/{resultado['ano_senado']}")
-        print(f"[SENADO]    Código matéria: {codigo_materia}")
-        print(f"[SENADO]    URL direta: {resultado['url_senado']}")
+        print(f"[SENADO] ✅ ENCONTRADO!")
+        print(f"[SENADO]    Matéria: {resultado['tipo_senado']} {resultado['numero_senado']}/{resultado['ano_senado']}")
+        print(f"[SENADO]    CodigoMateria: {codigo_materia}")
+        print(f"[SENADO]    Deep Link: {resultado['url_senado']}")
         print(f"[SENADO]    Situação: {resultado['situacao_senado']}")
+        print(f"[SENADO] ========================================")
         
         if debug:
             st.success(f"✅ Encontrado: {resultado['tipo_senado']} {resultado['numero_senado']}/{resultado['ano_senado']}")
+            st.write(f"Código: {codigo_materia}")
+            st.write(f"Deep Link: {resultado['url_senado']}")
             st.write(f"Situação: {resultado['situacao_senado']}")
         
         return resultado
         
+    except requests.exceptions.Timeout:
+        print(f"[SENADO] ❌ Timeout ao buscar {tipo} {numero}/{ano}")
+        if debug:
+            st.warning(f"Timeout ao buscar no Senado")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        print(f"[SENADO] ❌ Erro de conexão: {str(e)}")
+        if debug:
+            st.warning(f"Erro de conexão com API do Senado")
+        return None
     except Exception as e:
         # LOG: Erro
         print(f"[SENADO] ❌ ERRO ao buscar: {str(e)}")
