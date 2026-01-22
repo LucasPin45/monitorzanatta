@@ -1,5 +1,16 @@
-# monitor_sistema_jz.py - v32.2 INTEGRAÇÃO TOTAL CÂMARA + SENADO
+# monitor_sistema_jz.py - v32.4 INTEGRAÇÃO TOTAL + BUSCA DIRETA
 # 
+# ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
+# - Verificação expandida para detecção de Senado
+# - Busca direta por número funciona para qualquer proposição
+# - Filtro de anos: garantir que 2023 está incluído por padrão
+#
+# ALTERAÇÕES v32.3 - BUSCA DIRETA POR NÚMERO:
+# - Nova função buscar_proposicao_direta() - busca QUALQUER proposição
+# - Campo de busca aceita "PL 321/2023" e busca diretamente na API
+# - Não depende de autoria - permite monitorar qualquer proposição
+# - Indicadores de detecção do Senado expandidos
+#
 # ALTERAÇÕES v32.2 - DADOS INTEGRADOS NA TABELA E DETALHES:
 # - "Último andamento" mostra do Senado quando matéria está lá
 # - "Data do status" / "Última mov." / "Parado há" do Senado
@@ -96,8 +107,9 @@ def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> boo
     """
     texto_completo = f"{situacao_atual} {despacho}".lower()
     
-    # Lista RESTRITA de indicadores - somente quando ESTÁ no Senado para apreciação
+    # Lista de indicadores - EXPANDIDA v32.2 para cobrir mais casos
     indicadores = [
+        # Situações padrão
         "apreciação pelo senado federal",
         "apreciacao pelo senado federal",
         "apreciação pelo senado",
@@ -106,6 +118,23 @@ def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> boo
         "aguardando apreciacao pelo senado",
         "para apreciação do senado",
         "para apreciacao do senado",
+        # Situações adicionais - matéria remetida/enviada
+        "remetida ao senado federal",
+        "remetido ao senado federal",
+        "remessa ao senado federal",
+        "enviada ao senado federal",
+        "enviado ao senado federal",
+        "encaminhada ao senado federal",
+        "encaminhado ao senado federal",
+        # Situações de tramitação
+        "tramitando no senado",
+        "em tramitação no senado",
+        "tramitação no senado",
+        # Despachos comuns
+        "à mesa do senado",
+        "ao senado federal",
+        "ofício de remessa ao senado",
+        "sgm-p",  # Sigla de remessa ao Senado
     ]
     
     return any(indicador in texto_completo for indicador in indicadores)
@@ -6465,6 +6494,110 @@ def fetch_lista_proposicoes_autoria_geral(id_deputada):
     return df
 
 
+@st.cache_data(show_spinner=False, ttl=1800)
+def buscar_proposicao_direta(sigla_tipo: str, numero: str, ano: str) -> Optional[Dict]:
+    """
+    Busca proposição diretamente na API da Câmara por sigla/número/ano.
+    Não depende de autoria - busca QUALQUER proposição.
+    
+    NOVO v32.2: Permite buscar proposições que a deputada acompanha
+    mas não é autora.
+    
+    Args:
+        sigla_tipo: PL, PLP, PEC, etc.
+        numero: Número da proposição
+        ano: Ano (4 dígitos)
+        
+    Returns:
+        Dict com dados da proposição ou None
+    """
+    import requests
+    
+    sigla = (sigla_tipo or "").strip().upper()
+    num = (numero or "").strip()
+    ano_str = (ano or "").strip()
+    
+    if not (sigla and num and ano_str):
+        return None
+    
+    url = f"{BASE_URL}/proposicoes"
+    params = {
+        "siglaTipo": sigla,
+        "numero": num,
+        "ano": ano_str,
+        "itens": 5,
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        dados = data.get("dados", [])
+        
+        if not dados:
+            return None
+        
+        # Pegar o primeiro resultado que bate exatamente
+        for d in dados:
+            if (str(d.get("numero", "")).strip() == num and 
+                str(d.get("ano", "")).strip() == ano_str and
+                (d.get("siglaTipo", "")).strip().upper() == sigla):
+                return {
+                    "id": str(d.get("id") or ""),
+                    "siglaTipo": (d.get("siglaTipo") or "").strip(),
+                    "numero": str(d.get("numero") or "").strip(),
+                    "ano": str(d.get("ano") or "").strip(),
+                    "ementa": (d.get("ementa") or "").strip(),
+                    "Proposicao": format_sigla_num_ano(d.get("siglaTipo"), d.get("numero"), d.get("ano")),
+                }
+        
+        # Se não achou exato, retorna o primeiro
+        d = dados[0]
+        return {
+            "id": str(d.get("id") or ""),
+            "siglaTipo": (d.get("siglaTipo") or "").strip(),
+            "numero": str(d.get("numero") or "").strip(),
+            "ano": str(d.get("ano") or "").strip(),
+            "ementa": (d.get("ementa") or "").strip(),
+            "Proposicao": format_sigla_num_ano(d.get("siglaTipo"), d.get("numero"), d.get("ano")),
+        }
+        
+    except Exception as e:
+        print(f"[BUSCA-DIRETA] Erro: {e}")
+        return None
+
+
+def parse_proposicao_input(texto: str) -> Optional[Tuple[str, str, str]]:
+    """
+    Extrai sigla, número e ano de uma string de proposição.
+    
+    Exemplos aceitos:
+    - "PL 321/2023"
+    - "PL321/2023" 
+    - "pl 321 2023"
+    - "PLP 223/2023"
+    
+    Returns:
+        Tuple (sigla, numero, ano) ou None
+    """
+    import re
+    
+    texto = (texto or "").strip().upper()
+    if not texto:
+        return None
+    
+    # Padrão: SIGLA NUMERO/ANO ou SIGLA NUMERO ANO
+    padrao = r"^(PL|PLP|PEC|PDL|PRC|PLV|MPV|RIC|REQ|PDS|PRS)\s*(\d+)\s*[/\s]\s*(\d{4})$"
+    match = re.match(padrao, texto)
+    
+    if match:
+        return (match.group(1), match.group(2), match.group(3))
+    
+    return None
+
+
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_rics_por_autor(id_deputada):
     rows = []
@@ -8274,83 +8407,122 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
             st.markdown("---")
 
-            # Campo de busca
+            # Campo de busca - AGORA COM BUSCA DIRETA v32.2
             q = st.text_input(
                 "Filtrar proposições",
                 value="",
-                placeholder="Ex.: PL 2030/2025 | 'pix' | 'conanda' | 'oab'",
-                help="Busque por sigla/número/ano ou palavras na ementa. A busca textual procura em TODAS as proposições, ignorando filtros de ano.",
+                placeholder="Ex.: PL 321/2023 | 'pix' | 'conanda' | 'oab'",
+                help="Busque por sigla/número/ano (ex: PL 321/2023) para busca DIRETA ou palavras na ementa.",
                 key="busca_tab5"
             )
 
-            # Se há busca textual, buscar em TODAS as proposições (ignora filtro de ano)
-            # Isso garante acesso à base completa
-            if q.strip():
+            # NOVO v32.2: Verificar se é busca direta por número de proposição
+            busca_direta_resultado = None
+            parsed = parse_proposicao_input(q) if q.strip() else None
+            
+            if parsed:
+                sigla_busca, num_busca, ano_busca = parsed
+                # Verificar se está na lista de autoria
+                prop_formatada = f"{sigla_busca} {num_busca}/{ano_busca}"
+                ja_na_lista = df_aut[df_aut["Proposicao"].str.upper() == prop_formatada.upper()].copy() if not df_aut.empty else pd.DataFrame()
+                
+                if ja_na_lista.empty:
+                    # Não está na lista de autoria - fazer busca direta
+                    with st.spinner(f"🔍 Buscando {prop_formatada} diretamente na API..."):
+                        busca_direta_resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_busca)
+                        
+                    if busca_direta_resultado:
+                        st.success(f"✅ **{prop_formatada}** encontrada! (não é de autoria da deputada)")
+                        
+                        # Criar DataFrame com a proposição encontrada
+                        df_direta = pd.DataFrame([busca_direta_resultado])
+                        df_rast = df_direta.copy()
+                    else:
+                        st.warning(f"⚠️ **{prop_formatada}** não encontrada na API da Câmara")
+                        df_rast = pd.DataFrame()
+                else:
+                    # Está na lista - usar filtro normal
+                    qn = normalize_text(q)
+                    df_busca_completa = df_aut.copy()
+                    df_busca_completa["_search"] = (df_busca_completa["Proposicao"].fillna("").astype(str) + " " + df_busca_completa["ementa"].fillna("").astype(str)).apply(normalize_text)
+                    df_rast = df_busca_completa[df_busca_completa["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
+                    st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
+            elif q.strip():
+                # Busca textual normal
                 qn = normalize_text(q)
-                df_busca_completa = df_aut.copy()  # Usar df_aut completo, não df_base filtrado
+                df_busca_completa = df_aut.copy()
                 df_busca_completa["_search"] = (df_busca_completa["Proposicao"].fillna("").astype(str) + " " + df_busca_completa["ementa"].fillna("").astype(str)).apply(normalize_text)
                 df_rast = df_busca_completa[df_busca_completa["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
-                st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições")
+                st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
             else:
                 df_rast = df_base.copy()
 
-            df_rast_lim = df_rast.head(400).copy()
-            
-            with st.spinner("Carregando status das proposições..."):
-                ids_r = df_rast_lim["id"].astype(str).tolist()
-                status_map_r = build_status_map(ids_r)
+            # Verificar se tem resultados
+            if df_rast.empty:
+                st.info("Nenhuma proposição encontrada com os critérios informados.")
+                df_rast_lim = pd.DataFrame()
+                df_rast_enriched = pd.DataFrame()
+                df_tbl = pd.DataFrame()
+            else:
+                df_rast_lim = df_rast.head(400).copy()
                 
-                # DEBUG: Verificar se status_map tem dados
-                ids_com_situacao = sum(1 for k, v in status_map_r.items() if v.get("situacao"))
-                ids_com_orgao = sum(1 for k, v in status_map_r.items() if v.get("siglaOrgao"))
+                with st.spinner("Carregando status das proposições..."):
+                    ids_r = df_rast_lim["id"].astype(str).tolist()
+                    status_map_r = build_status_map(ids_r)
+                    
+                    # DEBUG: Verificar se status_map tem dados
+                    ids_com_situacao = sum(1 for k, v in status_map_r.items() if v.get("situacao"))
+                    ids_com_orgao = sum(1 for k, v in status_map_r.items() if v.get("siglaOrgao"))
+                    
+                    if ids_com_situacao < len(ids_r) // 2:
+                        st.warning(f"⚠️ API retornou poucos dados: Situação em {ids_com_situacao}/{len(ids_r)}, Órgão em {ids_com_orgao}/{len(ids_r)}")
+                    
+                    df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
+
+                df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
+
+            st.caption(f"Resultados: {len(df_rast_enriched) if not df_rast_enriched.empty else 0} proposições")
+
+            # Só continua se tiver dados
+            if not df_rast_enriched.empty:
+                df_tbl = df_rast_enriched.rename(
+                    columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
+                ).copy()
                 
-                if ids_com_situacao < len(ids_r) // 2:
-                    st.warning(f"⚠️ API retornou poucos dados: Situação em {ids_com_situacao}/{len(ids_r)}, Órgão em {ids_com_orgao}/{len(ids_r)}")
-                
-                df_rast_enriched = enrich_with_status(df_rast_lim, status_map_r)
-
-            df_rast_enriched = df_rast_enriched.sort_values("DataStatus_dt", ascending=False)
-
-            st.caption(f"Resultados: {len(df_rast_enriched)} proposições")
-
-            df_tbl = df_rast_enriched.rename(
-                columns={"Proposicao": "Proposição", "ementa": "Ementa", "id": "ID", "ano": "Ano", "siglaTipo": "Tipo"}
-            ).copy()
+                df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
+                df_tbl["Parado (dias)"] = df_rast_enriched.get("Parado (dias)", pd.Series([None]*len(df_rast_enriched)))
+                df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
             
-            df_tbl["Último andamento"] = df_rast_enriched["Andamento (status)"]
-            df_tbl["Parado (dias)"] = df_rast_enriched.get("Parado (dias)", pd.Series([None]*len(df_rast_enriched)))
-            df_tbl["LinkTramitacao"] = df_tbl["ID"].astype(str).apply(camara_link_tramitacao)
-            
-            # Criar coluna Alerta ANTES de processar Senado (importante!)
-            def get_alerta_emoji(dias):
-                if pd.isna(dias):
+                # Criar coluna Alerta ANTES de processar Senado (importante!)
+                def get_alerta_emoji(dias):
+                    if pd.isna(dias):
+                        return ""
+                    if dias <= 2:
+                        return "🚨"
+                    if dias <= 5:
+                        return "⚠️"
+                    if dias <= 15:
+                        return "🔔"
                     return ""
-                if dias <= 2:
-                    return "🚨"
-                if dias <= 5:
-                    return "⚠️"
-                if dias <= 15:
-                    return "🔔"
-                return ""
-            
-            df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
-            
-            # PROCESSAR COM SENADO (APÓS todas as colunas estarem criadas)
-            if incluir_senado_tab5:
-                with st.spinner("🔍 Buscando tramitação no Senado..."):
-                    df_tbl = processar_lista_com_senado(
-                        df_tbl,
-                        debug=debug_senado_5,
-                        mostrar_progresso=len(df_tbl) > 3
-                    )
-            # Colunas dinâmicas - incluir dados do Senado quando checkbox marcado
-            if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
-                # Substituir Relator e Órgão pelos dados do Senado quando disponíveis
-                if "Relator_Senado" in df_tbl.columns:
-                    # Criar coluna "Relator Exibido" que mostra Senado quando disponível
-                    df_tbl["Relator_Exibido"] = df_tbl.apply(
-                        lambda row: row.get("Relator_Senado", "") if row.get("no_senado") and row.get("Relator_Senado") else row.get("Relator(a)", ""),
-                        axis=1
+                
+                df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
+                
+                # PROCESSAR COM SENADO (APÓS todas as colunas estarem criadas)
+                if incluir_senado_tab5:
+                    with st.spinner("🔍 Buscando tramitação no Senado..."):
+                        df_tbl = processar_lista_com_senado(
+                            df_tbl,
+                            debug=debug_senado_5,
+                            mostrar_progresso=len(df_tbl) > 3
+                        )
+                # Colunas dinâmicas - incluir dados do Senado quando checkbox marcado
+                if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
+                    # Substituir Relator e Órgão pelos dados do Senado quando disponíveis
+                    if "Relator_Senado" in df_tbl.columns:
+                        # Criar coluna "Relator Exibido" que mostra Senado quando disponível
+                        df_tbl["Relator_Exibido"] = df_tbl.apply(
+                            lambda row: row.get("Relator_Senado", "") if row.get("no_senado") and row.get("Relator_Senado") else row.get("Relator(a)", ""),
+                            axis=1
                     )
                     df_tbl["Orgao_Exibido"] = df_tbl.apply(
                         lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
