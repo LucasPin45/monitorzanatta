@@ -1,5 +1,12 @@
-# monitor_sistema_jz.py - v32.1 INTEGRAÇÃO TOTAL CÂMARA + SENADO
+# monitor_sistema_jz.py - v32.2 INTEGRAÇÃO TOTAL CÂMARA + SENADO
 # 
+# ALTERAÇÕES v32.2 - DADOS INTEGRADOS NA TABELA E DETALHES:
+# - "Último andamento" mostra do Senado quando matéria está lá
+# - "Data do status" / "Última mov." / "Parado há" do Senado
+# - Métricas no detalhe usam dados do Senado
+# - Removido "(Senado)" dos nomes das colunas
+# - UltimasMov_Senado passado para exibir_detalhes_proposicao
+#
 # ALTERAÇÕES v32.1 - CORREÇÃO DA INTEGRAÇÃO:
 # - exibir_detalhes_proposicao() recebe dados do Senado via parâmetro
 # - Dados do Senado (órgão, relator, situação) agora aparecem no detalhe
@@ -6878,12 +6885,12 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
                 except:
                     st.markdown("📷")
             with col_info_sen:
-                st.markdown("**Relator(a) no Senado:**")
+                st.markdown("**Relator(a):**")
                 # Link para o senador no site do Senado
                 st.markdown(f"**{relator_senado_txt}**")
                 st.caption("🏛️ Tramitando no Senado Federal")
         else:
-            st.markdown("**Relator(a) no Senado:**")
+            st.markdown("**Relator(a):**")
             st.markdown(f"**{relator_senado_txt}**")
             st.caption("🏛️ Tramitando no Senado Federal")
         
@@ -6925,10 +6932,34 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
     elif precisa_relator:
         st.markdown("**Relator(a):** Não identificado")
     
+    # INTEGRAÇÃO v32.1: Métricas usando dados do Senado quando disponível
+    from datetime import datetime
+    
+    data_status_exibir = status_dt
+    ultima_mov_exibir = ultima_dt
+    parado_dias_exibir = parado_dias
+    
+    if no_senado_flag and prop.get("UltimasMov_Senado"):
+        movs = str(prop.get("UltimasMov_Senado", ""))
+        if movs and movs != "Sem movimentações disponíveis":
+            primeira = movs.split("\n")[0] if "\n" in movs else movs
+            partes = primeira.split(" | ")
+            if partes:
+                data_str = partes[0].strip()
+                for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
+                    try:
+                        dt_senado = datetime.strptime(data_str[:16], fmt)
+                        ultima_mov_exibir = dt_senado
+                        data_status_exibir = dt_senado
+                        parado_dias_exibir = (datetime.now() - dt_senado).days
+                        break
+                    except:
+                        continue
+    
     c1, c2, c3 = st.columns([1.2, 1.2, 1.2])
-    c1.metric("Data do Status", fmt_dt_br(status_dt))
-    c2.metric("Última mov.", fmt_dt_br(ultima_dt))
-    c3.metric("Parado há", f"{parado_dias} dias" if isinstance(parado_dias, int) else "—")
+    c1.metric("Data do Status", fmt_dt_br(data_status_exibir))
+    c2.metric("Última mov.", fmt_dt_br(ultima_mov_exibir))
+    c3.metric("Parado há", f"{parado_dias_exibir} dias" if isinstance(parado_dias_exibir, int) else "—")
     
     # SEÇÃO ESPECIAL PARA RICs - PRAZO DE RESPOSTA
     sigla_tipo = status.get("sigla", "")
@@ -6979,10 +7010,28 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
     st.markdown("**Ementa**")
     st.write(ementa)
 
-    st.markdown("**Último andamento**")
-    st.write(andamento)
+    # INTEGRAÇÃO v32.1: Último andamento do Senado quando disponível
+    if no_senado_flag and prop.get("UltimasMov_Senado"):
+        movs = str(prop.get("UltimasMov_Senado", ""))
+        if movs and movs != "Sem movimentações disponíveis":
+            primeira = movs.split("\n")[0] if "\n" in movs else movs
+            partes = primeira.split(" | ")
+            if len(partes) >= 3:
+                andamento_senado = partes[2]
+                st.markdown("**Último andamento**")
+                st.write(andamento_senado)
+            else:
+                st.markdown("**Último andamento**")
+                st.write(andamento)
+        else:
+            st.markdown("**Último andamento**")
+            st.write(andamento)
+    else:
+        st.markdown("**Último andamento**")
+        st.write(andamento)
 
-    if despacho:
+    # Despacho só mostra se for da Câmara (Senado não tem esse campo)
+    if despacho and not no_senado_flag:
         st.markdown("**Despacho (chave para onde foi)**")
         st.write(despacho)
 
@@ -8307,6 +8356,60 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
                         axis=1
                     )
+                    
+                    # NOVO v32.1: Atualizar Último andamento, Data e Parado com dados do Senado
+                    def get_ultimo_andamento_integrado(row):
+                        if row.get("no_senado") and row.get("UltimasMov_Senado"):
+                            movs = str(row.get("UltimasMov_Senado", ""))
+                            if movs and movs != "Sem movimentações disponíveis":
+                                # Pegar primeira linha (mais recente)
+                                primeira = movs.split("\n")[0] if "\n" in movs else movs
+                                # Formato: "26/11/2025 12:35 | CAE | Descrição"
+                                partes = primeira.split(" | ")
+                                if len(partes) >= 3:
+                                    return partes[2][:80]  # Descrição truncada
+                        return row.get("Último andamento", "") or row.get("Andamento (status)", "")
+                    
+                    def get_data_status_integrado(row):
+                        if row.get("no_senado") and row.get("UltimasMov_Senado"):
+                            movs = str(row.get("UltimasMov_Senado", ""))
+                            if movs and movs != "Sem movimentações disponíveis":
+                                primeira = movs.split("\n")[0] if "\n" in movs else movs
+                                partes = primeira.split(" | ")
+                                if partes:
+                                    return partes[0].strip()  # Data/hora
+                        return row.get("Data do status", "")
+                    
+                    def get_parado_dias_integrado(row):
+                        from datetime import datetime
+                        if row.get("no_senado") and row.get("UltimasMov_Senado"):
+                            movs = str(row.get("UltimasMov_Senado", ""))
+                            if movs and movs != "Sem movimentações disponíveis":
+                                primeira = movs.split("\n")[0] if "\n" in movs else movs
+                                partes = primeira.split(" | ")
+                                if partes:
+                                    data_str = partes[0].strip()
+                                    # Tentar parsear a data
+                                    for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
+                                        try:
+                                            dt = datetime.strptime(data_str[:16], fmt)
+                                            dias = (datetime.now() - dt).days
+                                            return dias
+                                        except:
+                                            continue
+                        # Fallback para valor original
+                        val = row.get("Parado (dias)")
+                        if pd.notna(val):
+                            return val
+                        return None
+                    
+                    df_tbl["Último andamento"] = df_tbl.apply(get_ultimo_andamento_integrado, axis=1)
+                    df_tbl["Data do status"] = df_tbl.apply(get_data_status_integrado, axis=1)
+                    df_tbl["Parado (dias)"] = df_tbl.apply(get_parado_dias_integrado, axis=1)
+                    
+                    # Recalcular alerta com novos valores
+                    df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
+                    
                 else:
                     df_tbl["Relator_Exibido"] = df_tbl.get("Relator(a)", "")
                     df_tbl["Orgao_Exibido"] = df_tbl.get("Órgão (sigla)", "")
@@ -8380,8 +8483,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
             if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
                 column_config_base.update({
-                    "Orgao_Exibido": st.column_config.TextColumn("Órgão (Senado)", width="medium", help="Órgão atual - mostra Senado quando disponível"),
-                    "Relator_Exibido": st.column_config.TextColumn("Relator (Senado)", width="medium", help="Relator atual - mostra Senado quando disponível"),
+                    "Orgao_Exibido": st.column_config.TextColumn("Órgão", width="medium", help="Órgão atual (Câmara ou Senado)"),
+                    "Relator_Exibido": st.column_config.TextColumn("Relator", width="medium", help="Relator atual (Câmara ou Senado)"),
                     "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
                     "codigo_materia_senado": st.column_config.TextColumn("Código Matéria", width="small", help="Código interno da matéria no Senado"),
                     "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
@@ -8450,6 +8553,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         "Relator_Senado": row_data.get("Relator_Senado", ""),
                         "Orgao_Senado_Sigla": row_data.get("Orgao_Senado_Sigla", ""),
                         "Orgao_Senado_Nome": row_data.get("Orgao_Senado_Nome", ""),
+                        "UltimasMov_Senado": row_data.get("UltimasMov_Senado", ""),  # NOVO v32.1
                     }
             except Exception:
                 selected_id = None
@@ -8817,6 +8921,39 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
                             axis=1
                         )
+                        
+                        # NOVO v32.1: Atualizar Última tramitação e Parado há com dados do Senado
+                        def get_ultima_tram_integrado_tab6(row):
+                            if row.get("no_senado") and row.get("UltimasMov_Senado"):
+                                movs = str(row.get("UltimasMov_Senado", ""))
+                                if movs and movs != "Sem movimentações disponíveis":
+                                    primeira = movs.split("\n")[0] if "\n" in movs else movs
+                                    partes = primeira.split(" | ")
+                                    if len(partes) >= 3:
+                                        return partes[2][:60]
+                            return row.get("Última tramitação", "") or ""
+                        
+                        def get_parado_integrado_tab6(row):
+                            from datetime import datetime
+                            if row.get("no_senado") and row.get("UltimasMov_Senado"):
+                                movs = str(row.get("UltimasMov_Senado", ""))
+                                if movs and movs != "Sem movimentações disponíveis":
+                                    primeira = movs.split("\n")[0] if "\n" in movs else movs
+                                    partes = primeira.split(" | ")
+                                    if partes:
+                                        data_str = partes[0].strip()
+                                        for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
+                                            try:
+                                                dt = datetime.strptime(data_str[:16], fmt)
+                                                dias = (datetime.now() - dt).days
+                                                return f"{dias}d"
+                                            except:
+                                                continue
+                            return row.get("Parado há", "")
+                        
+                        df_tbl_status["Última tramitação"] = df_tbl_status.apply(get_ultima_tram_integrado_tab6, axis=1)
+                        df_tbl_status["Parado há"] = df_tbl_status.apply(get_parado_integrado_tab6, axis=1)
+                        
                     else:
                         df_tbl_status["Relator_Exibido"] = df_tbl_status.get("Relator(a)", "—")
                         df_tbl_status["Orgao_Exibido"] = df_tbl_status.get("Órgão (sigla)", "")
@@ -8870,8 +9007,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     
                     if incluir_senado_tab6 and "no_senado" in df_tbl_status.columns:
                         column_config_tab6.update({
-                            "Orgao_Exibido": st.column_config.TextColumn("Órgão (Senado)", width="medium", help="Órgão atual - mostra Senado quando disponível"),
-                            "Relator_Exibido": st.column_config.TextColumn("Relator (Senado)", width="medium", help="Relator atual - mostra Senado quando disponível"),
+                            "Orgao_Exibido": st.column_config.TextColumn("Órgão", width="medium", help="Órgão atual (Câmara ou Senado)"),
+                            "Relator_Exibido": st.column_config.TextColumn("Relator", width="medium", help="Relator atual (Câmara ou Senado)"),
                             "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
                             "codigo_materia_senado": st.column_config.TextColumn("Código", width="small", help="Código interno da matéria no Senado"),
                             "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
