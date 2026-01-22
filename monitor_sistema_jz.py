@@ -712,7 +712,7 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
                 for mv in movs:
                     linhas.append(f"{mv.get('data','')} {mv.get('hora','')}".strip() + " | " + (mv.get('orgao','') or "—") + " | " + (mv.get('descricao','') or ""))
                 resultado["UltimasMov_Senado"] = "\n".join(linhas)
-)
+
         
         # 2. Buscar detalhes em endpoints separados (/relatorias e /situacao)
         codigo_materia = dados_senado.get("codigo_senado", "")
