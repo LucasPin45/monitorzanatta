@@ -6586,6 +6586,7 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     """
     with st.spinner("Carregando informações completas..."):
         dados_completos = fetch_proposicao_completa(selected_id)
+        prop = dados_completos  # alias (linha do DF) para campos extra do Senado
         
         status = {
             "status_dataHora": dados_completos.get("status_dataHora"),
