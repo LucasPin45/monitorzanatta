@@ -6634,27 +6634,23 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = ""):
     
     st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
     
-                # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
-        no_senado_flag = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
+    # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
+    no_senado_flag = bool(prop.get('no_senado') or prop.get('No Senado?') or prop.get('No Senado'))
+    if no_senado_flag:
+        org_sigla = (prop.get('Orgao_Senado_Sigla') or org_sigla or '').strip()
+        situacao_sen = (prop.get('situacao_senado') or '').strip()
+        if situacao_sen:
+            situacao = situacao_sen
+        st.markdown(f"**Órgão:** {org_sigla}")
+        st.markdown(f"**Situação atual:** {situacao}")
 
-        if no_senado_flag:
-            org_sigla = (prop.get("Orgao_Senado_Sigla") or org_sigla or "").strip()
-            situacao_sen = (prop.get("situacao_senado") or "").strip()
-            if situacao_sen:
-                situacao = situacao_sen
-
-            st.markdown(f"**Órgão:** {org_sigla}")
-            st.markdown(f"**Situação atual:** {situacao}")
-
-    
-    
     # Relator: se no Senado, preferir Relator_Senado (texto pronto), sem link/foto da Câmara
-    if no_senado_flag and (prop.get("Relator_Senado") or "").strip():
+    if no_senado_flag and (prop.get('Relator_Senado') or '').strip():
         st.markdown("**Relator(a):**")
         st.markdown(f"**{prop.get('Relator_Senado')}**")
         relator = None  # evita render do relator da Câmara
 
-if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
+    if relator and (relator.get("nome") or relator.get("partido") or relator.get("uf")):
         rel_nome = relator.get('nome','—')
         rel_partido = relator.get('partido','')
         rel_uf = relator.get('uf','')
