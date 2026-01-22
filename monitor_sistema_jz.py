@@ -1,15 +1,24 @@
-# monitor_sistema_jz.py - v31.0 INTEGRAÇÃO SENADO CORRIGIDA
+# monitor_sistema_jz.py - v31.1 ENRIQUECIMENTO SENADO COMPLETO
 # 
+# ALTERAÇÕES v31.1:
+# - Busca RELATOR do Senado (não mostra mais relator da Câmara para matérias no Senado)
+# - Busca ÓRGÃO/COMISSÃO atual do Senado (ex: CAE, CCJ)
+# - Busca últimas 10 MOVIMENTAÇÕES do Senado
+# - Novos campos: Relator_Senado, Orgao_Senado_Sigla, Orgao_Senado_Nome, UltimasMov_Senado
+# - Abas 5 e 6 mostram dados do Senado quando checkbox ativado
+# - Expander com detalhes e movimentações do Senado
+# - Cache de 6 horas para todas as consultas ao Senado
+# - Logs completos no console para debug
+#
 # ALTERAÇÕES v31.0:
 # - Removida aba separada "Senado Federal" (dados exibidos nas Abas 5 e 6)
 # - Consulta ao Senado SOMENTE quando situação = "Apreciação pelo Senado Federal"
 # - Número do projeto: IDÊNTICO na Câmara e no Senado (não existe conversão)
 # - Link direto para matéria no Senado (não link de busca)
-# - Logs no console para debug de buscas no Senado
-# - Cache de 6 horas para dados do Senado
+# - Endpoint correto: /dadosabertos/materia/{sigla}/{numero}/{ano} (XML)
 
 # ============================================================
-# FUNÇÕES DE INTEGRAÇÃO COM SENADO FEDERAL - v33
+# FUNÇÕES DE INTEGRAÇÃO COM SENADO FEDERAL - v34
 # Monitora proposições da Julia Zanatta que estão em
 # "Apreciação pelo Senado Federal"
 # ============================================================
@@ -277,12 +286,379 @@ def buscar_tramitacao_senado_mesmo_numero(
         return None
 
 
+@st.cache_data(ttl=21600, show_spinner=False)  # TTL de 6 horas
+def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional[Dict]:
+    """
+    Busca detalhes completos de uma matéria do Senado pelo CodigoMateria.
+    Retorna: Relator, Órgão atual, Situação detalhada.
+    
+    ENDPOINT: https://legis.senado.leg.br/dadosabertos/materia/{codigo}
+    FORMATO: XML
+    
+    Args:
+        codigo_materia: Código numérico da matéria no Senado (ex: "167367")
+        debug: Modo debug
+        
+    Returns:
+        Dict com detalhes ou None se não encontrado
+    """
+    import xml.etree.ElementTree as ET
+    
+    if not codigo_materia:
+        return None
+    
+    url = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo_materia}"
+    
+    print(f"[SENADO-DETALHES] ========================================")
+    print(f"[SENADO-DETALHES] Buscando detalhes para CodigoMateria={codigo_materia}")
+    print(f"[SENADO-DETALHES] URL: {url}")
+    
+    if debug:
+        st.write(f"🔍 Buscando detalhes no Senado: código {codigo_materia}")
+    
+    try:
+        response = requests.get(
+            url, 
+            timeout=15,
+            headers={
+                'User-Agent': 'Monitor-Zanatta/1.0',
+                'Accept': 'application/xml'
+            },
+            verify=_REQUESTS_VERIFY
+        )
+        
+        print(f"[SENADO-DETALHES] Status HTTP: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"[SENADO-DETALHES] ⚠️ Status code: {response.status_code}")
+            return None
+        
+        # Parsear XML
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as e:
+            print(f"[SENADO-DETALHES] ❌ Erro ao parsear XML: {str(e)}")
+            return None
+        
+        # Função auxiliar para extrair texto
+        def get_xml_text(element, tag_path, default=""):
+            el = element.find(tag_path)
+            if el is not None and el.text:
+                return el.text.strip()
+            return default
+        
+        # Procurar elemento Materia
+        materia = root.find('.//Materia')
+        if materia is None:
+            materia = root
+        
+        # ========== EXTRAIR RELATOR ==========
+        relator_nome = ""
+        relator_partido = ""
+        relator_uf = ""
+        
+        # Tentar vários caminhos para o relator
+        relator_paths = [
+            './/RelatoriaAtual/Relator',
+            './/Relatorias/Relatoria/Relator',
+            './/SituacaoAtual/Autuacoes/Autuacao/Relatoria/Relator',
+            './/Relator'
+        ]
+        
+        for path in relator_paths:
+            relator_elem = materia.find(path)
+            if relator_elem is not None:
+                # Tentar extrair nome do parlamentar
+                nome = (
+                    get_xml_text(relator_elem, './/NomeParlamentar') or
+                    get_xml_text(relator_elem, './/NomeAutor') or
+                    get_xml_text(relator_elem, './/Nome') or
+                    get_xml_text(relator_elem, '.')
+                )
+                if nome:
+                    relator_nome = nome
+                    relator_partido = (
+                        get_xml_text(relator_elem, './/SiglaPartido') or
+                        get_xml_text(relator_elem, './/Partido/SiglaPartido') or
+                        ""
+                    )
+                    relator_uf = (
+                        get_xml_text(relator_elem, './/UfParlamentar') or
+                        get_xml_text(relator_elem, './/SiglaUf') or
+                        get_xml_text(relator_elem, './/Uf') or
+                        ""
+                    )
+                    break
+        
+        # Formatar relator
+        if relator_nome:
+            if relator_partido and relator_uf:
+                relator_formatado = f"{relator_nome} ({relator_partido}/{relator_uf})"
+            elif relator_partido:
+                relator_formatado = f"{relator_nome} ({relator_partido})"
+            else:
+                relator_formatado = relator_nome
+        else:
+            relator_formatado = ""
+        
+        # ========== EXTRAIR ÓRGÃO ATUAL ==========
+        orgao_sigla = ""
+        orgao_nome = ""
+        
+        # Tentar vários caminhos para órgão
+        orgao_paths = [
+            './/SituacaoAtual/Autuacoes/Autuacao/Local',
+            './/LocalAtual',
+            './/Comissao',
+            './/Orgao'
+        ]
+        
+        for path in orgao_paths:
+            orgao_elem = materia.find(path)
+            if orgao_elem is not None:
+                sigla = (
+                    get_xml_text(orgao_elem, './/SiglaComissao') or
+                    get_xml_text(orgao_elem, './/SiglaCasaLocal') or
+                    get_xml_text(orgao_elem, './/SiglaLocal') or
+                    get_xml_text(orgao_elem, './/Sigla') or
+                    ""
+                )
+                nome = (
+                    get_xml_text(orgao_elem, './/NomeComissao') or
+                    get_xml_text(orgao_elem, './/NomeCasaLocal') or
+                    get_xml_text(orgao_elem, './/NomeLocal') or
+                    get_xml_text(orgao_elem, './/Nome') or
+                    ""
+                )
+                if sigla or nome:
+                    orgao_sigla = sigla
+                    orgao_nome = nome
+                    break
+        
+        # Se não encontrou, tentar pegar da situação atual
+        if not orgao_sigla:
+            situacao_atual = materia.find('.//SituacaoAtual')
+            if situacao_atual is not None:
+                for autuacao in situacao_atual.findall('.//Autuacao'):
+                    local = autuacao.find('Local')
+                    if local is not None:
+                        orgao_sigla = get_xml_text(local, './/SiglaLocal') or get_xml_text(local, '.')
+                        orgao_nome = get_xml_text(local, './/NomeLocal') or ""
+                        if orgao_sigla:
+                            break
+        
+        resultado = {
+            "relator_senado": relator_formatado,
+            "relator_nome": relator_nome,
+            "relator_partido": relator_partido,
+            "relator_uf": relator_uf,
+            "orgao_senado_sigla": orgao_sigla,
+            "orgao_senado_nome": orgao_nome,
+        }
+        
+        print(f"[SENADO-DETALHES] ✅ Detalhes extraídos:")
+        print(f"[SENADO-DETALHES]    Relator: {relator_formatado or 'não encontrado'}")
+        print(f"[SENADO-DETALHES]    Órgão: {orgao_sigla} - {orgao_nome}" if orgao_sigla else "[SENADO-DETALHES]    Órgão: não encontrado")
+        print(f"[SENADO-DETALHES] ========================================")
+        
+        if debug:
+            st.write(f"Relator Senado: {relator_formatado or 'não encontrado'}")
+            st.write(f"Órgão Senado: {orgao_sigla} - {orgao_nome}" if orgao_sigla else "Órgão: não encontrado")
+        
+        return resultado
+        
+    except Exception as e:
+        print(f"[SENADO-DETALHES] ❌ ERRO: {str(e)}")
+        if debug:
+            st.error(f"Erro ao buscar detalhes: {str(e)}")
+        return None
+
+
+@st.cache_data(ttl=21600, show_spinner=False)  # TTL de 6 horas
+def buscar_movimentacoes_senado(codigo_materia: str, limite: int = 10, debug: bool = False) -> List[Dict]:
+    """
+    Busca as últimas movimentações/tramitações de uma matéria do Senado.
+    
+    ENDPOINT: https://legis.senado.leg.br/dadosabertos/materia/movimentacoes/{codigo}
+    FORMATO: XML
+    
+    Args:
+        codigo_materia: Código numérico da matéria no Senado
+        limite: Número máximo de movimentações a retornar
+        debug: Modo debug
+        
+    Returns:
+        Lista de dicts com movimentações (mais recentes primeiro)
+    """
+    import xml.etree.ElementTree as ET
+    
+    if not codigo_materia:
+        return []
+    
+    url = f"https://legis.senado.leg.br/dadosabertos/materia/movimentacoes/{codigo_materia}"
+    
+    print(f"[SENADO-MOV] ========================================")
+    print(f"[SENADO-MOV] Buscando movimentações para CodigoMateria={codigo_materia}")
+    print(f"[SENADO-MOV] URL: {url}")
+    
+    if debug:
+        st.write(f"🔍 Buscando movimentações no Senado: código {codigo_materia}")
+    
+    try:
+        response = requests.get(
+            url, 
+            timeout=15,
+            headers={
+                'User-Agent': 'Monitor-Zanatta/1.0',
+                'Accept': 'application/xml'
+            },
+            verify=_REQUESTS_VERIFY
+        )
+        
+        print(f"[SENADO-MOV] Status HTTP: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"[SENADO-MOV] ⚠️ Status code: {response.status_code}")
+            return []
+        
+        # Parsear XML
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as e:
+            print(f"[SENADO-MOV] ❌ Erro ao parsear XML: {str(e)}")
+            return []
+        
+        # Função auxiliar
+        def get_xml_text(element, tag_path, default=""):
+            el = element.find(tag_path)
+            if el is not None and el.text:
+                return el.text.strip()
+            return default
+        
+        movimentacoes = []
+        
+        # Procurar movimentações - tentar vários caminhos
+        mov_paths = [
+            './/Movimentacoes/Movimentacao',
+            './/Tramitacoes/Tramitacao',
+            './/Movimentacao',
+            './/Tramitacao'
+        ]
+        
+        for path in mov_paths:
+            movs = root.findall(path)
+            if movs:
+                for mov in movs:
+                    data = (
+                        get_xml_text(mov, './/DataMovimentacao') or
+                        get_xml_text(mov, './/DataTramitacao') or
+                        get_xml_text(mov, './/Data') or
+                        ""
+                    )
+                    
+                    descricao = (
+                        get_xml_text(mov, './/DescricaoMovimentacao') or
+                        get_xml_text(mov, './/DescricaoTramitacao') or
+                        get_xml_text(mov, './/Descricao') or
+                        get_xml_text(mov, './/TextoTramitacao') or
+                        ""
+                    )
+                    
+                    orgao = (
+                        get_xml_text(mov, './/SiglaLocal') or
+                        get_xml_text(mov, './/Local/SiglaLocal') or
+                        get_xml_text(mov, './/Origem/SiglaLocal') or
+                        get_xml_text(mov, './/Destino/SiglaLocal') or
+                        ""
+                    )
+                    
+                    if data or descricao:
+                        movimentacoes.append({
+                            "data": data,
+                            "descricao": descricao,
+                            "orgao": orgao
+                        })
+                
+                if movimentacoes:
+                    break
+        
+        # Ordenar por data (mais recente primeiro) e limitar
+        # Tentar parsear datas para ordenação
+        def parse_date_key(mov):
+            data = mov.get("data", "")
+            if data:
+                # Formato esperado: YYYY-MM-DD ou DD/MM/YYYY
+                try:
+                    if "-" in data:
+                        return data
+                    elif "/" in data:
+                        parts = data.split("/")
+                        if len(parts) == 3:
+                            return f"{parts[2]}-{parts[1]}-{parts[0]}"
+                except:
+                    pass
+            return "0000-00-00"
+        
+        movimentacoes.sort(key=parse_date_key, reverse=True)
+        movimentacoes = movimentacoes[:limite]
+        
+        print(f"[SENADO-MOV] ✅ Encontradas {len(movimentacoes)} movimentações (limitado a {limite})")
+        for i, mov in enumerate(movimentacoes[:3]):  # Log das 3 primeiras
+            print(f"[SENADO-MOV]    {i+1}. {mov['data']} - {mov['descricao'][:50]}...")
+        print(f"[SENADO-MOV] ========================================")
+        
+        if debug:
+            st.write(f"Encontradas {len(movimentacoes)} movimentações")
+        
+        return movimentacoes
+        
+    except Exception as e:
+        print(f"[SENADO-MOV] ❌ ERRO: {str(e)}")
+        if debug:
+            st.error(f"Erro ao buscar movimentações: {str(e)}")
+        return []
+
+
+def formatar_movimentacoes_senado(movimentacoes: List[Dict]) -> str:
+    """
+    Formata lista de movimentações em string para exibição.
+    """
+    if not movimentacoes:
+        return "Sem movimentações disponíveis"
+    
+    linhas = []
+    for mov in movimentacoes:
+        data = mov.get("data", "")
+        descricao = mov.get("descricao", "")
+        orgao = mov.get("orgao", "")
+        
+        if orgao:
+            linha = f"• {data} [{orgao}]: {descricao}"
+        else:
+            linha = f"• {data}: {descricao}"
+        
+        linhas.append(linha)
+    
+    return "\n".join(linhas)
+
+
 def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False) -> Dict:
     """
     Adiciona informações do Senado a uma proposição da Câmara.
     
     REGRA DE NEGÓCIO: Só consulta o Senado se a situação for "Apreciação pelo Senado Federal".
     IMPORTANTE: O número da Câmara é IGUAL ao número do Senado (não existe conversão).
+    
+    Campos adicionados:
+    - no_senado: bool
+    - codigo_materia_senado: str (CodigoMateria)
+    - situacao_senado: str
+    - url_senado: str (deep link)
+    - tipo_numero_senado: str
+    - Relator_Senado: str (relator formatado do Senado)
+    - Orgao_Senado_Sigla: str
+    - Orgao_Senado_Nome: str
+    - UltimasMov_Senado: str (movimentações formatadas)
     
     Args:
         proposicao_dict: Dicionário com dados da proposição da Câmara
@@ -296,9 +672,14 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     
     # Inicializar campos do Senado
     resultado["no_senado"] = False
+    resultado["codigo_materia_senado"] = ""
     resultado["situacao_senado"] = ""
     resultado["url_senado"] = ""
     resultado["tipo_numero_senado"] = ""
+    resultado["Relator_Senado"] = ""
+    resultado["Orgao_Senado_Sigla"] = ""
+    resultado["Orgao_Senado_Nome"] = ""
+    resultado["UltimasMov_Senado"] = ""
     
     # Verificar se está em apreciação pelo Senado
     situacao = proposicao_dict.get("Situação atual", "")
@@ -326,23 +707,41 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     tipo, numero, ano = partes
     print(f"[SENADO] 📋 Usando MESMO número da Câmara: {tipo} {numero}/{ano}")
     
-    # Buscar no Senado
+    # 1. Buscar dados básicos no Senado (código da matéria, situação, URL)
     dados_senado = buscar_tramitacao_senado_mesmo_numero(
         tipo, numero, ano, debug=debug
     )
     
     if dados_senado:
         resultado["no_senado"] = True
-        resultado["situacao_senado"] = dados_senado["situacao_senado"]
-        resultado["url_senado"] = dados_senado["url_senado"]
+        resultado["codigo_materia_senado"] = dados_senado.get("codigo_senado", "")
+        resultado["situacao_senado"] = dados_senado.get("situacao_senado", "")
+        resultado["url_senado"] = dados_senado.get("url_senado", "")
         resultado["tipo_numero_senado"] = (
             f"{dados_senado['tipo_senado']} "
             f"{dados_senado['numero_senado']}/"
             f"{dados_senado['ano_senado']}"
         )
         
+        codigo_materia = dados_senado.get("codigo_senado", "")
+        
+        # 2. Buscar detalhes (relator e órgão do Senado)
+        if codigo_materia:
+            detalhes = buscar_detalhes_senado(codigo_materia, debug=debug)
+            if detalhes:
+                resultado["Relator_Senado"] = detalhes.get("relator_senado", "")
+                resultado["Orgao_Senado_Sigla"] = detalhes.get("orgao_senado_sigla", "")
+                resultado["Orgao_Senado_Nome"] = detalhes.get("orgao_senado_nome", "")
+            
+            # 3. Buscar movimentações do Senado
+            movimentacoes = buscar_movimentacoes_senado(codigo_materia, limite=10, debug=debug)
+            if movimentacoes:
+                resultado["UltimasMov_Senado"] = formatar_movimentacoes_senado(movimentacoes)
+        
         if debug:
             st.success(f"✅ {proposicao_str} encontrado no Senado")
+            st.write(f"Relator Senado: {resultado['Relator_Senado'] or 'não encontrado'}")
+            st.write(f"Órgão Senado: {resultado['Orgao_Senado_Sigla'] or 'não encontrado'}")
     else:
         print(f"[SENADO] ℹ️ {proposicao_str} não encontrado no Senado (pode não ter chegado ainda)")
     
@@ -7645,11 +8044,26 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         debug=debug_senado_5,
                         mostrar_progresso=len(df_tbl) > 3
                     )
-            # Colunas dinâmicas
+            # Colunas dinâmicas - incluir dados do Senado quando checkbox marcado
             if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
+                # Substituir Relator e Órgão pelos dados do Senado quando disponíveis
+                if "Relator_Senado" in df_tbl.columns:
+                    # Criar coluna "Relator Exibido" que mostra Senado quando disponível
+                    df_tbl["Relator_Exibido"] = df_tbl.apply(
+                        lambda row: row.get("Relator_Senado", "") if row.get("no_senado") and row.get("Relator_Senado") else row.get("Relator(a)", ""),
+                        axis=1
+                    )
+                    df_tbl["Orgao_Exibido"] = df_tbl.apply(
+                        lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
+                        axis=1
+                    )
+                else:
+                    df_tbl["Relator_Exibido"] = df_tbl.get("Relator(a)", "")
+                    df_tbl["Orgao_Exibido"] = df_tbl.get("Órgão (sigla)", "")
+                
                 show_cols_r = [
                     "Alerta", "Proposição", "Tipo", "Ano",
-                    "Situação atual", "Órgão (sigla)", "Relator(a)",
+                    "Situação atual", "Orgao_Exibido", "Relator_Exibido",
                     "Último andamento", "Data do status", "Parado (dias)",
                     "no_senado", "tipo_numero_senado", "situacao_senado",
                     "LinkTramitacao", "url_senado", "Ementa", "ID",
@@ -7669,8 +8083,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             # DEBUG: Verificar dados ANTES de salvar
             _debug_situacao = df_tbl["Situação atual"].dropna().astype(str)
             _debug_situacao_ok = (_debug_situacao != "").sum()
-            _debug_orgao = df_tbl["Órgão (sigla)"].dropna().astype(str)
-            _debug_orgao_ok = (_debug_orgao != "").sum()
+            _debug_orgao = df_tbl["Órgão (sigla)"].dropna().astype(str) if "Órgão (sigla)" in df_tbl.columns else pd.Series()
+            _debug_orgao_ok = (_debug_orgao != "").sum() if len(_debug_orgao) > 0 else 0
             
             if _debug_situacao_ok == 0 or _debug_orgao_ok == 0:
                 st.warning(f"⚠️ DEBUG: Dados incompletos! Situação: {_debug_situacao_ok}/{len(df_tbl)}, Órgão: {_debug_orgao_ok}/{len(df_tbl)}")
@@ -7707,25 +8121,63 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     
                     st.session_state["df_todas_enriquecido_tab5"] = df_aut_enriquecido
             
+            # Configurar colunas de exibição com rótulos melhores quando Senado ativo
+            column_config_base = {
+                "Alerta": st.column_config.TextColumn("", width="small", help="Urgência"),
+                "LinkTramitacao": st.column_config.LinkColumn("🏛️ Câmara", display_text="Abrir"),
+                "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+            }
+            
+            if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
+                column_config_base.update({
+                    "Orgao_Exibido": st.column_config.TextColumn("Órgão (Senado)", width="medium", help="Órgão atual - mostra Senado quando disponível"),
+                    "Relator_Exibido": st.column_config.TextColumn("Relator (Senado)", width="medium", help="Relator atual - mostra Senado quando disponível"),
+                    "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
+                    "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
+                    "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium"),
+                    "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
+                })
+            
             sel = st.dataframe(
                 df_tbl[show_cols_r],
                 use_container_width=True,
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
-                column_config={
-                    "Alerta": st.column_config.TextColumn("", width="small", help="Urgência"),
-                    "LinkTramitacao": st.column_config.LinkColumn("🏛️ Câmara", display_text="Abrir"),
-                    "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-                    "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
-                    "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
-                    "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium"),
-                    "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
-                },
+                column_config=column_config_base,
                 key="df_busca_tab5"
             )
             
             st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
+            
+            # Exibir detalhes do Senado para proposição selecionada
+            if incluir_senado_tab5:
+                try:
+                    if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
+                        row_idx_senado = sel["selection"]["rows"][0]
+                        row_senado = df_tbl.iloc[row_idx_senado]
+                        
+                        if row_senado.get("no_senado"):
+                            with st.expander("🏛️ **Detalhes do Senado Federal**", expanded=True):
+                                st.markdown(f"**Matéria:** {row_senado.get('tipo_numero_senado', '')}")
+                                st.markdown(f"**Situação no Senado:** {row_senado.get('situacao_senado', 'N/A')}")
+                                st.markdown(f"**Relator no Senado:** {row_senado.get('Relator_Senado', 'Não designado')}")
+                                st.markdown(f"**Órgão atual:** {row_senado.get('Orgao_Senado_Sigla', '')} - {row_senado.get('Orgao_Senado_Nome', '')}")
+                                
+                                url_senado = row_senado.get('url_senado', '')
+                                if url_senado:
+                                    st.markdown(f"[🔗 Abrir no portal do Senado]({url_senado})")
+                                
+                                # Movimentações do Senado
+                                movs = row_senado.get('UltimasMov_Senado', '')
+                                if movs and movs != "Sem movimentações disponíveis":
+                                    st.markdown("---")
+                                    st.markdown("**📋 Últimas 10 movimentações no Senado:**")
+                                    st.text(movs)
+                                else:
+                                    st.info("Movimentações não disponíveis")
+                except Exception:
+                    pass
             
             # Exportação
             col_x4, col_p4 = st.columns(2)
@@ -8114,10 +8566,34 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         return relator
                     # Mantemos Relator(a) como texto, o link estará em LinkRelator
 
-                show_cols = [
-                    "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Relator(a)",
-                    "Última tramitação", "Sinal", "Parado há", "Tema", "id", "LinkTramitacao", "LinkRelator", "Ementa"
-                ]
+                # Quando Senado habilitado, substituir Relator e Órgão pelos dados do Senado
+                if incluir_senado_tab6 and "no_senado" in df_tbl_status.columns:
+                    # Criar colunas que mostram dados do Senado quando disponíveis
+                    if "Relator_Senado" in df_tbl_status.columns:
+                        df_tbl_status["Relator_Exibido"] = df_tbl_status.apply(
+                            lambda row: row.get("Relator_Senado", "") if row.get("no_senado") and row.get("Relator_Senado") else row.get("Relator(a)", "—"),
+                            axis=1
+                        )
+                        df_tbl_status["Orgao_Exibido"] = df_tbl_status.apply(
+                            lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
+                            axis=1
+                        )
+                    else:
+                        df_tbl_status["Relator_Exibido"] = df_tbl_status.get("Relator(a)", "—")
+                        df_tbl_status["Orgao_Exibido"] = df_tbl_status.get("Órgão (sigla)", "")
+                    
+                    show_cols = [
+                        "Proposição", "Tipo", "Ano", "Situação atual", "Orgao_Exibido", "Relator_Exibido",
+                        "Última tramitação", "Sinal", "Parado há", "Tema", 
+                        "no_senado", "tipo_numero_senado", "situacao_senado", "url_senado",
+                        "id", "LinkTramitacao", "LinkRelator", "Ementa"
+                    ]
+                else:
+                    show_cols = [
+                        "Proposição", "Tipo", "Ano", "Situação atual", "Órgão (sigla)", "Relator(a)",
+                        "Última tramitação", "Sinal", "Parado há", "Tema", "id", "LinkTramitacao", "LinkRelator", "Ementa"
+                    ]
+                
                 for c in show_cols:
                     if c not in df_tbl_status.columns:
                         df_tbl_status[c] = ""
@@ -8145,18 +8621,60 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     if "DataStatus_dt" in df_tbl_status.columns:
                         df_tbl_status = df_tbl_status.sort_values("DataStatus_dt", ascending=False)
                     
+                    # Configurar colunas de exibição
+                    column_config_tab6 = {
+                        "LinkTramitacao": st.column_config.LinkColumn("Link Tramitação", display_text="abrir"),
+                        "LinkRelator": st.column_config.LinkColumn("Link Relator", display_text="ver"),
+                        "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                        "Última tramitação": st.column_config.TextColumn("Última tramitação", width="small"),
+                    }
+                    
+                    if incluir_senado_tab6 and "no_senado" in df_tbl_status.columns:
+                        column_config_tab6.update({
+                            "Orgao_Exibido": st.column_config.TextColumn("Órgão (Senado)", width="medium", help="Órgão atual - mostra Senado quando disponível"),
+                            "Relator_Exibido": st.column_config.TextColumn("Relator (Senado)", width="medium", help="Relator atual - mostra Senado quando disponível"),
+                            "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
+                            "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
+                            "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium"),
+                            "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
+                        })
+                    else:
+                        column_config_tab6.update({
+                            "Relator(a)": st.column_config.TextColumn("Relator(a)", width="medium"),
+                        })
+                    
                     st.dataframe(
                         df_tbl_status[show_cols],
                         use_container_width=True,
                         hide_index=True,
-                        column_config={
-                            "LinkTramitacao": st.column_config.LinkColumn("Link Tramitação", display_text="abrir"),
-                            "LinkRelator": st.column_config.LinkColumn("Link Relator", display_text="ver"),
-                            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-                            "Relator(a)": st.column_config.TextColumn("Relator(a)", width="medium"),
-                            "Última tramitação": st.column_config.TextColumn("Última tramitação", width="small"),
-                        },
+                        column_config=column_config_tab6,
                     )
+                
+                # Seção especial para detalhes do Senado
+                if incluir_senado_tab6 and "no_senado" in df_tbl_status.columns:
+                    df_senado_tab6 = df_tbl_status[df_tbl_status["no_senado"] == True].copy()
+                    if not df_senado_tab6.empty:
+                        with st.expander(f"🏛️ **Detalhes do Senado** ({len(df_senado_tab6)} matérias)", expanded=False):
+                            for idx, row in df_senado_tab6.iterrows():
+                                st.markdown(f"**{row.get('Proposição', '')}** → {row.get('tipo_numero_senado', '')}")
+                                
+                                col_info1, col_info2 = st.columns(2)
+                                with col_info1:
+                                    st.markdown(f"- **Relator Senado:** {row.get('Relator_Senado', 'Não designado')}")
+                                    st.markdown(f"- **Órgão:** {row.get('Orgao_Senado_Sigla', '')} - {row.get('Orgao_Senado_Nome', '')}")
+                                with col_info2:
+                                    st.markdown(f"- **Situação:** {row.get('situacao_senado', 'N/A')}")
+                                    url_sen = row.get('url_senado', '')
+                                    if url_sen:
+                                        st.markdown(f"- [🔗 Abrir no Senado]({url_sen})")
+                                
+                                # Movimentações
+                                movs = row.get('UltimasMov_Senado', '')
+                                if movs and movs != "Sem movimentações disponíveis":
+                                    with st.expander("📋 Últimas movimentações no Senado", expanded=False):
+                                        st.text(movs)
+                                
+                                st.markdown("---")
                 
                 # Seção especial para RICs se houver
                 df_rics = df_tbl_status[df_tbl_status["Tipo"] == "RIC"].copy() if "Tipo" in df_tbl_status.columns else pd.DataFrame()
