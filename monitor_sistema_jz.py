@@ -229,32 +229,25 @@ def buscar_tramitacao_senado_mesmo_numero(
 
 def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional[Dict]:
     """
-    Busca detalhes completos de uma matéria do Senado pelo CodigoMateria.
-    
-    USA DOIS ENDPOINTS SEPARADOS:
-    - /materia/{codigo}/relatorias → Relator atual
-    - /materia/{codigo}/situacao → Órgão atual
-    
-    Args:
-        codigo_materia: Código numérico da matéria no Senado (ex: "167367")
-        debug: Modo debug
-        
-    Returns:
-        Dict com detalhes ou None se não encontrado
+    Busca Relator e Órgão atuais no SENADO pelo CodigoMateria.
+
+    Correção:
+    - NÃO usar /materia/{codigo}/relatorias nem /materia/{codigo}/situacao (podem não existir).
+    - Usar o endpoint do Swagger: /dadosabertos/processo/relatoria?codigoMateria=...
+
+    Retorna dict com:
+      - relator_senado (ex: "Izalci Lucas (PL/DF)")
+      - relator_nome, relator_partido, relator_uf
+      - orgao_senado_sigla (ex: "CAE"), orgao_senado_nome
     """
+    import requests
+    import json
     import xml.etree.ElementTree as ET
-    
+    from datetime import date
+
     if not codigo_materia:
         return None
-    
-    def get_xml_text(element, tag_path, default=""):
-        if element is None:
-            return default
-        el = element.find(tag_path)
-        if el is not None and el.text:
-            return el.text.strip()
-        return default
-    
+
     resultado = {
         "relator_senado": "",
         "relator_nome": "",
@@ -263,140 +256,140 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
         "orgao_senado_sigla": "",
         "orgao_senado_nome": "",
     }
-    
-    # ========== 1. BUSCAR RELATOR EM /relatorias ==========
-    url_relatorias = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo_materia}/relatorias"
-    print(f"[SENADO-RELATOR] Buscando relator: {url_relatorias}")
-    
+
+    # Endpoint (Swagger) — aceita codigoMateria e (opcional) dataReferencia
+    # Alguns ambientes ignoram Accept e retornam XML; suportar ambos.
+    data_ref = date.today().isoformat()
+    url = f"https://legis.senado.leg.br/dadosabertos/processo/relatoria?codigoMateria={codigo_materia}&dataReferencia={data_ref}&v=1"
+
+    print(f"[SENADO-RELATORIA] Buscando relatoria: {url}")
     if debug:
-        st.write(f"🔍 Buscando relator: {url_relatorias}")
-    
+        st.write(f"🔎 Buscando relatoria (Senado): {url}")
+
     try:
-        response = requests.get(
-            url_relatorias, 
-            timeout=15,
-            headers={'User-Agent': 'Monitor-Zanatta/1.0', 'Accept': 'application/xml'},
-            verify=_REQUESTS_VERIFY
+        resp = requests.get(
+            url,
+            timeout=20,
+            headers={"User-Agent": "Monitor-Zanatta/1.0", "Accept": "application/json"},
+            verify=_REQUESTS_VERIFY,
         )
-        
-        print(f"[SENADO-RELATOR] Status HTTP: {response.status_code}")
-        
-        if response.status_code == 200:
-            try:
-                root = ET.fromstring(response.content)
-                
-                if debug:
-                    # Mostrar tags encontradas
-                    tags = set(elem.tag for elem in root.iter())
-                    st.write(f"Tags em /relatorias: {sorted(tags)}")
-                
-                # Procurar relator atual (mais recente ou sem data fim)
-                relatorias = root.findall('.//Relatoria')
-                if not relatorias:
-                    relatorias = root.findall('.//Relator')
-                
-                for relatoria in relatorias:
-                    # Procurar nome do parlamentar
-                    nome = (
-                        get_xml_text(relatoria, './/NomeParlamentar') or
-                        get_xml_text(relatoria, './/NomeRelator') or
-                        get_xml_text(relatoria, './/Nome') or
-                        get_xml_text(relatoria, './/IdentificacaoParlamentar/NomeParlamentar')
-                    )
-                    if nome:
-                        resultado["relator_nome"] = nome
-                        resultado["relator_partido"] = (
-                            get_xml_text(relatoria, './/SiglaPartido') or
-                            get_xml_text(relatoria, './/IdentificacaoParlamentar/SiglaPartido') or
-                            ""
-                        )
-                        resultado["relator_uf"] = (
-                            get_xml_text(relatoria, './/UfParlamentar') or
-                            get_xml_text(relatoria, './/SiglaUf') or
-                            get_xml_text(relatoria, './/IdentificacaoParlamentar/UfParlamentar') or
-                            ""
-                        )
-                        # Formatar
-                        if resultado["relator_partido"] and resultado["relator_uf"]:
-                            resultado["relator_senado"] = f"{nome} ({resultado['relator_partido']}/{resultado['relator_uf']})"
-                        elif resultado["relator_partido"]:
-                            resultado["relator_senado"] = f"{nome} ({resultado['relator_partido']})"
-                        else:
-                            resultado["relator_senado"] = nome
-                        print(f"[SENADO-RELATOR] ✅ Encontrado: {resultado['relator_senado']}")
-                        break
-                
-                if not resultado["relator_nome"]:
-                    print(f"[SENADO-RELATOR] ⚠️ Nenhum relator encontrado nas tags")
-                    
-            except ET.ParseError as e:
-                print(f"[SENADO-RELATOR] ❌ Erro ao parsear XML: {e}")
     except Exception as e:
-        print(f"[SENADO-RELATOR] ❌ Erro: {e}")
-    
-    # ========== 2. BUSCAR ÓRGÃO ATUAL EM /situacao ==========
-    url_situacao = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo_materia}/situacao"
-    print(f"[SENADO-ORGAO] Buscando órgão: {url_situacao}")
-    
-    if debug:
-        st.write(f"🔍 Buscando órgão: {url_situacao}")
-    
+        print(f"[SENADO-RELATORIA] ERRO request: {e}")
+        if debug:
+            st.error(f"Erro consultando relatoria do Senado: {e}")
+        return resultado
+
+    print(f"[SENADO-RELATORIA] Status HTTP: {resp.status_code}")
+    if resp.status_code != 200 or not resp.content:
+        return resultado
+
+    # ---------- 1) Tentar JSON ----------
+    dados = None
     try:
-        response = requests.get(
-            url_situacao, 
-            timeout=15,
-            headers={'User-Agent': 'Monitor-Zanatta/1.0', 'Accept': 'application/xml'},
-            verify=_REQUESTS_VERIFY
-        )
-        
-        print(f"[SENADO-ORGAO] Status HTTP: {response.status_code}")
-        
-        if response.status_code == 200:
-            try:
-                root = ET.fromstring(response.content)
-                
-                if debug:
-                    tags = set(elem.tag for elem in root.iter())
-                    st.write(f"Tags em /situacao: {sorted(tags)}")
-                
-                # Procurar órgão/local atual
-                sigla = (
-                    get_xml_text(root, './/SiglaLocal') or
-                    get_xml_text(root, './/SiglaComissao') or
-                    get_xml_text(root, './/Local/SiglaLocal') or
-                    get_xml_text(root, './/Comissao/SiglaComissao') or
-                    get_xml_text(root, './/SiglaColegiado') or
-                    ""
-                )
-                nome = (
-                    get_xml_text(root, './/NomeLocal') or
-                    get_xml_text(root, './/NomeComissao') or
-                    get_xml_text(root, './/Local/NomeLocal') or
-                    get_xml_text(root, './/Comissao/NomeComissao') or
-                    get_xml_text(root, './/NomeColegiado') or
-                    ""
-                )
-                
-                if sigla:
-                    resultado["orgao_senado_sigla"] = sigla
-                    resultado["orgao_senado_nome"] = nome
-                    print(f"[SENADO-ORGAO] ✅ Encontrado: {sigla} - {nome}")
-                else:
-                    print(f"[SENADO-ORGAO] ⚠️ Nenhum órgão encontrado nas tags")
-                    
-            except ET.ParseError as e:
-                print(f"[SENADO-ORGAO] ❌ Erro ao parsear XML: {e}")
-    except Exception as e:
-        print(f"[SENADO-ORGAO] ❌ Erro: {e}")
-    
+        dados = resp.json()
+    except Exception:
+        dados = None
+
+    relatorias = []
+    if isinstance(dados, list):
+        relatorias = dados
+    elif isinstance(dados, dict):
+        # algumas respostas podem vir aninhadas; tentar chaves comuns
+        for k in ("relatorias", "Relatorias", "items", "data"):
+            v = dados.get(k)
+            if isinstance(v, list):
+                relatorias = v
+                break
+
+    # ---------- 2) Fallback XML ----------
+    if not relatorias:
+        try:
+            root = ET.fromstring(resp.content)
+            # Estrutura típica: <relatorias><relatoria>...</relatoria></relatorias>
+            # Aceitar namespaces variados.
+            def strip_ns(tag):
+                return tag.split("}", 1)[-1] if "}" in tag else tag
+
+            rel_nodes = []
+            for el in root.iter():
+                if strip_ns(el.tag).lower() in ("relatoria", "relator"):
+                    rel_nodes.append(el)
+
+            # Se achou nós "relatoria", extrair campos mínimos
+            for el in rel_nodes:
+                # pega valores por tag (sem namespace)
+                values = {}
+                for child in el.iter():
+                    t = strip_ns(child.tag)
+                    if child.text and child.text.strip():
+                        values[t] = child.text.strip()
+
+                if values:
+                    relatorias.append({
+                        "dataDestituicao": values.get("dataDestituicao") or values.get("DataDestituicao"),
+                        "descricaoTipoRelator": values.get("descricaoTipoRelator") or values.get("DescricaoTipoRelator"),
+                        "dataDesignacao": values.get("dataDesignacao") or values.get("DataDesignacao"),
+                        "nomeParlamentar": values.get("nomeParlamentar") or values.get("NomeParlamentar"),
+                        "siglaPartidoParlamentar": values.get("siglaPartidoParlamentar") or values.get("SiglaPartidoParlamentar"),
+                        "ufParlamentar": values.get("ufParlamentar") or values.get("UfParlamentar"),
+                        "siglaColegiado": values.get("siglaColegiado") or values.get("SiglaColegiado"),
+                        "nomeColegiado": values.get("nomeColegiado") or values.get("NomeColegiado"),
+                    })
+        except Exception as e:
+            print(f"[SENADO-RELATORIA] Falha parse XML: {e}")
+
+    if not relatorias:
+        return resultado
+
+    # ---------- Escolher relatoria "ativa" ----------
+    # Preferir: dataDestituicao == None e descricaoTipoRelator == "Relator"
+    def is_active(r):
+        dd = r.get("dataDestituicao")
+        return dd in (None, "", "null")
+
+    candidatas = [r for r in relatorias if is_active(r)]
+    if not candidatas:
+        candidatas = relatorias
+
+    relator_cands = [r for r in candidatas if (r.get("descricaoTipoRelator") or "").lower() == "relator"]
+    if relator_cands:
+        candidatas = relator_cands
+
+    # Ordenar por dataDesignacao (mais recente primeiro) quando possível
+    def key_data(r):
+        return (r.get("dataDesignacao") or "").strip()
+
+    candidatas.sort(key=key_data, reverse=True)
+    atual = candidatas[0] if candidatas else None
+    if not atual:
+        return resultado
+
+    nome = (atual.get("nomeParlamentar") or "").strip()
+    partido = (atual.get("siglaPartidoParlamentar") or "").strip()
+    uf = (atual.get("ufParlamentar") or "").strip()
+    sigla_col = (atual.get("siglaColegiado") or "").strip()
+    nome_col = (atual.get("nomeColegiado") or "").strip()
+
+    resultado["relator_nome"] = nome
+    resultado["relator_partido"] = partido
+    resultado["relator_uf"] = uf
+    resultado["orgao_senado_sigla"] = sigla_col
+    resultado["orgao_senado_nome"] = nome_col
+
+    if nome:
+        if partido and uf:
+            resultado["relator_senado"] = f"{nome} ({partido}/{uf})"
+        elif partido:
+            resultado["relator_senado"] = f"{nome} ({partido})"
+        else:
+            resultado["relator_senado"] = nome
+
     if debug:
-        st.write(f"Relator: {resultado['relator_senado'] or 'não encontrado'}")
-        st.write(f"Órgão: {resultado['orgao_senado_sigla'] or 'não encontrado'}")
-    
+        st.write(f"✅ Relator (Senado): {resultado['relator_senado'] or 'não encontrado'}")
+        st.write(f"✅ Órgão (Senado): {resultado['orgao_senado_sigla'] or '—'} {resultado['orgao_senado_nome'] or ''}".strip())
+
     return resultado
 
-
-@st.cache_data(ttl=21600, show_spinner=False)  # TTL de 6 horas
 def buscar_movimentacoes_senado(codigo_materia: str, limite: int = 10, debug: bool = False) -> List[Dict]:
     """
     Busca as últimas movimentações/tramitações de uma matéria do Senado.
