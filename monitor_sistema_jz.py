@@ -1,5 +1,12 @@
-# monitor_sistema_jz.py - v31.1 ENRIQUECIMENTO SENADO COMPLETO
+# monitor_sistema_jz.py - v31.2 CORREÇÃO PARSEAMENTO XML SENADO
 # 
+# ALTERAÇÕES v31.2:
+# - Correção: Remove zeros à esquerda do número da matéria
+# - Correção: Garante ano com 4 dígitos
+# - Nova coluna: codigo_materia_senado (para verificação)
+# - Deep link SEMPRE no formato: /materia/{CodigoMateria}
+# - Exemplo: PLP 223/2023 → código 167367 → https://www25.senado.leg.br/web/atividade/materias/-/materia/167367
+#
 # ALTERAÇÕES v31.1:
 # - Busca RELATOR do Senado (não mostra mais relator da Câmara para matérias no Senado)
 # - Busca ÓRGÃO/COMISSÃO atual do Senado (ex: CAE, CCJ)
@@ -209,17 +216,24 @@ def buscar_tramitacao_senado_mesmo_numero(
             tipo.upper()
         )
         
-        numero_materia = (
+        numero_materia_raw = (
             get_xml_text(materia, './/NumeroMateria') or
             get_xml_text(materia, './/IdentificacaoMateria/NumeroMateria') or
             numero
         )
+        # LIMPAR: Remover zeros à esquerda
+        numero_materia = str(int(numero_materia_raw)) if numero_materia_raw.isdigit() else numero_materia_raw
         
-        ano_materia = (
+        ano_materia_raw = (
             get_xml_text(materia, './/AnoMateria') or
             get_xml_text(materia, './/IdentificacaoMateria/AnoMateria') or
             ano
         )
+        # LIMPAR: Garantir 4 dígitos no ano
+        ano_materia = str(ano_materia_raw).strip()
+        if len(ano_materia) == 2:
+            # Se vier apenas 2 dígitos (ex: "23"), assumir 20XX
+            ano_materia = f"20{ano_materia}"
         
         # Situação/Descrição
         situacao = (
@@ -243,8 +257,8 @@ def buscar_tramitacao_senado_mesmo_numero(
         url_senado = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}"
         
         resultado = {
-            "codigo_senado": codigo_materia,
-            "tipo_senado": sigla_materia,
+            "codigo_senado": str(codigo_materia).strip(),
+            "tipo_senado": str(sigla_materia).strip().upper(),
             "numero_senado": numero_materia,
             "ano_senado": ano_materia,
             "situacao_senado": situacao,
@@ -8065,7 +8079,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     "Alerta", "Proposição", "Tipo", "Ano",
                     "Situação atual", "Orgao_Exibido", "Relator_Exibido",
                     "Último andamento", "Data do status", "Parado (dias)",
-                    "no_senado", "tipo_numero_senado", "situacao_senado",
+                    "no_senado", "codigo_materia_senado", "tipo_numero_senado", "situacao_senado",
                     "LinkTramitacao", "url_senado", "Ementa", "ID",
                 ]
             else:
@@ -8133,9 +8147,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     "Orgao_Exibido": st.column_config.TextColumn("Órgão (Senado)", width="medium", help="Órgão atual - mostra Senado quando disponível"),
                     "Relator_Exibido": st.column_config.TextColumn("Relator (Senado)", width="medium", help="Relator atual - mostra Senado quando disponível"),
                     "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
+                    "codigo_materia_senado": st.column_config.TextColumn("Código Matéria", width="small", help="Código interno da matéria no Senado"),
                     "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
                     "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium"),
-                    "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
+                    "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir", help="Clique para abrir a página da matéria no Senado"),
                 })
             
             sel = st.dataframe(
@@ -8585,7 +8600,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     show_cols = [
                         "Proposição", "Tipo", "Ano", "Situação atual", "Orgao_Exibido", "Relator_Exibido",
                         "Última tramitação", "Sinal", "Parado há", "Tema", 
-                        "no_senado", "tipo_numero_senado", "situacao_senado", "url_senado",
+                        "no_senado", "codigo_materia_senado", "tipo_numero_senado", "situacao_senado", "url_senado",
                         "id", "LinkTramitacao", "LinkRelator", "Ementa"
                     ]
                 else:
@@ -8634,9 +8649,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             "Orgao_Exibido": st.column_config.TextColumn("Órgão (Senado)", width="medium", help="Órgão atual - mostra Senado quando disponível"),
                             "Relator_Exibido": st.column_config.TextColumn("Relator (Senado)", width="medium", help="Relator atual - mostra Senado quando disponível"),
                             "no_senado": st.column_config.CheckboxColumn("No Senado?", width="small"),
+                            "codigo_materia_senado": st.column_config.TextColumn("Código", width="small", help="Código interno da matéria no Senado"),
                             "tipo_numero_senado": st.column_config.TextColumn("Nº Senado", width="medium"),
                             "situacao_senado": st.column_config.TextColumn("Situação Senado", width="medium"),
-                            "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir"),
+                            "url_senado": st.column_config.LinkColumn("🏛️ Senado", display_text="Abrir", help="Clique para abrir a página da matéria no Senado"),
                         })
                     else:
                         column_config_tab6.update({
