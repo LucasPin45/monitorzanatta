@@ -1,10 +1,11 @@
-# monitor_sistema_jz.py - v31.3 RELATOR/ÓRGÃO EXTRAÍDOS NA BUSCA PRINCIPAL
+# monitor_sistema_jz.py - v31.4 ENDPOINTS CORRETOS PARA RELATOR/ÓRGÃO
 # 
-# ALTERAÇÕES v31.3:
-# - Relator e Órgão extraídos diretamente do XML da busca principal
-# - Removidas chamadas separadas a buscar_detalhes_senado/buscar_movimentacoes_senado
-# - Iteração por todas as tags do XML para encontrar relator
-# - Logs detalhados de relator/órgão encontrados
+# ALTERAÇÕES v31.4:
+# - buscar_detalhes_senado agora usa endpoints separados:
+#   - /materia/{codigo}/relatorias → Relator
+#   - /materia/{codigo}/situacao → Órgão atual
+# - Função principal só busca código/situação/URL
+# - Debug mostra tags encontradas em cada endpoint
 #
 # ALTERAÇÕES v31.1:
 # - Busca RELATOR do Senado (não mostra mais relator da Câmara para matérias no Senado)
@@ -168,15 +169,6 @@ def buscar_tramitacao_senado_mesmo_numero(
                 st.error(f"Erro ao parsear XML: {str(e)}")
             return None
         
-        # DEBUG: Mostrar XML completo para identificar estrutura
-        if debug:
-            st.code(response.text[:4000], language="xml")
-            st.write("**Tags encontradas no XML:**")
-            tags_encontradas = set()
-            for elem in root.iter():
-                tags_encontradas.add(elem.tag)
-            st.write(sorted(tags_encontradas))
-        
         # Procurar o elemento Materia (pode estar em diferentes níveis)
         materia = root.find('.//Materia')
         if materia is None:
@@ -247,69 +239,13 @@ def buscar_tramitacao_senado_mesmo_numero(
         situacao = (
             get_xml_text(materia, './/DescricaoIdentificacaoMateria') or
             get_xml_text(materia, './/DadosBasicosMateria/DescricaoIdentificacaoMateria') or
-            get_xml_text(materia, './/SituacaoAtual/Autuacoes/Autuacao/Situacao/DescricaoSituacao') or
-            get_xml_text(materia, './/Situacao/DescricaoSituacao') or
             ""
         )
         
-        # ========== EXTRAIR RELATOR DIRETAMENTE ==========
-        relator_nome = ""
-        relator_partido = ""
-        relator_uf = ""
-        
-        # Procurar em todos os caminhos possíveis
-        for elem in root.iter():
-            tag_lower = elem.tag.lower() if elem.tag else ""
-            if 'relator' in tag_lower:
-                # Encontrou um elemento relacionado a relator
-                nome_elem = elem.find('.//NomeParlamentar')
-                if nome_elem is None:
-                    nome_elem = elem.find('.//NomeAutor')
-                if nome_elem is None:
-                    nome_elem = elem.find('.//Nome')
-                if nome_elem is not None and nome_elem.text:
-                    relator_nome = nome_elem.text.strip()
-                    # Buscar partido e UF
-                    partido_elem = elem.find('.//SiglaPartido')
-                    if partido_elem is not None and partido_elem.text:
-                        relator_partido = partido_elem.text.strip()
-                    uf_elem = elem.find('.//UfParlamentar')
-                    if uf_elem is None:
-                        uf_elem = elem.find('.//SiglaUf')
-                    if uf_elem is not None and uf_elem.text:
-                        relator_uf = uf_elem.text.strip()
-                    if relator_nome:
-                        break
-        
-        # Formatar relator
-        if relator_nome:
-            if relator_partido and relator_uf:
-                relator_formatado = f"{relator_nome} ({relator_partido}/{relator_uf})"
-            elif relator_partido:
-                relator_formatado = f"{relator_nome} ({relator_partido})"
-            else:
-                relator_formatado = relator_nome
-        else:
-            relator_formatado = ""
-        
-        print(f"[SENADO]    Relator encontrado: {relator_formatado or 'não encontrado'}")
-        
-        # ========== EXTRAIR ÓRGÃO ATUAL ==========
-        orgao_sigla = ""
-        orgao_nome = ""
-        
-        # Procurar Local/Órgão atual
-        for path in ['.//SituacaoAtual/Autuacoes/Autuacao/Local', './/Local', './/Orgao']:
-            local_elem = materia.find(path)
-            if local_elem is not None:
-                sigla = get_xml_text(local_elem, './/SiglaLocal') or get_xml_text(local_elem, './/SiglaOrgao')
-                nome = get_xml_text(local_elem, './/NomeLocal') or get_xml_text(local_elem, './/NomeOrgao')
-                if sigla:
-                    orgao_sigla = sigla
-                    orgao_nome = nome
-                    break
-        
-        print(f"[SENADO]    Órgão encontrado: {orgao_sigla or 'não encontrado'}")
+        # NOTA: Relator e Órgão NÃO estão neste endpoint
+        # Precisam ser buscados em endpoints separados:
+        # - /materia/{codigo}/relatorias
+        # - /materia/{codigo}/tramitacoes
         
         # Ementa
         ementa = (
@@ -331,9 +267,9 @@ def buscar_tramitacao_senado_mesmo_numero(
             "situacao_senado": situacao,
             "ementa_senado": ementa,
             "url_senado": url_senado,
-            "relator_senado": relator_formatado,
-            "orgao_senado_sigla": orgao_sigla,
-            "orgao_senado_nome": orgao_nome,
+            "relator_senado": "",  # Será buscado em /relatorias
+            "orgao_senado_sigla": "",  # Será buscado em /tramitacoes
+            "orgao_senado_nome": "",
         }
         
         # LOG: Resultado encontrado
@@ -374,10 +310,10 @@ def buscar_tramitacao_senado_mesmo_numero(
 def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional[Dict]:
     """
     Busca detalhes completos de uma matéria do Senado pelo CodigoMateria.
-    Retorna: Relator, Órgão atual, Situação detalhada.
     
-    ENDPOINT: https://legis.senado.leg.br/dadosabertos/materia/{codigo}
-    FORMATO: XML
+    USA DOIS ENDPOINTS SEPARADOS:
+    - /materia/{codigo}/relatorias → Relator atual
+    - /materia/{codigo}/situacao → Órgão atual
     
     Args:
         codigo_materia: Código numérico da matéria no Senado (ex: "167367")
@@ -391,171 +327,153 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
     if not codigo_materia:
         return None
     
-    url = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo_materia}"
+    def get_xml_text(element, tag_path, default=""):
+        if element is None:
+            return default
+        el = element.find(tag_path)
+        if el is not None and el.text:
+            return el.text.strip()
+        return default
     
-    print(f"[SENADO-DETALHES] ========================================")
-    print(f"[SENADO-DETALHES] Buscando detalhes para CodigoMateria={codigo_materia}")
-    print(f"[SENADO-DETALHES] URL: {url}")
+    resultado = {
+        "relator_senado": "",
+        "relator_nome": "",
+        "relator_partido": "",
+        "relator_uf": "",
+        "orgao_senado_sigla": "",
+        "orgao_senado_nome": "",
+    }
+    
+    # ========== 1. BUSCAR RELATOR EM /relatorias ==========
+    url_relatorias = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo_materia}/relatorias"
+    print(f"[SENADO-RELATOR] Buscando relator: {url_relatorias}")
     
     if debug:
-        st.write(f"🔍 Buscando detalhes no Senado: código {codigo_materia}")
+        st.write(f"🔍 Buscando relator: {url_relatorias}")
     
     try:
         response = requests.get(
-            url, 
+            url_relatorias, 
             timeout=15,
-            headers={
-                'User-Agent': 'Monitor-Zanatta/1.0',
-                'Accept': 'application/xml'
-            },
+            headers={'User-Agent': 'Monitor-Zanatta/1.0', 'Accept': 'application/xml'},
             verify=_REQUESTS_VERIFY
         )
         
-        print(f"[SENADO-DETALHES] Status HTTP: {response.status_code}")
+        print(f"[SENADO-RELATOR] Status HTTP: {response.status_code}")
         
-        if response.status_code != 200:
-            print(f"[SENADO-DETALHES] ⚠️ Status code: {response.status_code}")
-            return None
-        
-        # Parsear XML
-        try:
-            root = ET.fromstring(response.content)
-        except ET.ParseError as e:
-            print(f"[SENADO-DETALHES] ❌ Erro ao parsear XML: {str(e)}")
-            return None
-        
-        # Função auxiliar para extrair texto
-        def get_xml_text(element, tag_path, default=""):
-            el = element.find(tag_path)
-            if el is not None and el.text:
-                return el.text.strip()
-            return default
-        
-        # Procurar elemento Materia
-        materia = root.find('.//Materia')
-        if materia is None:
-            materia = root
-        
-        # ========== EXTRAIR RELATOR ==========
-        relator_nome = ""
-        relator_partido = ""
-        relator_uf = ""
-        
-        # Tentar vários caminhos para o relator
-        relator_paths = [
-            './/RelatoriaAtual/Relator',
-            './/Relatorias/Relatoria/Relator',
-            './/SituacaoAtual/Autuacoes/Autuacao/Relatoria/Relator',
-            './/Relator'
-        ]
-        
-        for path in relator_paths:
-            relator_elem = materia.find(path)
-            if relator_elem is not None:
-                # Tentar extrair nome do parlamentar
-                nome = (
-                    get_xml_text(relator_elem, './/NomeParlamentar') or
-                    get_xml_text(relator_elem, './/NomeAutor') or
-                    get_xml_text(relator_elem, './/Nome') or
-                    get_xml_text(relator_elem, '.')
-                )
-                if nome:
-                    relator_nome = nome
-                    relator_partido = (
-                        get_xml_text(relator_elem, './/SiglaPartido') or
-                        get_xml_text(relator_elem, './/Partido/SiglaPartido') or
-                        ""
+        if response.status_code == 200:
+            try:
+                root = ET.fromstring(response.content)
+                
+                if debug:
+                    # Mostrar tags encontradas
+                    tags = set(elem.tag for elem in root.iter())
+                    st.write(f"Tags em /relatorias: {sorted(tags)}")
+                
+                # Procurar relator atual (mais recente ou sem data fim)
+                relatorias = root.findall('.//Relatoria')
+                if not relatorias:
+                    relatorias = root.findall('.//Relator')
+                
+                for relatoria in relatorias:
+                    # Procurar nome do parlamentar
+                    nome = (
+                        get_xml_text(relatoria, './/NomeParlamentar') or
+                        get_xml_text(relatoria, './/NomeRelator') or
+                        get_xml_text(relatoria, './/Nome') or
+                        get_xml_text(relatoria, './/IdentificacaoParlamentar/NomeParlamentar')
                     )
-                    relator_uf = (
-                        get_xml_text(relator_elem, './/UfParlamentar') or
-                        get_xml_text(relator_elem, './/SiglaUf') or
-                        get_xml_text(relator_elem, './/Uf') or
-                        ""
-                    )
-                    break
-        
-        # Formatar relator
-        if relator_nome:
-            if relator_partido and relator_uf:
-                relator_formatado = f"{relator_nome} ({relator_partido}/{relator_uf})"
-            elif relator_partido:
-                relator_formatado = f"{relator_nome} ({relator_partido})"
-            else:
-                relator_formatado = relator_nome
-        else:
-            relator_formatado = ""
-        
-        # ========== EXTRAIR ÓRGÃO ATUAL ==========
-        orgao_sigla = ""
-        orgao_nome = ""
-        
-        # Tentar vários caminhos para órgão
-        orgao_paths = [
-            './/SituacaoAtual/Autuacoes/Autuacao/Local',
-            './/LocalAtual',
-            './/Comissao',
-            './/Orgao'
-        ]
-        
-        for path in orgao_paths:
-            orgao_elem = materia.find(path)
-            if orgao_elem is not None:
-                sigla = (
-                    get_xml_text(orgao_elem, './/SiglaComissao') or
-                    get_xml_text(orgao_elem, './/SiglaCasaLocal') or
-                    get_xml_text(orgao_elem, './/SiglaLocal') or
-                    get_xml_text(orgao_elem, './/Sigla') or
-                    ""
-                )
-                nome = (
-                    get_xml_text(orgao_elem, './/NomeComissao') or
-                    get_xml_text(orgao_elem, './/NomeCasaLocal') or
-                    get_xml_text(orgao_elem, './/NomeLocal') or
-                    get_xml_text(orgao_elem, './/Nome') or
-                    ""
-                )
-                if sigla or nome:
-                    orgao_sigla = sigla
-                    orgao_nome = nome
-                    break
-        
-        # Se não encontrou, tentar pegar da situação atual
-        if not orgao_sigla:
-            situacao_atual = materia.find('.//SituacaoAtual')
-            if situacao_atual is not None:
-                for autuacao in situacao_atual.findall('.//Autuacao'):
-                    local = autuacao.find('Local')
-                    if local is not None:
-                        orgao_sigla = get_xml_text(local, './/SiglaLocal') or get_xml_text(local, '.')
-                        orgao_nome = get_xml_text(local, './/NomeLocal') or ""
-                        if orgao_sigla:
-                            break
-        
-        resultado = {
-            "relator_senado": relator_formatado,
-            "relator_nome": relator_nome,
-            "relator_partido": relator_partido,
-            "relator_uf": relator_uf,
-            "orgao_senado_sigla": orgao_sigla,
-            "orgao_senado_nome": orgao_nome,
-        }
-        
-        print(f"[SENADO-DETALHES] ✅ Detalhes extraídos:")
-        print(f"[SENADO-DETALHES]    Relator: {relator_formatado or 'não encontrado'}")
-        print(f"[SENADO-DETALHES]    Órgão: {orgao_sigla} - {orgao_nome}" if orgao_sigla else "[SENADO-DETALHES]    Órgão: não encontrado")
-        print(f"[SENADO-DETALHES] ========================================")
-        
-        if debug:
-            st.write(f"Relator Senado: {relator_formatado or 'não encontrado'}")
-            st.write(f"Órgão Senado: {orgao_sigla} - {orgao_nome}" if orgao_sigla else "Órgão: não encontrado")
-        
-        return resultado
-        
+                    if nome:
+                        resultado["relator_nome"] = nome
+                        resultado["relator_partido"] = (
+                            get_xml_text(relatoria, './/SiglaPartido') or
+                            get_xml_text(relatoria, './/IdentificacaoParlamentar/SiglaPartido') or
+                            ""
+                        )
+                        resultado["relator_uf"] = (
+                            get_xml_text(relatoria, './/UfParlamentar') or
+                            get_xml_text(relatoria, './/SiglaUf') or
+                            get_xml_text(relatoria, './/IdentificacaoParlamentar/UfParlamentar') or
+                            ""
+                        )
+                        # Formatar
+                        if resultado["relator_partido"] and resultado["relator_uf"]:
+                            resultado["relator_senado"] = f"{nome} ({resultado['relator_partido']}/{resultado['relator_uf']})"
+                        elif resultado["relator_partido"]:
+                            resultado["relator_senado"] = f"{nome} ({resultado['relator_partido']})"
+                        else:
+                            resultado["relator_senado"] = nome
+                        print(f"[SENADO-RELATOR] ✅ Encontrado: {resultado['relator_senado']}")
+                        break
+                
+                if not resultado["relator_nome"]:
+                    print(f"[SENADO-RELATOR] ⚠️ Nenhum relator encontrado nas tags")
+                    
+            except ET.ParseError as e:
+                print(f"[SENADO-RELATOR] ❌ Erro ao parsear XML: {e}")
     except Exception as e:
-        print(f"[SENADO-DETALHES] ❌ ERRO: {str(e)}")
-        if debug:
-            st.error(f"Erro ao buscar detalhes: {str(e)}")
-        return None
+        print(f"[SENADO-RELATOR] ❌ Erro: {e}")
+    
+    # ========== 2. BUSCAR ÓRGÃO ATUAL EM /situacao ==========
+    url_situacao = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo_materia}/situacao"
+    print(f"[SENADO-ORGAO] Buscando órgão: {url_situacao}")
+    
+    if debug:
+        st.write(f"🔍 Buscando órgão: {url_situacao}")
+    
+    try:
+        response = requests.get(
+            url_situacao, 
+            timeout=15,
+            headers={'User-Agent': 'Monitor-Zanatta/1.0', 'Accept': 'application/xml'},
+            verify=_REQUESTS_VERIFY
+        )
+        
+        print(f"[SENADO-ORGAO] Status HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            try:
+                root = ET.fromstring(response.content)
+                
+                if debug:
+                    tags = set(elem.tag for elem in root.iter())
+                    st.write(f"Tags em /situacao: {sorted(tags)}")
+                
+                # Procurar órgão/local atual
+                sigla = (
+                    get_xml_text(root, './/SiglaLocal') or
+                    get_xml_text(root, './/SiglaComissao') or
+                    get_xml_text(root, './/Local/SiglaLocal') or
+                    get_xml_text(root, './/Comissao/SiglaComissao') or
+                    get_xml_text(root, './/SiglaColegiado') or
+                    ""
+                )
+                nome = (
+                    get_xml_text(root, './/NomeLocal') or
+                    get_xml_text(root, './/NomeComissao') or
+                    get_xml_text(root, './/Local/NomeLocal') or
+                    get_xml_text(root, './/Comissao/NomeComissao') or
+                    get_xml_text(root, './/NomeColegiado') or
+                    ""
+                )
+                
+                if sigla:
+                    resultado["orgao_senado_sigla"] = sigla
+                    resultado["orgao_senado_nome"] = nome
+                    print(f"[SENADO-ORGAO] ✅ Encontrado: {sigla} - {nome}")
+                else:
+                    print(f"[SENADO-ORGAO] ⚠️ Nenhum órgão encontrado nas tags")
+                    
+            except ET.ParseError as e:
+                print(f"[SENADO-ORGAO] ❌ Erro ao parsear XML: {e}")
+    except Exception as e:
+        print(f"[SENADO-ORGAO] ❌ Erro: {e}")
+    
+    if debug:
+        st.write(f"Relator: {resultado['relator_senado'] or 'não encontrado'}")
+        st.write(f"Órgão: {resultado['orgao_senado_sigla'] or 'não encontrado'}")
+    
+    return resultado
 
 
 @st.cache_data(ttl=21600, show_spinner=False)  # TTL de 6 horas
@@ -807,10 +725,14 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
             f"{dados_senado['ano_senado']}"
         )
         
-        # Usar relator e órgão que já vieram da busca principal
-        resultado["Relator_Senado"] = dados_senado.get("relator_senado", "")
-        resultado["Orgao_Senado_Sigla"] = dados_senado.get("orgao_senado_sigla", "")
-        resultado["Orgao_Senado_Nome"] = dados_senado.get("orgao_senado_nome", "")
+        # 2. Buscar detalhes em endpoints separados (/relatorias e /situacao)
+        codigo_materia = dados_senado.get("codigo_senado", "")
+        if codigo_materia:
+            detalhes = buscar_detalhes_senado(codigo_materia, debug=debug)
+            if detalhes:
+                resultado["Relator_Senado"] = detalhes.get("relator_senado", "")
+                resultado["Orgao_Senado_Sigla"] = detalhes.get("orgao_senado_sigla", "")
+                resultado["Orgao_Senado_Nome"] = detalhes.get("orgao_senado_nome", "")
         
         if debug:
             st.success(f"✅ {proposicao_str} encontrado no Senado")
