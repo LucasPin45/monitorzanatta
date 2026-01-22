@@ -168,6 +168,15 @@ def buscar_tramitacao_senado_mesmo_numero(
                 st.error(f"Erro ao parsear XML: {str(e)}")
             return None
         
+        # DEBUG: Mostrar XML completo para identificar estrutura
+        if debug:
+            st.code(response.text[:4000], language="xml")
+            st.write("**Tags encontradas no XML:**")
+            tags_encontradas = set()
+            for elem in root.iter():
+                tags_encontradas.add(elem.tag)
+            st.write(sorted(tags_encontradas))
+        
         # Procurar o elemento Materia (pode estar em diferentes níveis)
         materia = root.find('.//Materia')
         if materia is None:
