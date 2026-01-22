@@ -1,26 +1,4 @@
 {
-  "notificadas": [
-    {
-      "chave": "2584819_2026-01-15T00:00",
-      "proposicao_id": 2584819,
-      "sigla": "RIC 7670/2025",
-      "data_tramitacao": "2026-01-15T00:00",
-      "registrado_em": "2026-01-15T08:28:28.651415-03:00"
-    },
-    {
-      "chave": "2589352_2026-01-15T08:27",
-      "proposicao_id": 2589352,
-      "sigla": "PL 6029/2025",
-      "data_tramitacao": "2026-01-15T08:27",
-      "registrado_em": "2026-01-15T09:05:18.203909-03:00"
-    },
-    {
-      "chave": "2582078_2026-01-15T08:36",
-      "proposicao_id": 2582078,
-      "sigla": "PL 5701/2025",
-      "data_tramitacao": "2026-01-15T08:36",
-      "registrado_em": "2026-01-15T09:05:20.601399-03:00"
-    }
-  ],
-  "ultima_limpeza": "2026-01-22T08:25:23.349446-03:00"
+  "notificadas": [],
+  "ultima_limpeza": "2026-01-22T10:50:04.328534-03:00"
 }
