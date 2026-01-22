@@ -1,9 +1,17 @@
-# monitor_sistema_jz.py - v30.1 AUDITADA E CORRIGIDA
+# monitor_sistema_jz.py - v31.0 INTEGRAÇÃO SENADO CORRIGIDA
+# 
+# ALTERAÇÕES v31.0:
+# - Removida aba separada "Senado Federal" (dados exibidos nas Abas 5 e 6)
+# - Consulta ao Senado SOMENTE quando situação = "Apreciação pelo Senado Federal"
+# - Número do projeto: IDÊNTICO na Câmara e no Senado (não existe conversão)
+# - Link direto para matéria no Senado (não link de busca)
+# - Logs no console para debug de buscas no Senado
+# - Cache de 6 horas para dados do Senado
 
 # ============================================================
-# FUNÇÕES DE INTEGRAÇÃO COM SENADO FEDERAL - v32
-# Monitora proposições da Julia Zanatta que foram aprovadas
-# e estão tramitando no Senado Federal
+# FUNÇÕES DE INTEGRAÇÃO COM SENADO FEDERAL - v33
+# Monitora proposições da Julia Zanatta que estão em
+# "Apreciação pelo Senado Federal"
 # ============================================================
 
 import re
@@ -37,48 +45,37 @@ def extrair_numero_pl_camera(proposicao: str) -> Optional[Tuple[str, str, str]]:
 
 def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> bool:
     """
-    Verifica se a proposição foi remetida ao Senado.
+    Verifica se a proposição está em apreciação pelo Senado Federal.
+    
+    REGRA DE NEGÓCIO: Como a Deputada Júlia Zanatta é deputada federal,
+    só consultamos o Senado quando o status indicar CLARAMENTE que a 
+    matéria está em "Apreciação pelo Senado Federal" ou variações equivalentes.
     
     Args:
         situacao_atual: Situação atual da proposição na Câmara
         despacho: Último despacho (opcional)
         
     Returns:
-        True se foi para o Senado
+        True se está em apreciação pelo Senado Federal
     """
     texto_completo = f"{situacao_atual} {despacho}".lower()
     
-    # Lista COMPLETA de indicadores
+    # Lista RESTRITA de indicadores - somente quando ESTÁ no Senado para apreciação
     indicadores = [
-        "remetida ao senado",
-        "remetido ao senado", 
-        "encaminhada ao senado",
-        "enviada ao senado",
-        "enviado ao senado",
-        "aprovada pela câmara",
-        "senado federal",
-        "enviado à revisão",
-        "enviado a revisão",
-        "casa revisora",
-        "aguardando apreciação pelo senado",
-        "aguardando apreciacao pelo senado",
+        "apreciação pelo senado federal",
+        "apreciacao pelo senado federal",
         "apreciação pelo senado",
         "apreciacao pelo senado",
-        "tramitando no senado",
-        "em tramitação no senado",
-        "em tramitacao no senado",
-        "remetida à revisão",
-        "remetida a revisão",
-        "revisão do senado",
-        "revisao do senado",
+        "aguardando apreciação pelo senado",
+        "aguardando apreciacao pelo senado",
         "para apreciação do senado",
-        "para apreciacao do senado"
+        "para apreciacao do senado",
     ]
     
     return any(indicador in texto_completo for indicador in indicadores)
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=21600, show_spinner=False)  # TTL de 6 horas (21600 segundos)
 def buscar_tramitacao_senado_mesmo_numero(
     tipo: str,
     numero: str,
@@ -86,7 +83,11 @@ def buscar_tramitacao_senado_mesmo_numero(
     debug: bool = False
 ) -> Optional[Dict]:
     """
-    Busca a tramitação no Senado usando o MESMO número da Câmara.
+    Busca a tramitação no Senado usando EXATAMENTE o MESMO número da Câmara.
+    
+    REGRA FUNDAMENTAL: O número do projeto é IDÊNTICO na Câmara e no Senado.
+    Exemplo: PLP 223/2024 na Câmara → busca PLP 223/2024 no Senado.
+    NÃO existe numeração diferente.
     
     Args:
         tipo: Tipo da proposição (ex: "PL", "PLP", "PEC")
@@ -97,6 +98,9 @@ def buscar_tramitacao_senado_mesmo_numero(
     Returns:
         Dict com dados do Senado ou None se não encontrado
     """
+    # LOG: Início da busca
+    print(f"[SENADO] Buscando: {tipo} {numero}/{ano}")
+    
     try:
         url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
         
@@ -124,12 +128,15 @@ def buscar_tramitacao_senado_mesmo_numero(
         )
         
         if response.status_code != 200:
+            # LOG: Status code não-OK
+            print(f"[SENADO] ⚠️ Status code: {response.status_code}")
             if debug:
                 st.warning(f"Status code: {response.status_code}")
             return None
         
         content_type = response.headers.get('content-type', '')
         if 'json' not in content_type.lower():
+            print(f"[SENADO] ⚠️ Content-type não é JSON: {content_type}")
             if debug:
                 st.warning(f"Content-type não é JSON: {content_type}")
             return None
@@ -137,6 +144,7 @@ def buscar_tramitacao_senado_mesmo_numero(
         data = response.json()
         
         if "PesquisaBasicaMateria" not in data:
+            print(f"[SENADO] ℹ️ Campo PesquisaBasicaMateria não encontrado na resposta")
             if debug:
                 st.info("Campo PesquisaBasicaMateria não encontrado")
             return None
@@ -144,6 +152,7 @@ def buscar_tramitacao_senado_mesmo_numero(
         pesquisa = data["PesquisaBasicaMateria"]
         
         if "Materias" not in pesquisa or "Materia" not in pesquisa["Materias"]:
+            print(f"[SENADO] ℹ️ Nenhuma matéria encontrada para essa busca")
             if debug:
                 st.info("Nenhuma matéria encontrada")
             return None
@@ -153,6 +162,7 @@ def buscar_tramitacao_senado_mesmo_numero(
             materias = [materias]
         
         if not materias:
+            print(f"[SENADO] ℹ️ Lista de matérias vazia")
             return None
         
         materia = materias[0]
@@ -171,6 +181,12 @@ def buscar_tramitacao_senado_mesmo_numero(
             "url_senado": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}",
         }
         
+        # LOG: Resultado encontrado
+        print(f"[SENADO] ✅ ENCONTRADO: {resultado['tipo_senado']} {resultado['numero_senado']}/{resultado['ano_senado']}")
+        print(f"[SENADO]    Código matéria: {codigo_materia}")
+        print(f"[SENADO]    URL direta: {resultado['url_senado']}")
+        print(f"[SENADO]    Situação: {resultado['situacao_senado']}")
+        
         if debug:
             st.success(f"✅ Encontrado: {resultado['tipo_senado']} {resultado['numero_senado']}/{resultado['ano_senado']}")
             st.write(f"Situação: {resultado['situacao_senado']}")
@@ -178,6 +194,8 @@ def buscar_tramitacao_senado_mesmo_numero(
         return resultado
         
     except Exception as e:
+        # LOG: Erro
+        print(f"[SENADO] ❌ ERRO ao buscar: {str(e)}")
         if debug:
             st.error(f"Erro ao buscar no Senado: {str(e)}")
         return None
@@ -186,7 +204,9 @@ def buscar_tramitacao_senado_mesmo_numero(
 def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False) -> Dict:
     """
     Adiciona informações do Senado a uma proposição da Câmara.
-    IMPORTANTE: Preserva TODAS as colunas originais!
+    
+    REGRA DE NEGÓCIO: Só consulta o Senado se a situação for "Apreciação pelo Senado Federal".
+    IMPORTANTE: O número da Câmara é IGUAL ao número do Senado (não existe conversão).
     
     Args:
         proposicao_dict: Dicionário com dados da proposição da Câmara
@@ -204,26 +224,31 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     resultado["url_senado"] = ""
     resultado["tipo_numero_senado"] = ""
     
-    # Verificar se foi para o Senado
+    # Verificar se está em apreciação pelo Senado
     situacao = proposicao_dict.get("Situação atual", "")
     despacho = proposicao_dict.get("despacho", "")
+    proposicao_str = proposicao_dict.get("Proposição", "") or proposicao_dict.get("Proposicao", "")
     
     if not verificar_se_foi_para_senado(situacao, despacho):
+        # LOG: Não é para buscar no Senado
+        print(f"[SENADO] ⏭️ IGNORANDO {proposicao_str} - situação '{situacao}' não requer busca no Senado")
         return resultado
     
-    # Extrair identificação da proposição
-    proposicao_str = proposicao_dict.get("Proposição", "")
-    if not proposicao_str:
-        proposicao_str = proposicao_dict.get("Proposicao", "")
+    # LOG: Vai buscar no Senado
+    print(f"[SENADO] 🔍 CONSULTANDO {proposicao_str} - situação '{situacao}' indica apreciação pelo Senado")
     
+    # Extrair identificação da proposição
     if not proposicao_str:
+        print(f"[SENADO] ⚠️ Proposição sem identificação, pulando...")
         return resultado
     
     partes = extrair_numero_pl_camera(proposicao_str)
     if not partes:
+        print(f"[SENADO] ⚠️ Não foi possível extrair tipo/número/ano de '{proposicao_str}'")
         return resultado
     
     tipo, numero, ano = partes
+    print(f"[SENADO] 📋 Usando MESMO número da Câmara: {tipo} {numero}/{ano}")
     
     # Buscar no Senado
     dados_senado = buscar_tramitacao_senado_mesmo_numero(
@@ -242,6 +267,8 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
         
         if debug:
             st.success(f"✅ {proposicao_str} encontrado no Senado")
+    else:
+        print(f"[SENADO] ℹ️ {proposicao_str} não encontrado no Senado (pode não ter chegado ainda)")
     
     return resultado
 
@@ -253,6 +280,8 @@ def processar_lista_com_senado(
 ) -> pd.DataFrame:
     """
     Processa um DataFrame de proposições, adicionando informações do Senado.
+    
+    REGRA: Só consulta o Senado para proposições com situação "Apreciação pelo Senado Federal".
     IMPORTANTE: Preserva TODAS as colunas originais do DataFrame!
     
     Args:
@@ -282,18 +311,31 @@ def processar_lista_com_senado(
     
     proposicoes_enriquecidas = []
     total = len(proposicoes_list)
+    erros_api = 0
     
     for i, prop in enumerate(proposicoes_list):
-        if progress_bar:
-            progress_bar.progress((i + 1) / total)
-            status_text.text(f"Verificando proposição {i+1} de {total}...")
-        
-        prop_enriquecida = enriquecer_proposicao_com_senado(prop, debug=debug)
-        proposicoes_enriquecidas.append(prop_enriquecida)
-        
-        if i < total - 1:
-            import time
-            time.sleep(0.1)
+        try:
+            if progress_bar:
+                progress_bar.progress((i + 1) / total)
+                status_text.text(f"Verificando proposição {i+1} de {total}...")
+            
+            prop_enriquecida = enriquecer_proposicao_com_senado(prop, debug=debug)
+            proposicoes_enriquecidas.append(prop_enriquecida)
+            
+            if i < total - 1:
+                import time
+                time.sleep(0.1)
+        except Exception as e:
+            # LOG: Erro ao processar proposição específica
+            print(f"[SENADO] ❌ Erro ao processar proposição {i+1}: {str(e)}")
+            erros_api += 1
+            # Adiciona a proposição original sem dados do Senado
+            prop_original = prop.copy()
+            prop_original["no_senado"] = False
+            prop_original["situacao_senado"] = "Sem dados do Senado (falha na consulta)"
+            prop_original["url_senado"] = ""
+            prop_original["tipo_numero_senado"] = ""
+            proposicoes_enriquecidas.append(prop_original)
     
     if progress_bar:
         progress_bar.empty()
@@ -314,6 +356,10 @@ def processar_lista_com_senado(
             st.success(f"✅ {total_senado} proposição(ões) encontrada(s) tramitando no Senado")
         else:
             st.info("ℹ️ Nenhuma proposição encontrada no Senado")
+    
+    # Informar sobre erros
+    if erros_api > 0:
+        st.warning(f"⚠️ {erros_api} proposição(ões) com falha na consulta ao Senado")
     
     return df_enriquecido
 
@@ -6620,9 +6666,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     st.markdown("---")
 
     # ============================================================
-    # ABAS REORGANIZADAS (7 abas)
+    # ABAS REORGANIZADAS (8 abas - SEM aba separada do Senado)
+    # Dados do Senado são exibidos nas Abas 5 e 6 quando aplicável
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
@@ -6630,7 +6677,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
         "7️⃣ RICs (Requerimentos de Informação)",
-        "🏛️ Senado Federal",
         "📧 Receber Notificações"
     ])
 
@@ -8584,195 +8630,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
 
 
-
     # ============================================================
-    # ABA 9 - SENADO FEDERAL (NOVA v30!)
+    # NOTA: A aba do Senado foi removida conforme especificação.
+    # Os dados do Senado são exibidos nas Abas 5 e 6 apenas quando
+    # a situação da proposição for "Apreciação pelo Senado Federal".
     # ============================================================
-    with tab9:
-        st.header("🏛️ Senado Federal - Monitoramento Julia Zanatta")
-        
-        st.markdown("""
-        Esta aba busca **automaticamente** no Senado Federal:
-        - 📄 Matérias que mencionam "Julia Zanatta"
-        - 🎤 Proposições com autoria relacionada
-        - 📊 Tramitações e situações atuais
-        """)
-        
-        # Modo debug (admin only)
-        debug_mode = False
-        if st.session_state.get("usuario_logado") == "admin":
-            debug_mode = st.checkbox("🔧 Modo Debug (apenas admin)", value=False, key="debug_senado")
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            termo_busca = st.text_input(
-                "🔍 Termo de busca",
-                value="Julia Zanatta",
-                help="Buscar menções no Senado",
-                key="termo_busca_senado"
-            )
-        
-        with col2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            btn_buscar = st.button("🔍 Buscar no Senado", type="primary", use_container_width=True, key="btn_buscar_senado")
-        
-        if btn_buscar or "df_senado" in st.session_state:
-            with st.spinner("🔄 Buscando matérias no Senado Federal..."):
-                df_senado = buscar_materias_senado(termo_busca, limite=100, debug=debug_mode)
-                st.session_state.df_senado = df_senado
-            
-            if not df_senado.empty:
-                st.success(f"✅ Encontradas **{len(df_senado)}** matérias no Senado")
-                
-                # Estatísticas
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Total de Matérias", len(df_senado))
-                
-                with col2:
-                    if "Ano" in df_senado.columns:
-                        anos_unicos = df_senado["Ano"].nunique()
-                        st.metric("Anos", anos_unicos)
-                    else:
-                        st.metric("Anos", "N/A")
-                
-                with col3:
-                    if "Sigla" in df_senado.columns:
-                        tipos_unicos = df_senado["Sigla"].nunique()
-                        st.metric("Tipos", tipos_unicos)
-                    else:
-                        st.metric("Tipos", "N/A")
-                
-                with col4:
-                    if "Autor" in df_senado.columns:
-                        autores_unicos = df_senado["Autor"].nunique()
-                        st.metric("Autores", autores_unicos)
-                    else:
-                        st.metric("Autores", "N/A")
-                
-                st.markdown("---")
-                
-                # Filtros
-                with st.expander("🎛️ Filtros", expanded=False):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        if "Ano" in df_senado.columns:
-                            anos = sorted(df_senado["Ano"].unique(), reverse=True)
-                            ano_selecionado = st.multiselect("📅 Ano", anos, default=anos[:3] if len(anos) >= 3 else anos, key="filtro_ano_senado")
-                        else:
-                            ano_selecionado = []
-                    
-                    with col2:
-                        if "Sigla" in df_senado.columns:
-                            tipos = sorted(df_senado["Sigla"].unique())
-                            tipo_selecionado = st.multiselect("📋 Tipo", tipos, key="filtro_tipo_senado")
-                        else:
-                            tipo_selecionado = []
-                    
-                    with col3:
-                        if "Autor" in df_senado.columns:
-                            autores = sorted(df_senado["Autor"].unique())
-                            autor_selecionado = st.multiselect("👤 Autor", autores, key="filtro_autor_senado")
-                        else:
-                            autor_selecionado = []
-                
-                # Aplicar filtros
-                df_filtrado = df_senado.copy()
-                
-                if ano_selecionado and "Ano" in df_filtrado.columns:
-                    df_filtrado = df_filtrado[df_filtrado["Ano"].isin(ano_selecionado)]
-                
-                if tipo_selecionado and "Sigla" in df_filtrado.columns:
-                    df_filtrado = df_filtrado[df_filtrado["Sigla"].isin(tipo_selecionado)]
-                
-                if autor_selecionado and "Autor" in df_filtrado.columns:
-                    df_filtrado = df_filtrado[df_filtrado["Autor"].isin(autor_selecionado)]
-                
-                # Tabela de resultados
-                st.subheader(f"📊 Matérias Encontradas ({len(df_filtrado)})")
-                
-                # Preparar colunas para exibição
-                colunas_exibir = ["Proposicao", "Ementa", "Autor", "Data", "Casa", "URL"]
-                colunas_exibir = [c for c in colunas_exibir if c in df_filtrado.columns]
-                
-                # Configurar dataframe
-                st.dataframe(
-                    df_filtrado[colunas_exibir],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "URL": st.column_config.LinkColumn("🔗 Link", display_text="Abrir no Senado"),
-                        "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-                        "Proposicao": st.column_config.TextColumn("Proposição", width="medium"),
-                    },
-                    key="df_senado_display"
-                )
-                
-                # Download
-                st.markdown("---")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Preparar CSV
-                    csv = df_filtrado.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        "⬇️ Baixar CSV",
-                        data=csv,
-                        file_name=f"senado_julia_zanatta_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        key="download_senado_csv"
-                    )
-                
-                with col2:
-                    # Preparar Excel
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df_filtrado.to_excel(writer, index=False, sheet_name='Matérias Senado')
-                    excel_data = output.getvalue()
-                    
-                    st.download_button(
-                        "⬇️ Baixar Excel",
-                        data=excel_data,
-                        file_name=f"senado_julia_zanatta_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        key="download_senado_excel"
-                    )
-                
-                # Gráficos
-                st.markdown("---")
-                st.subheader("📊 Análises Visuais")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Gráfico por ano
-                    if "Ano" in df_filtrado.columns and not df_filtrado.empty:
-                        st.markdown("### 📅 Matérias por Ano")
-                        materias_ano = df_filtrado["Ano"].value_counts().sort_index()
-                        st.bar_chart(materias_ano)
-                
-                with col2:
-                    # Gráfico por tipo
-                    if "Sigla" in df_filtrado.columns and not df_filtrado.empty:
-                        st.markdown("### 📋 Matérias por Tipo")
-                        materias_tipo = df_filtrado["Sigla"].value_counts().head(10)
-                        st.bar_chart(materias_tipo)
-                
-            else:
-                st.warning("⚠️ Nenhuma matéria encontrada com o termo pesquisado")
-                st.info("💡 Tente termos mais genéricos ou verifique a ortografia")
-        
-        else:
-            st.info("👆 Clique em **Buscar no Senado** para começar")
-        
-        st.markdown("---")
-        st.caption("🏛️ Dados do Senado Federal | API oficial Dados Abertos")
 
     st.markdown("---")
 
