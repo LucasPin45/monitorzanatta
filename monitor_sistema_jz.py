@@ -6,7 +6,8 @@
 # - Busca em múltiplos campos: Proposição, ementa, ID, número
 # - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
 # - BUSCA HÍBRIDA: busca local + API, combina resultados
-# - Marca corretamente quais são de autoria da deputada
+# - NOVA: verificar_autoria_proposicao() - verifica CO-AUTORIAS via API /autores
+# - Corrige problema onde co-autorias não eram identificadas
 # - FIX: Adicionado @st.cache_data em fetch_proposicao_completa (erro .clear())
 #
 # ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
@@ -6782,6 +6783,59 @@ def buscar_proposicao_direta(sigla_tipo: str, numero: str, ano: str) -> Optional
         return None
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def verificar_autoria_proposicao(id_proposicao: str, id_deputada: int) -> bool:
+    """
+    Verifica se um deputado é autor/co-autor de uma proposição.
+    
+    Consulta diretamente a API /proposicoes/{id}/autores
+    
+    Args:
+        id_proposicao: ID da proposição
+        id_deputada: ID do deputado
+        
+    Returns:
+        True se o deputado é autor/co-autor
+    """
+    import requests
+    
+    pid = str(id_proposicao).strip()
+    if not pid:
+        return False
+    
+    url = f"{BASE_URL}/proposicoes/{pid}/autores"
+    
+    try:
+        resp = requests.get(url, timeout=15)
+        if resp.status_code != 200:
+            return False
+        
+        data = resp.json()
+        autores = data.get("dados", [])
+        
+        id_dep_str = str(id_deputada)
+        
+        for autor in autores:
+            # O ID pode estar na URI do autor
+            uri = autor.get("uri", "") or ""
+            if uri:
+                # Extrair ID da URI (ex: .../deputados/220559)
+                autor_id = uri.rstrip("/").split("/")[-1]
+                if autor_id == id_dep_str:
+                    return True
+            
+            # Também verificar por nome (backup)
+            nome = (autor.get("nome", "") or "").lower()
+            if "julia zanatta" in nome or "júlia zanatta" in nome:
+                return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"[VERIFICAR-AUTORIA] Erro: {e}")
+        return False
+
+
 def parse_proposicao_input(texto: str) -> Optional[Tuple[str, str, str]]:
     """
     Extrai sigla, número e ano de uma string de proposição.
@@ -8686,28 +8740,38 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         if resultados_api:
                             # Criar set de IDs da busca local
                             ids_local = set(df_rast["id"].astype(str).tolist()) if not df_rast.empty else set()
-                            ids_autoria = set(df_aut["id"].astype(str).tolist()) if not df_aut.empty else set()
+                            ids_autoria_local = set(df_aut["id"].astype(str).tolist()) if not df_aut.empty else set()
                             
                             # Classificar resultados da API
+                            # AGORA VERIFICA AUTORIA VIA API DE AUTORES (para pegar co-autorias)
                             resultados_autoria = []
                             resultados_outros = []
                             novos_resultados = []
                             
-                            for r in resultados_api:
-                                rid = str(r.get("id", ""))
-                                is_autoria = rid in ids_autoria
-                                r["_is_autoria"] = is_autoria
-                                
-                                if is_autoria:
-                                    resultados_autoria.append(r)
-                                else:
-                                    resultados_outros.append(r)
-                                
-                                # Adicionar aos novos se não estava na busca local
-                                if rid not in ids_local:
-                                    novos_resultados.append(r)
+                            with st.spinner("Verificando autorias..."):
+                                for r in resultados_api:
+                                    rid = str(r.get("id", ""))
+                                    
+                                    # Primeiro verifica no cache local
+                                    is_autoria = rid in ids_autoria_local
+                                    
+                                    # Se não está no cache local, VERIFICA NA API DE AUTORES
+                                    # (isso pega co-autorias que o idDeputadoAutor não retorna)
+                                    if not is_autoria:
+                                        is_autoria = verificar_autoria_proposicao(rid, id_deputada)
+                                    
+                                    r["_is_autoria"] = is_autoria
+                                    
+                                    if is_autoria:
+                                        resultados_autoria.append(r)
+                                    else:
+                                        resultados_outros.append(r)
+                                    
+                                    # Adicionar aos novos se não estava na busca local
+                                    if rid not in ids_local:
+                                        novos_resultados.append(r)
                             
-                            # Se encontrou proposições de autoria que não estavam na busca local, adicionar
+                            # Se encontrou proposições que não estavam na busca local, adicionar
                             if novos_resultados:
                                 df_novos = pd.DataFrame(novos_resultados)
                                 if df_rast.empty:
@@ -8721,11 +8785,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                                 props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
                                 props_outros = ", ".join([r.get('Proposicao', '?') for r in resultados_outros])
                                 st.success(f"✅ Encontradas **{len(resultados_api)}** proposições:\n"
-                                          f"- **De autoria:** {props_autoria}\n"
+                                          f"- **De autoria/co-autoria:** {props_autoria}\n"
                                           f"- **Outras:** {props_outros}")
                             elif resultados_autoria:
                                 props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
-                                st.success(f"✅ **{props_autoria}** encontrada(s)! (de autoria da deputada)")
+                                st.success(f"✅ **{props_autoria}** encontrada(s)! (de autoria/co-autoria da deputada)")
                             else:
                                 anos_encontrados = [r.get('ano', '?') for r in resultados_api]
                                 st.success(f"✅ Encontradas **{len(resultados_api)}** proposições: {sigla_busca} {num_busca} nos anos {', '.join(anos_encontrados)} (não são de autoria da deputada)")
