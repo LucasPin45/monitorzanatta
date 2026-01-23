@@ -1961,7 +1961,7 @@ PROPOSICOES_FALTANTES_API = {
             "siglaTipo": "PL",
             "numero": "321",
             "ano": "2023",
-            "ementa": "Altera a Lei nº 8.069, de 13 de julho de 1990 (Estatuto da Criança e do Adolescente), para dispor sobre a divulgação de informação acerca de criança e adolescente a quem se atribua ato infracional."
+            "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941, para dispor sobre a possibilidade de realização da audiência de custódia por videoconferência."
         },
     ]
 }
@@ -8555,15 +8555,34 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
                     # Substituir Relator e Órgão pelos dados do Senado quando disponíveis
                     if "Relator_Senado" in df_tbl.columns:
-                        # Criar coluna "Relator Exibido" que mostra Senado quando disponível
-                        df_tbl["Relator_Exibido"] = df_tbl.apply(
-                            lambda row: row.get("Relator_Senado", "") if row.get("no_senado") and row.get("Relator_Senado") else row.get("Relator(a)", ""),
-                            axis=1
-                    )
-                    df_tbl["Orgao_Exibido"] = df_tbl.apply(
-                        lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
-                        axis=1
-                    )
+                        # v33 CORRIGIDO: Se está no Senado, SEMPRE usa dados do Senado
+                        # (mesmo que vazios, para não mostrar relator antigo da Câmara)
+                        def get_relator_integrado(row):
+                            if row.get("no_senado"):
+                                relator_senado = row.get("Relator_Senado", "")
+                                if relator_senado and relator_senado.strip():
+                                    return relator_senado
+                                else:
+                                    return "—"  # Sem relator no Senado ainda
+                            return row.get("Relator(a)", "")
+                        
+                        def get_orgao_integrado(row):
+                            if row.get("no_senado"):
+                                orgao_senado = row.get("Orgao_Senado_Sigla", "")
+                                if orgao_senado and orgao_senado.strip():
+                                    return orgao_senado
+                                else:
+                                    # Tentar pegar do último andamento se disponível
+                                    movs = str(row.get("UltimasMov_Senado", ""))
+                                    if movs and " | " in movs:
+                                        partes = movs.split("\n")[0].split(" | ")
+                                        if len(partes) >= 2 and partes[1].strip():
+                                            return partes[1].strip()
+                                    return "MESA"  # Padrão quando ainda não foi distribuído
+                            return row.get("Órgão (sigla)", "")
+                        
+                        df_tbl["Relator_Exibido"] = df_tbl.apply(get_relator_integrado, axis=1)
+                        df_tbl["Orgao_Exibido"] = df_tbl.apply(get_orgao_integrado, axis=1)
                     
                     # NOVO v32.1: Atualizar Último andamento, Data e Parado com dados do Senado
                     def get_ultimo_andamento_integrado(row):
@@ -9132,14 +9151,33 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 if incluir_senado_tab6 and "no_senado" in df_tbl_status.columns:
                     # Criar colunas que mostram dados do Senado quando disponíveis
                     if "Relator_Senado" in df_tbl_status.columns:
-                        df_tbl_status["Relator_Exibido"] = df_tbl_status.apply(
-                            lambda row: row.get("Relator_Senado", "") if row.get("no_senado") and row.get("Relator_Senado") else row.get("Relator(a)", "—"),
-                            axis=1
-                        )
-                        df_tbl_status["Orgao_Exibido"] = df_tbl_status.apply(
-                            lambda row: row.get("Orgao_Senado_Sigla", "") if row.get("no_senado") and row.get("Orgao_Senado_Sigla") else row.get("Órgão (sigla)", ""),
-                            axis=1
-                        )
+                        # v33 CORRIGIDO: Se está no Senado, SEMPRE usa dados do Senado
+                        def get_relator_integrado_tab6(row):
+                            if row.get("no_senado"):
+                                relator_senado = row.get("Relator_Senado", "")
+                                if relator_senado and relator_senado.strip():
+                                    return relator_senado
+                                else:
+                                    return "—"  # Sem relator no Senado ainda
+                            return row.get("Relator(a)", "—")
+                        
+                        def get_orgao_integrado_tab6(row):
+                            if row.get("no_senado"):
+                                orgao_senado = row.get("Orgao_Senado_Sigla", "")
+                                if orgao_senado and orgao_senado.strip():
+                                    return orgao_senado
+                                else:
+                                    # Tentar pegar do último andamento se disponível
+                                    movs = str(row.get("UltimasMov_Senado", ""))
+                                    if movs and " | " in movs:
+                                        partes = movs.split("\n")[0].split(" | ")
+                                        if len(partes) >= 2 and partes[1].strip():
+                                            return partes[1].strip()
+                                    return "MESA"  # Padrão quando ainda não foi distribuído
+                            return row.get("Órgão (sigla)", "")
+                        
+                        df_tbl_status["Relator_Exibido"] = df_tbl_status.apply(get_relator_integrado_tab6, axis=1)
+                        df_tbl_status["Orgao_Exibido"] = df_tbl_status.apply(get_orgao_integrado_tab6, axis=1)
                         
                         # NOVO v32.1: Atualizar Última tramitação e Parado há com dados do Senado
                         def get_ultima_tram_integrado_tab6(row):
