@@ -7,6 +7,7 @@
 # - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
 # - BUSCA HÍBRIDA: busca local + API, combina resultados
 # - NOVA: verificar_autoria_proposicao() - verifica CO-AUTORIAS via API /autores
+# - NOVA: Busca apenas número (ex: "321") tenta PL/PLP/PEC/PDL automaticamente
 # - Corrige problema onde co-autorias não eram identificadas
 # - FIX: Adicionado @st.cache_data em fetch_proposicao_completa (erro .clear())
 #
@@ -8723,19 +8724,35 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     # Primeiro tenta busca local robusta
                     df_rast = busca_robusta_df(df_aut, q)
                     
-                    # Se parsed e não encontrou localmente (ou encontrou pouco), complementa com API
-                    if parsed and not parsed[2]:  # Tem sigla+número mas sem ano
-                        sigla_busca, num_busca, _ = parsed
+                    # Verifica se o termo é apenas um número (ex: "321")
+                    termo_limpo = q.strip()
+                    apenas_numero = termo_limpo.isdigit() and len(termo_limpo) >= 2
+                    
+                    # Se parsed (tem sigla+número) OU se é apenas número, complementa com API
+                    if (parsed and not parsed[2]) or apenas_numero:
+                        if parsed and not parsed[2]:
+                            # Tem sigla+número (ex: "pl 321")
+                            sigla_busca, num_busca, _ = parsed
+                            siglas_tentar = [sigla_busca]
+                        else:
+                            # Apenas número (ex: "321") - tentar principais siglas
+                            num_busca = termo_limpo
+                            siglas_tentar = ["PL", "PLP", "PEC", "PDL"]
                         
                         # Buscar todos os anos na API
                         anos_tentar = ["2025", "2024", "2023", "2022", "2021", "2020", "2019"]
                         resultados_api = []
                         
-                        with st.spinner(f"🔍 Buscando {sigla_busca} {num_busca} na API (verificando anos 2019-2025)..."):
-                            for ano_tentativa in anos_tentar:
-                                resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_tentativa)
-                                if resultado:
-                                    resultados_api.append(resultado)
+                        siglas_display = "/".join(siglas_tentar) if len(siglas_tentar) > 1 else siglas_tentar[0]
+                        with st.spinner(f"🔍 Buscando {siglas_display} {num_busca} na API (verificando anos 2019-2025)..."):
+                            for sigla_tentativa in siglas_tentar:
+                                for ano_tentativa in anos_tentar:
+                                    resultado = buscar_proposicao_direta(sigla_tentativa, num_busca, ano_tentativa)
+                                    if resultado:
+                                        # Evitar duplicatas
+                                        rid = str(resultado.get("id", ""))
+                                        if not any(str(r.get("id", "")) == rid for r in resultados_api):
+                                            resultados_api.append(resultado)
                         
                         if resultados_api:
                             # Criar set de IDs da busca local
@@ -8784,19 +8801,19 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             if resultados_autoria and resultados_outros:
                                 props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
                                 props_outros = ", ".join([r.get('Proposicao', '?') for r in resultados_outros])
-                                st.success(f"✅ Encontradas **{len(resultados_api)}** proposições:\n"
+                                st.success(f"✅ Encontradas **{len(resultados_api)}** proposições via API:\n"
                                           f"- **De autoria/co-autoria:** {props_autoria}\n"
                                           f"- **Outras:** {props_outros}")
                             elif resultados_autoria:
                                 props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
                                 st.success(f"✅ **{props_autoria}** encontrada(s)! (de autoria/co-autoria da deputada)")
-                            else:
-                                anos_encontrados = [r.get('ano', '?') for r in resultados_api]
-                                st.success(f"✅ Encontradas **{len(resultados_api)}** proposições: {sigla_busca} {num_busca} nos anos {', '.join(anos_encontrados)} (não são de autoria da deputada)")
+                            elif apenas_numero and resultados_outros:
+                                # Se buscou apenas número e encontrou proposições (mas não de autoria), mostrar
+                                props_outros = ", ".join([r.get('Proposicao', '?') for r in resultados_outros])
+                                st.info(f"ℹ️ Encontradas **{len(resultados_outros)}** proposições com número {num_busca}: {props_outros} (não são de autoria da deputada)")
                         
-                        elif df_rast.empty:
-                            st.warning(f"⚠️ **{sigla_busca} {num_busca}** não encontrada nos anos 2019-2025. "
-                                      f"Tente especificar o ano exato: `{sigla_busca} {num_busca}/AAAA`")
+                        elif apenas_numero and df_rast.empty:
+                            st.info(f"ℹ️ Nenhuma proposição PL/PLP/PEC/PDL {num_busca} encontrada nos anos 2019-2025.")
                     
                     st.caption(f"🔍 Busca em **todas** as {len(df_aut)} proposições de autoria")
             else:
