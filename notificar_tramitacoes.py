@@ -7,11 +7,9 @@ Monitor de tramitações da Deputada Júlia Zanatta
 Verifica novas movimentações e notifica via Telegram + Email
 
 v6: 
-- Modo aviso_manutencao: envia aviso quando Câmara está em manutenção
-- Modo sistema_normalizado: envia aviso quando sistema volta ao normal
-- Telegram + Email para ambos os avisos
-
-v5: 
+- INTEGRAÇÃO COM SENADO
+- Quando projeto está no Senado: 🔵 ZANATTA NO SENADO
+- Busca tramitações tanto da Câmara quanto do Senado
 - Lógica diferenciada Telegram vs Email
 - Email só recebe: tramitações encontradas + resumo do dia
 - Telegram recebe tudo (bom dia, sem novidades, tramitações, resumo)
@@ -35,8 +33,11 @@ from pathlib import Path
 # CONFIGURAÇÕES
 # ============================================================
 
+# APIs
 BASE_URL = "https://dadosabertos.camara.leg.br/api/v2"
+SENADO_BASE_URL = "https://legis.senado.leg.br/dadosabertos"
 HEADERS = {"User-Agent": "MonitorZanatta/24.0 (gabinete-julia-zanatta)"}
+HEADERS_SENADO = {"User-Agent": "MonitorZanatta/24.0", "Accept": "application/json"}
 
 DEPUTADA_ID = 220559  # Júlia Zanatta
 
@@ -77,14 +78,11 @@ EMAIL_RECIPIENTS = ",".join(_todos_emails)
 NOTIFICAR_TELEGRAM = os.getenv("NOTIFICAR_TELEGRAM", "true").lower() == "true"
 NOTIFICAR_EMAIL = os.getenv("NOTIFICAR_EMAIL", "true").lower() == "true"
 
-# Incluir aviso de manutenção no resumo do dia (use "true" para ativar)
-INCLUIR_AVISO_MANUTENCAO = os.getenv("INCLUIR_AVISO_MANUTENCAO", "false").lower() == "true"
-
-# Modo de execução (bom_dia, varredura, resumo, aviso_manutencao, sistema_normalizado)
+# Modo de execução (bom_dia, varredura, resumo)
 MODO_EXECUCAO = os.getenv("MODO_EXECUCAO", "varredura")
 
 # Tipos de proposição a monitorar
-TIPOS_MONITORADOS = ["PL", "PLP", "PDL", "RIC", "REQ", "PRL"]
+TIPOS_MONITORADOS = ["PL", "PLP", "PDL", "PEC", "RIC", "REQ", "PRL"]
 DATA_INICIO_MANDATO = "2023-02-01"
 
 # Arquivos de estado
@@ -159,28 +157,29 @@ def limpar_historico_antigo(historico):
     return historico
 
 
-def gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao):
+def gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao, origem="camara"):
     data_normalizada = str(data_hora_tramitacao)[:19] if data_hora_tramitacao else "sem_data"
-    return f"{proposicao_id}_{data_normalizada}"
+    return f"{origem}_{proposicao_id}_{data_normalizada}"
 
 
-def ja_foi_notificada(historico, proposicao_id, data_hora_tramitacao):
-    chave = gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao)
+def ja_foi_notificada(historico, proposicao_id, data_hora_tramitacao, origem="camara"):
+    chave = gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao, origem)
     for item in historico.get("notificadas", []):
         if item.get("chave") == chave:
             return True
     return False
 
 
-def registrar_notificacao(historico, proposicao_id, data_hora_tramitacao, sigla_proposicao):
-    chave = gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao)
+def registrar_notificacao(historico, proposicao_id, data_hora_tramitacao, sigla_proposicao, origem="camara"):
+    chave = gerar_chave_tramitacao(proposicao_id, data_hora_tramitacao, origem)
     agora = datetime.now(FUSO_BRASILIA).isoformat()
     historico["notificadas"].append({
         "chave": chave,
         "proposicao_id": proposicao_id,
         "sigla": sigla_proposicao,
         "data_tramitacao": str(data_hora_tramitacao)[:19] if data_hora_tramitacao else None,
-        "registrado_em": agora
+        "registrado_em": agora,
+        "origem": origem
     })
     return historico
 
@@ -217,13 +216,17 @@ def inicializar_resumo_dia():
     return resumo
 
 
-def adicionar_ao_resumo(resumo, sigla_proposicao):
+def adicionar_ao_resumo(resumo, sigla_proposicao, no_senado=False):
     agora = datetime.now(FUSO_BRASILIA)
     data_hoje = agora.strftime("%Y-%m-%d")
     if resumo.get("data") != data_hoje:
         resumo = {"data": data_hoje, "tramitacoes": []}
-    if sigla_proposicao not in resumo["tramitacoes"]:
-        resumo["tramitacoes"].append(sigla_proposicao)
+    
+    # Adiciona marcador se for do Senado
+    sigla_com_origem = f"🔵 {sigla_proposicao}" if no_senado else sigla_proposicao
+    
+    if sigla_com_origem not in resumo["tramitacoes"]:
+        resumo["tramitacoes"].append(sigla_com_origem)
     return resumo
 
 
@@ -242,6 +245,241 @@ def obter_data_hora_brasilia():
     agora_brasilia = agora_utc.astimezone(FUSO_BRASILIA)
     return agora_brasilia.strftime("%d/%m/%Y às %H:%M")
 
+
+# ============================================================
+# FUNÇÕES - VERIFICAÇÃO SENADO
+# ============================================================
+
+def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> bool:
+    """
+    Verifica se a proposição está em apreciação pelo Senado Federal.
+    """
+    texto_completo = f"{situacao_atual} {despacho}".lower()
+    
+    indicadores = [
+        "apreciação pelo senado federal",
+        "apreciacao pelo senado federal",
+        "apreciação pelo senado",
+        "apreciacao pelo senado",
+        "aguardando apreciação pelo senado",
+        "aguardando apreciacao pelo senado",
+        "para apreciação do senado",
+        "para apreciacao do senado",
+        "remetida ao senado federal",
+        "remetido ao senado federal",
+        "remessa ao senado federal",
+        "enviada ao senado federal",
+        "enviado ao senado federal",
+        "encaminhada ao senado federal",
+        "encaminhado ao senado federal",
+        "tramitando no senado",
+        "em tramitação no senado",
+        "tramitação no senado",
+        "à mesa do senado",
+        "ao senado federal",
+        "ofício de remessa ao senado",
+        "sgm-p",
+    ]
+    
+    return any(indicador in texto_completo for indicador in indicadores)
+
+
+def buscar_situacao_camara(proposicao_id):
+    """Busca a situação atual da proposição na Câmara."""
+    url = f"{BASE_URL}/proposicoes/{proposicao_id}"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        dados = data.get("dados", {})
+        status = dados.get("statusProposicao", {})
+        return {
+            "situacao": status.get("descricaoSituacao", ""),
+            "despacho": status.get("despacho", ""),
+            "orgao": status.get("siglaOrgao", "")
+        }
+    except Exception:
+        return {"situacao": "", "despacho": "", "orgao": ""}
+
+
+# ============================================================
+# FUNÇÕES - API SENADO
+# ============================================================
+
+def buscar_dados_senado(tipo: str, numero: str, ano: str):
+    """
+    Busca dados básicos de uma proposição no Senado.
+    Retorna dict com código da matéria, id do processo, situação, url.
+    """
+    tipo_norm = (tipo or "").strip().upper()
+    numero_norm = (numero or "").strip()
+    ano_norm = (ano or "").strip()
+    
+    if not (tipo_norm and numero_norm and ano_norm):
+        return None
+    
+    url = f"{SENADO_BASE_URL}/processo?sigla={tipo_norm}&numero={numero_norm}&ano={ano_norm}&v=1"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS_SENADO, timeout=20)
+        
+        if resp.status_code == 404:
+            return None
+        
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        
+        if not data:
+            return None
+        
+        itens = data if isinstance(data, list) else [data]
+        
+        identificacao_alvo = f"{tipo_norm} {numero_norm}/{ano_norm}"
+        escolhido = None
+        for it in itens:
+            ident = (it.get("identificacao") or "").strip()
+            if ident.upper() == identificacao_alvo.upper():
+                escolhido = it
+                break
+        if escolhido is None:
+            escolhido = itens[0]
+        
+        codigo_materia = str(escolhido.get("codigoMateria") or "").strip()
+        id_processo = str(escolhido.get("id") or "").strip()
+        
+        if not codigo_materia:
+            return None
+        
+        url_deep = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}"
+        
+        return {
+            "codigo_materia": codigo_materia,
+            "id_processo": id_processo,
+            "url_senado": url_deep,
+        }
+    
+    except Exception as e:
+        print(f"   ⚠️ Erro ao consultar Senado: {e}")
+        return None
+
+
+def buscar_movimentacoes_senado(id_processo: str, limite: int = 10):
+    """
+    Busca movimentações de uma proposição no Senado.
+    Retorna lista de movimentações ordenadas por data (mais recente primeiro).
+    """
+    if not id_processo:
+        return []
+    
+    url = f"{SENADO_BASE_URL}/processo/{id_processo}/movimentacoes?v=1"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS_SENADO, timeout=20)
+        
+        if resp.status_code != 200:
+            return []
+        
+        data = resp.json()
+        
+        if not data:
+            return []
+        
+        movimentacoes = data if isinstance(data, list) else [data]
+        
+        # Ordenar por data (mais recente primeiro)
+        def parse_data(mov):
+            data_str = mov.get("data") or mov.get("dataMovimento") or ""
+            try:
+                return datetime.fromisoformat(data_str.replace("Z", ""))
+            except:
+                return datetime.min
+        
+        movimentacoes_ordenadas = sorted(movimentacoes, key=parse_data, reverse=True)
+        
+        return movimentacoes_ordenadas[:limite]
+    
+    except Exception as e:
+        print(f"   ⚠️ Erro ao buscar movimentações Senado: {e}")
+        return []
+
+
+def buscar_status_senado(id_processo: str):
+    """
+    Busca situação atual e órgão no Senado via /processo/{id}.
+    """
+    if not id_processo:
+        return {"situacao": "", "orgao": ""}
+    
+    url = f"{SENADO_BASE_URL}/processo/{id_processo}?v=1"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS_SENADO, timeout=20)
+        
+        if resp.status_code != 200:
+            return {"situacao": "", "orgao": ""}
+        
+        proc = resp.json()
+        
+        if isinstance(proc, dict):
+            autuacoes = proc.get("autuacoes") or []
+            if autuacoes and isinstance(autuacoes, list):
+                a0 = autuacoes[0] or {}
+                orgao = (a0.get("siglaColegiadoControleAtual") or "").strip()
+                
+                situacoes = a0.get("situacoes") or []
+                situacao = ""
+                if isinstance(situacoes, list) and situacoes:
+                    ativa = None
+                    for s in reversed(situacoes):
+                        if not s.get("fim"):
+                            ativa = s
+                            break
+                    if not ativa:
+                        ativa = situacoes[-1]
+                    situacao = (ativa.get("descricao") or "").strip()
+                
+                return {"situacao": situacao, "orgao": orgao}
+        
+        return {"situacao": "", "orgao": ""}
+    
+    except Exception:
+        return {"situacao": "", "orgao": ""}
+
+
+def tramitacao_senado_recente(movimentacao: dict, horas: int = 48) -> bool:
+    """Verifica se uma movimentação do Senado é recente."""
+    if not movimentacao:
+        return False
+    
+    data_str = movimentacao.get("data") or movimentacao.get("dataMovimento") or ""
+    
+    if not data_str:
+        return False
+    
+    try:
+        # Tentar diferentes formatos
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+            try:
+                data_mov = datetime.strptime(data_str[:19], fmt)
+                break
+            except:
+                continue
+        else:
+            data_mov = datetime.strptime(data_str[:10], "%Y-%m-%d")
+        
+        agora = datetime.now()
+        diferenca = agora - data_mov
+        return diferenca.total_seconds() <= (horas * 3600)
+    
+    except Exception:
+        return False
+
+
+# ============================================================
+# FUNÇÕES - API CÂMARA
+# ============================================================
 
 def buscar_proposicoes_por_tipo(deputado_id, sigla_tipo):
     proposicoes = []
@@ -328,6 +566,7 @@ def tramitacao_recente(tramitacao, horas=48):
 # ============================================================
 
 def formatar_mensagem_novidade(proposicao, tramitacao):
+    """Formata mensagem de tramitação da CÂMARA."""
     sigla = proposicao.get("siglaTipo", "")
     numero = proposicao.get("numero", "")
     ano = proposicao.get("ano", "")
@@ -364,11 +603,73 @@ Houve nova movimentação!
 ⏰ <i>Varredura: {data_hora_varredura}</i>"""
 
 
+def formatar_mensagem_novidade_senado(proposicao, movimentacao, dados_senado, status_senado):
+    """Formata mensagem de tramitação do SENADO com 🔵 ZANATTA NO SENADO."""
+    sigla = proposicao.get("siglaTipo", "")
+    numero = proposicao.get("numero", "")
+    ano = proposicao.get("ano", "")
+    ementa = escapar_html(proposicao.get("ementa", ""))
+    if len(ementa) > 200:
+        ementa = ementa[:197] + "..."
+    
+    # Data da movimentação
+    data_mov = movimentacao.get("data") or movimentacao.get("dataMovimento") or ""
+    if data_mov:
+        try:
+            dt = datetime.fromisoformat(data_mov.replace("Z", ""))
+            data_formatada = dt.strftime("%d/%m/%Y %H:%M")
+        except:
+            data_formatada = data_mov[:10]
+    else:
+        data_formatada = "Data não disponível"
+    
+    # Descrição da movimentação
+    descricao_raw = (
+        movimentacao.get("descricao") or 
+        movimentacao.get("textoMovimento") or 
+        movimentacao.get("texto") or 
+        "Movimentação registrada"
+    )
+    descricao = escapar_html(descricao_raw)
+    if len(descricao) > 300:
+        descricao = descricao[:297] + "..."
+    
+    # Órgão atual no Senado
+    orgao = status_senado.get("orgao", "") or "—"
+    situacao = status_senado.get("situacao", "") or "Em tramitação"
+    
+    # Link do Senado
+    link_senado = dados_senado.get("url_senado", "")
+    link_camara = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={proposicao['id']}"
+    
+    data_hora_varredura = obter_data_hora_brasilia()
+    
+    return f"""🔵 <b>ZANATTA NO SENADO</b>
+
+📢 <b>Monitor Parlamentar Informa:</b>
+
+Houve nova movimentação no <b>Senado Federal</b>!
+
+📄 <b>{sigla} {numero}/{ano}</b>
+{ementa}
+
+🏛️ <b>Órgão:</b> {orgao}
+📋 <b>Situação:</b> {situacao}
+
+📅 {data_formatada}
+➡️ {descricao}
+
+🔗 <a href="{link_senado}">Tramitação no Senado</a>
+🔗 <a href="{link_camara}">Tramitação na Câmara</a>
+
+⏰ <i>Varredura: {data_hora_varredura}</i>"""
+
+
 def formatar_mensagem_sem_novidades_completa():
     data_hora = obter_data_hora_brasilia()
     return f"""🔍 <b>Monitor Parlamentar Informa:</b>
 
-Na última varredura não foram encontradas tramitações recentes em matérias da Dep. Júlia Zanatta.
+Na última varredura não foram encontradas tramitações recentes em matérias da Dep. Júlia Zanatta (Câmara e Senado).
 
 Mas continue atento! 👀
 
@@ -387,88 +688,47 @@ def formatar_mensagem_bom_dia():
 
 Sou <b>MoniParBot</b>, o Robô do Monitor Parlamentar, sistema criado para monitorar as matérias legislativas de autoria da Deputada Júlia Zanatta, a Deputada pronta para combate! 💪
 
-Ao longo do dia, faremos uma varredura de 2 em 2h para identificar movimentações nas matérias da Deputada. Quando encontrada, será notificada. Quando não encontrada, será avisado que não foi encontrada.
+Ao longo do dia, faremos uma varredura de 2 em 2h para identificar movimentações nas matérias da Deputada - tanto na <b>Câmara</b> quanto no <b>Senado</b> 🔵
+
+Quando encontrada, será notificada. Quando não encontrada, será avisado que não foi encontrada.
 
 Até daqui a pouco! 🔍"""
 
 
-def formatar_mensagem_resumo_dia(tramitacoes, incluir_aviso_manutencao=False):
+def formatar_mensagem_resumo_dia(tramitacoes):
     quantidade = len(tramitacoes)
     
-    # Aviso de manutenção para adicionar ao final (se habilitado)
-    aviso_manutencao = ""
-    if incluir_aviso_manutencao:
-        aviso_manutencao = """
-
-━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️ <b>ATENÇÃO: Manutenção Programada</b>
-
-A Câmara dos Deputados está realizando manutenção no banco de dados.
-
-📅 <b>Início:</b> Sexta (17/01) às 18h
-📅 <b>Retorno:</b> Final do domingo (19/01)
-
-Durante este período, o Monitor pode apresentar dados indisponíveis.
-
-🔄 Avisaremos quando tudo voltar ao normal!"""
+    # Contar quantas são do Senado
+    senado_count = sum(1 for t in tramitacoes if t.startswith("🔵"))
     
     if quantidade == 0:
-        return f"""🌙 <b>Resumo do dia:</b>
+        return """🌙 <b>Resumo do dia:</b>
 
 Hoje não foram identificadas tramitações em matérias da Dep. Júlia Zanatta.
 
-Até amanhã! 👋{aviso_manutencao}"""
+Até amanhã! 👋"""
     
     elif quantidade == 1:
         lista = f"• {tramitacoes[0]}"
+        extra = " (no Senado)" if senado_count == 1 else ""
         return f"""🌙 <b>Resumo do dia:</b>
 
-Hoje foi identificada <b>1 tramitação</b>. Na seguinte matéria:
+Hoje foi identificada <b>1 tramitação</b>{extra}. Na seguinte matéria:
 
 {lista}
 
-Até amanhã! 👋{aviso_manutencao}"""
+Até amanhã! 👋"""
     
     else:
         lista = "\n".join([f"• {t}" for t in tramitacoes])
+        extra = f" ({senado_count} no Senado)" if senado_count > 0 else ""
         return f"""🌙 <b>Resumo do dia:</b>
 
-Hoje foram identificadas <b>{quantidade} tramitações</b>. Nas seguintes matérias:
+Hoje foram identificadas <b>{quantidade} tramitações</b>{extra}. Nas seguintes matérias:
 
 {lista}
 
-Até amanhã! 👋{aviso_manutencao}"""
-
-
-def formatar_mensagem_aviso_manutencao():
-    """Formata mensagem de aviso de manutenção da Câmara"""
-    return """⚠️ <b>AVISO: Sistemas da Câmara dos Deputados em Manutenção</b>
-
-A Diretoria de Inovação e Tecnologia da Informação (Ditec) da Câmara dos Deputados informou que está realizando uma <b>atualização no ambiente tecnológico do serviço de bancos de dados</b>.
-
-📅 <b>Início:</b> Sexta-feira (17/01) às 18h
-📅 <b>Previsão de retorno:</b> Final do domingo (19/01)
-
-Durante este período, o <b>Monitor Parlamentar da Dep. Júlia Zanatta</b> pode apresentar dados indisponíveis ou desatualizados, pois depende da API da Câmara.
-
-🔄 O sistema voltará ao normal automaticamente após o término da manutenção.
-
-📢 Avisaremos quando tudo estiver funcionando novamente!"""
-
-
-def formatar_mensagem_sistema_normalizado():
-    """Formata mensagem informando que o sistema voltou ao normal"""
-    data_hora = obter_data_hora_brasilia()
-    return f"""✅ <b>Sistemas da Câmara Normalizados!</b>
-
-A manutenção programada da Câmara dos Deputados foi concluída.
-
-O <b>Monitor Parlamentar da Dep. Júlia Zanatta</b> está funcionando normalmente! 🎉
-
-🔍 As varreduras de tramitações foram retomadas.
-
-⏰ <i>{data_hora}</i>"""
+Até amanhã! 👋"""
 
 
 # ============================================================
@@ -477,6 +737,11 @@ O <b>Monitor Parlamentar da Dep. Júlia Zanatta</b> está funcionando normalment
 
 def telegram_para_email_html(mensagem_telegram, assunto):
     corpo = mensagem_telegram.replace("\n", "<br>")
+    
+    # Cor do header baseada no conteúdo (azul para Senado)
+    is_senado = "ZANATTA NO SENADO" in mensagem_telegram
+    header_color = "#0066cc" if is_senado else "#1e3a5f"
+    header_gradient = "linear-gradient(135deg, #0066cc 0%, #004499 100%)" if is_senado else "linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)"
     
     return f"""<!DOCTYPE html>
 <html>
@@ -491,9 +756,9 @@ def telegram_para_email_html(mensagem_telegram, assunto):
                 <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                     <!-- Header -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%); padding: 25px 30px; border-radius: 8px 8px 0 0;">
+                        <td style="background: {header_gradient}; padding: 25px 30px; border-radius: 8px 8px 0 0;">
                             <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">
-                                🏛️ Monitor Parlamentar
+                                {"🔵 ZANATTA NO SENADO" if is_senado else "🏛️ Monitor Parlamentar"}
                             </h1>
                             <p style="margin: 5px 0 0 0; color: #b8d4e8; font-size: 14px;">
                                 Dep. Júlia Zanatta (PL-SC)
@@ -506,34 +771,14 @@ def telegram_para_email_html(mensagem_telegram, assunto):
                             {corpo}
                         </td>
                     </tr>
-                    <!-- Painel Link -->
-                    <tr>
-                        <td style="padding: 0 30px 25px 30px;">
-                            <table role="presentation" style="width: 100%; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 8px; border-left: 4px solid #4caf50;">
-                                <tr>
-                                    <td style="padding: 15px 20px;">
-                                        <p style="margin: 0 0 8px 0; color: #2e7d32; font-weight: 600; font-size: 14px;">
-                                            📊 Acompanhe em tempo real
-                                        </p>
-                                        <p style="margin: 0; color: #555; font-size: 13px;">
-                                            Acesse o painel completo do Monitor Parlamentar:
-                                        </p>
-                                        <p style="margin: 10px 0 0 0;">
-                                            <a href="{LINK_PAINEL}" style="display: inline-block; background: #4caf50; color: white; padding: 8px 20px; border-radius: 5px; text-decoration: none; font-weight: 600; font-size: 13px;">
-                                                🖥️ Abrir Painel
-                                            </a>
-                                        </p>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
                     <!-- Footer -->
                     <tr>
                         <td style="background-color: #f8f9fa; padding: 20px 30px; border-radius: 0 0 8px 8px; border-top: 1px solid #e9ecef;">
-                            <p style="margin: 0; color: #6c757d; font-size: 12px; text-align: center;">
-                                📧 Notificação automática do Monitor Parlamentar<br>
-                                <a href="{LINK_PAINEL}" style="color: #2d5a87;">monitorzanatta.streamlit.app</a>
+                            <p style="margin: 0; color: #6c757d; font-size: 13px;">
+                                📊 <a href="{LINK_PAINEL}" style="color: #0d6efd;">Acessar Painel Completo</a>
+                            </p>
+                            <p style="margin: 10px 0 0 0; color: #6c757d; font-size: 12px;">
+                                Monitor Parlamentar - Gabinete Dep. Júlia Zanatta
                             </p>
                         </td>
                     </tr>
@@ -545,20 +790,13 @@ def telegram_para_email_html(mensagem_telegram, assunto):
 </html>"""
 
 
-def extrair_texto_plano(mensagem_telegram):
-    import re
-    texto = re.sub(r'<[^>]+>', '', mensagem_telegram)
-    texto = texto.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
-    return texto
-
-
 # ============================================================
-# ENVIO DE NOTIFICAÇÕES
+# FUNÇÕES DE ENVIO
 # ============================================================
 
 def enviar_telegram(mensagem):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não configurados!")
+        print("⚠️ Telegram: Credenciais não configuradas")
         return False
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -570,10 +808,13 @@ def enviar_telegram(mensagem):
     }
     
     try:
-        resp = requests.post(url, json=payload, timeout=10)
-        resp.raise_for_status()
-        print("✅ Telegram: Mensagem enviada!")
-        return True
+        resp = requests.post(url, json=payload, timeout=30)
+        if resp.status_code == 200:
+            print("✅ Telegram: Enviado com sucesso")
+            return True
+        else:
+            print(f"❌ Telegram: Erro {resp.status_code}")
+            return False
     except Exception as e:
         print(f"❌ Telegram: Erro: {e}")
         return False
@@ -589,26 +830,23 @@ def enviar_email(mensagem_telegram, assunto):
         print("⚠️ Email: Nenhum destinatário")
         return False
     
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = assunto
-    msg["From"] = f"Monitor Parlamentar <{EMAIL_SENDER}>"
-    msg["To"] = ", ".join(recipients)
-    
-    texto_plano = extrair_texto_plano(mensagem_telegram)
-    texto_plano += f"\n\n---\nAcesse o painel: {LINK_PAINEL}"
-    msg.attach(MIMEText(texto_plano, "plain", "utf-8"))
-    
-    html_email = telegram_para_email_html(mensagem_telegram, assunto)
-    msg.attach(MIMEText(html_email, "html", "utf-8"))
+    html_body = telegram_para_email_html(mensagem_telegram, assunto)
     
     try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = assunto
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = ", ".join(recipients)
+        
+        parte_html = MIMEText(html_body, "html", "utf-8")
+        msg.attach(parte_html)
+        
         context = ssl.create_default_context()
         with smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT) as server:
-            server.ehlo()
             server.starttls(context=context)
-            server.ehlo()
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.sendmail(EMAIL_SENDER, recipients, msg.as_string())
+        
         print(f"✅ Email: Enviado para {len(recipients)} destinatário(s)")
         return True
     except smtplib.SMTPAuthenticationError:
@@ -675,38 +913,11 @@ def executar_resumo_dia():
     for t in tramitacoes:
         print(f"   • {t}")
     
-    if INCLUIR_AVISO_MANUTENCAO:
-        print("⚠️ Aviso de manutenção será incluído no resumo")
-    
-    mensagem = formatar_mensagem_resumo_dia(tramitacoes, incluir_aviso_manutencao=INCLUIR_AVISO_MANUTENCAO)
+    mensagem = formatar_mensagem_resumo_dia(tramitacoes)
     print("\n📤 Enviando resumo (Telegram + Email)...")
     notificar_ambos(mensagem, "🌙 Monitor Parlamentar - Resumo do Dia")
     
     print("\n✅ Resumo enviado!")
-
-
-def executar_aviso_manutencao():
-    """Aviso de manutenção - TELEGRAM + EMAIL"""
-    print("⚠️ MODO: AVISO DE MANUTENÇÃO")
-    print("=" * 60)
-    
-    mensagem = formatar_mensagem_aviso_manutencao()
-    print("\n📤 Enviando aviso de manutenção (Telegram + Email)...")
-    notificar_ambos(mensagem, "⚠️ Monitor Parlamentar - Aviso de Manutenção da Câmara")
-    
-    print("\n✅ Aviso de manutenção enviado!")
-
-
-def executar_sistema_normalizado():
-    """Aviso de sistema normalizado - TELEGRAM + EMAIL"""
-    print("✅ MODO: SISTEMA NORMALIZADO")
-    print("=" * 60)
-    
-    mensagem = formatar_mensagem_sistema_normalizado()
-    print("\n📤 Enviando aviso de normalização (Telegram + Email)...")
-    notificar_ambos(mensagem, "✅ Monitor Parlamentar - Sistema Normalizado")
-    
-    print("\n✅ Aviso de normalização enviado!")
 
 
 def executar_varredura():
@@ -745,11 +956,13 @@ def executar_varredura():
         salvar_resumo_dia(resumo)
         return
     
-    print("\n🔍 Verificando tramitações das últimas 48h...\n")
+    print("\n🔍 Verificando tramitações das últimas 48h (Câmara + Senado)...\n")
     
-    props_com_novidade = []
+    props_com_novidade_camara = []
+    props_com_novidade_senado = []
     props_ja_notificadas = 0
     erros = 0
+    props_no_senado = 0
     
     for i, prop in enumerate(proposicoes, 1):
         sigla_prop = f"{prop['siglaTipo']} {prop['numero']}/{prop['ano']}"
@@ -757,42 +970,80 @@ def executar_varredura():
         if i % 25 == 0 or i == 1:
             print(f"📊 Progresso: {i}/{len(proposicoes)}...")
         
+        # 1. Verificar tramitação na Câmara
         tramitacao = buscar_ultima_tramitacao(prop["id"])
         
         if tramitacao is None:
             erros += 1
-            continue
-        
-        if tramitacao_recente(tramitacao, horas=48):
+        elif tramitacao_recente(tramitacao, horas=48):
             data_hora_tram = tramitacao.get("dataHora", "")
             
-            if ja_foi_notificada(historico, prop["id"], data_hora_tram):
-                print(f"   ⏭️ JÁ NOTIFICADA: {sigla_prop}")
+            if ja_foi_notificada(historico, prop["id"], data_hora_tram, "camara"):
                 props_ja_notificadas += 1
             else:
-                print(f"   ✅ NOVA! {sigla_prop}")
-                props_com_novidade.append({
+                print(f"   ✅ NOVA (Câmara)! {sigla_prop}")
+                props_com_novidade_camara.append({
                     "proposicao": prop,
                     "tramitacao": tramitacao,
                     "sigla": sigla_prop
                 })
         
+        # 2. Verificar se está no Senado
+        situacao_camara = buscar_situacao_camara(prop["id"])
+        if verificar_se_foi_para_senado(situacao_camara.get("situacao", ""), situacao_camara.get("despacho", "")):
+            props_no_senado += 1
+            
+            # Buscar dados do Senado
+            dados_senado = buscar_dados_senado(
+                prop["siglaTipo"],
+                str(prop["numero"]),
+                str(prop["ano"])
+            )
+            
+            if dados_senado and dados_senado.get("id_processo"):
+                # Buscar movimentações do Senado
+                movimentacoes = buscar_movimentacoes_senado(dados_senado["id_processo"], limite=5)
+                
+                for mov in movimentacoes:
+                    if tramitacao_senado_recente(mov, horas=48):
+                        data_mov = mov.get("data") or mov.get("dataMovimento") or ""
+                        
+                        if ja_foi_notificada(historico, prop["id"], data_mov, "senado"):
+                            props_ja_notificadas += 1
+                        else:
+                            print(f"   🔵 NOVA (Senado)! {sigla_prop}")
+                            status_senado = buscar_status_senado(dados_senado["id_processo"])
+                            props_com_novidade_senado.append({
+                                "proposicao": prop,
+                                "movimentacao": mov,
+                                "dados_senado": dados_senado,
+                                "status_senado": status_senado,
+                                "sigla": sigla_prop
+                            })
+                            break  # Só notifica a mais recente
+        
         time.sleep(0.15)
+    
+    total_novidades = len(props_com_novidade_camara) + len(props_com_novidade_senado)
     
     print(f"\n{'=' * 60}")
     print(f"📊 RESUMO:")
     print(f"   Total verificadas: {len(proposicoes)}")
-    print(f"   Com novidades: {len(props_com_novidade)}")
+    print(f"   Tramitando no Senado: {props_no_senado}")
+    print(f"   Novidades Câmara: {len(props_com_novidade_camara)}")
+    print(f"   Novidades Senado: {len(props_com_novidade_senado)}")
     print(f"   Já notificadas: {props_ja_notificadas}")
     print(f"   Erros API: {erros}")
     print(f"{'=' * 60}")
     
-    if props_com_novidade:
+    if total_novidades > 0:
         # ENCONTROU TRAMITAÇÃO - Telegram + Email
-        print(f"\n📤 Enviando {len(props_com_novidade)} notificação(ões) (Telegram + Email)...\n")
+        print(f"\n📤 Enviando {total_novidades} notificação(ões) (Telegram + Email)...\n")
         
         enviadas = 0
-        for item in props_com_novidade:
+        
+        # Enviar novidades da Câmara
+        for item in props_com_novidade_camara:
             mensagem = formatar_mensagem_novidade(item["proposicao"], item["tramitacao"])
             assunto = f"📢 Nova Tramitação: {item['sigla']}"
             
@@ -801,9 +1052,33 @@ def executar_varredura():
                     historico,
                     item["proposicao"]["id"],
                     item["tramitacao"].get("dataHora", ""),
-                    item["sigla"]
+                    item["sigla"],
+                    "camara"
                 )
-                resumo = adicionar_ao_resumo(resumo, item["sigla"])
+                resumo = adicionar_ao_resumo(resumo, item["sigla"], no_senado=False)
+                enviadas += 1
+            time.sleep(1)
+        
+        # Enviar novidades do Senado
+        for item in props_com_novidade_senado:
+            mensagem = formatar_mensagem_novidade_senado(
+                item["proposicao"],
+                item["movimentacao"],
+                item["dados_senado"],
+                item["status_senado"]
+            )
+            assunto = f"🔵 ZANATTA NO SENADO: {item['sigla']}"
+            
+            if notificar_ambos(mensagem, assunto):
+                data_mov = item["movimentacao"].get("data") or item["movimentacao"].get("dataMovimento") or ""
+                historico = registrar_notificacao(
+                    historico,
+                    item["proposicao"]["id"],
+                    data_mov,
+                    item["sigla"],
+                    "senado"
+                )
+                resumo = adicionar_ao_resumo(resumo, item["sigla"], no_senado=True)
                 enviadas += 1
             time.sleep(1)
         
@@ -835,8 +1110,9 @@ def executar_varredura():
 
 def main():
     print("=" * 60)
-    print("🤖 MONIPARBOT - MONITOR PARLAMENTAR")
+    print("🤖 MONIPARBOT - MONITOR PARLAMENTAR v6")
     print("    Deputada Júlia Zanatta")
+    print("    📍 Câmara + 🔵 Senado")
     print("=" * 60)
     print()
     
@@ -867,17 +1143,11 @@ def main():
     # - varredura COM novidade: Telegram + Email
     # - varredura SEM novidade: APENAS Telegram
     # - resumo: Telegram + Email
-    # - aviso_manutencao: Telegram + Email
-    # - sistema_normalizado: Telegram + Email
     
     if MODO_EXECUCAO == "bom_dia":
         executar_bom_dia()
     elif MODO_EXECUCAO == "resumo":
         executar_resumo_dia()
-    elif MODO_EXECUCAO == "aviso_manutencao":
-        executar_aviso_manutencao()
-    elif MODO_EXECUCAO == "sistema_normalizado":
-        executar_sistema_normalizado()
     else:
         executar_varredura()
 

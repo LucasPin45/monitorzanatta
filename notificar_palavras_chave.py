@@ -5,7 +5,10 @@ notificar_palavras_chave.py
 ========================================
 Monitor de PAUTAS por PALAVRAS-CHAVE
 
-v6: 
+v7: 
+- INTEGRAÇÃO COM SENADO
+- Quando projeto está no Senado: 🔵 ZANATTA NO SENADO
+- Monitora movimentações de proposições no Senado 
 - Lógica diferenciada Telegram vs Email
 - Email só recebe: matérias encontradas + resumo do dia
 - Telegram recebe tudo
@@ -33,6 +36,9 @@ from pathlib import Path
 
 BASE_URL = "https://dadosabertos.camara.leg.br/api/v2"
 HEADERS = {"User-Agent": "MonitorPalavrasChave/2.0 (gabinete-julia-zanatta)"}
+SENADO_BASE_URL = "https://legis.senado.leg.br/dadosabertos"
+HEADERS_SENADO = {"User-Agent": "MonitorPalavrasChave/2.0", "Accept": "application/json"}
+
 
 LINK_PAINEL = "https://monitorzanatta.streamlit.app/"
 
@@ -970,7 +976,27 @@ def executar_varredura():
         
         time.sleep(0.1)
     
-    total_novos = len(itens_autoria) + len(itens_relatoria) + len(itens_palavras_chave)
+    # ====== PARTE 2: MOVIMENTAÇÕES NO SENADO ======
+    print("\n🔵 Verificando movimentações no Senado...")
+    itens_senado = []
+    
+    proposicoes_senado = buscar_proposicoes_no_senado(ids_autoria)
+    
+    for prop_data in proposicoes_senado:
+        sigla = f"{prop_data['tipo']} {prop_data['numero']}/{prop_data['ano']}"
+        chave_senado = f"senado_{prop_data['prop_id']}_{prop_data['movimentacao'].get('data', '')[:10]}"
+        
+        if ja_foi_notificada(historico, "senado", chave_senado):
+            itens_ja_notificados += 1
+        else:
+            print(f"   🔵 SENADO: {sigla}")
+            itens_senado.append({
+                "prop_data": prop_data,
+                "sigla": sigla,
+                "chave": chave_senado
+            })
+    
+    total_novos = len(itens_autoria) + len(itens_relatoria) + len(itens_palavras_chave) + len(itens_senado)
     
     print(f"\n{'=' * 60}")
     print(f"📊 RESUMO:")
@@ -979,6 +1005,7 @@ def executar_varredura():
     print(f"   AUTORIA: {len(itens_autoria)}")
     print(f"   RELATORIA: {len(itens_relatoria)}")
     print(f"   PALAVRAS-CHAVE: {len(itens_palavras_chave)}")
+    print(f"   🔵 SENADO: {len(itens_senado)}")
     print(f"   Já notificados: {itens_ja_notificados}")
     print(f"{'=' * 60}")
     
@@ -1017,6 +1044,17 @@ def executar_varredura():
                 enviadas += 1
             time.sleep(1)
     
+    # SENADO - Telegram + Email
+    if itens_senado:
+        print(f"\n📤 Enviando {len(itens_senado)} do SENADO (Telegram + Email)...\n")
+        for item_data in itens_senado:
+            mensagem = formatar_mensagem_senado(item_data["prop_data"])
+            if notificar_ambos(mensagem, f"🔵 ZANATTA NO SENADO: {item_data['sigla']}"):
+                historico = registrar_notificacao(historico, "senado", item_data["chave"], item_data["sigla"], "Senado")
+                resumo = adicionar_ao_resumo(resumo, item_data["sigla"], "Senado")
+                enviadas += 1
+            time.sleep(1)
+    
     # Se não teve nenhuma novidade - APENAS Telegram
     if total_novos == 0:
         print("\n📤 Enviando status (apenas Telegram)...")
@@ -1038,8 +1076,9 @@ def executar_varredura():
 
 def main():
     print("=" * 60)
-    print("🔑 MONITOR DE PAUTAS v6")
+    print("🔑 MONITOR DE PAUTAS v7")
     print("    Autoria + Relatoria + Palavras-chave")
+    print("    📍 Câmara + 🔵 Senado")
     print("=" * 60)
     print()
     
