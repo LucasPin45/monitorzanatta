@@ -7051,43 +7051,112 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
     st.markdown(f"**Proposição:** {proposicao_fmt or '—'}")
     
     # Se estiver no Senado, mostrar contexto do Senado (órgão/situação/relator)
+    # v33 CORRIGIDO: Verificar também pela situação da Câmara
     no_senado_flag = bool(prop.get("no_senado") or prop.get("No Senado?") or prop.get("No Senado"))
+    
+    # v33: Verificação adicional pela situação da Câmara
+    if not no_senado_flag:
+        situacao_camara = (situacao or "").lower()
+        if verificar_se_foi_para_senado(situacao, despacho):
+            no_senado_flag = True
+            # Buscar dados do Senado se não foram passados
+            if not prop.get("codigo_materia_senado"):
+                tipo = status.get("sigla", "")
+                numero = status.get("numero", "")
+                ano = status.get("ano", "")
+                if tipo and numero and ano:
+                    dados_senado = buscar_tramitacao_senado_mesmo_numero(tipo, str(numero), str(ano), debug=False)
+                    if dados_senado:
+                        prop["codigo_materia_senado"] = dados_senado.get("codigo_senado", "")
+                        prop["id_processo_senado"] = dados_senado.get("id_processo_senado", "")
+                        prop["situacao_senado"] = dados_senado.get("situacao_senado", "")
+                        prop["url_senado"] = dados_senado.get("url_senado", "")
+                        
+                        # Buscar status detalhado do Senado
+                        id_proc_sen = dados_senado.get("id_processo_senado", "")
+                        if id_proc_sen:
+                            status_sen = buscar_status_senado_por_processo(id_proc_sen, debug=False)
+                            if status_sen:
+                                if status_sen.get("situacao_senado"):
+                                    prop["situacao_senado"] = status_sen.get("situacao_senado", "")
+                                if status_sen.get("orgao_senado_sigla"):
+                                    prop["Orgao_Senado_Sigla"] = status_sen.get("orgao_senado_sigla", "")
+                                if status_sen.get("orgao_senado_nome"):
+                                    prop["Orgao_Senado_Nome"] = status_sen.get("orgao_senado_nome", "")
+                            
+                            # Buscar relator do Senado
+                            rel_sen = buscar_relator_atual_senado(prop.get("codigo_materia_senado", ""), id_proc_sen, debug=False)
+                            if rel_sen:
+                                prop["Relator_Senado"] = rel_sen
+                            
+                            # Buscar movimentações
+                            movs = buscar_movimentacoes_senado(prop.get("codigo_materia_senado", ""), id_processo_senado=id_proc_sen, limite=10, debug=False)
+                            if movs:
+                                linhas_movs = []
+                                for m in movs[:5]:
+                                    data_mov = m.get("data", "")
+                                    orgao_mov = m.get("orgao", "")
+                                    desc_mov = m.get("descricao", "")[:80]
+                                    linhas_movs.append(f"{data_mov} | {orgao_mov} | {desc_mov}")
+                                prop["UltimasMov_Senado"] = "\n".join(linhas_movs)
+    
     if no_senado_flag:
-        org_sigla = (prop.get("Orgao_Senado_Sigla") or org_sigla or "").strip()
+        # Órgão do Senado
+        orgao_sen = (prop.get("Orgao_Senado_Sigla") or "").strip()
+        if not orgao_sen:
+            # Tentar extrair das movimentações
+            movs = str(prop.get("UltimasMov_Senado", ""))
+            if movs and " | " in movs:
+                partes = movs.split("\n")[0].split(" | ")
+                if len(partes) >= 2 and partes[1].strip():
+                    orgao_sen = partes[1].strip()
+        if not orgao_sen:
+            orgao_sen = "MESA"  # Padrão para proposições recém-chegadas
+        org_sigla = orgao_sen
+        
+        # Situação do Senado
         situacao_sen = (prop.get("situacao_senado") or "").strip()
         if situacao_sen:
-            situacao = situacao_sen
+            situacao = f"🏛️ {situacao_sen}"
+        else:
+            situacao = "🏛️ AGUARDANDO DESPACHO"
 
     st.markdown(f"**Órgão:** {org_sigla}")
     st.markdown(f"**Situação atual:** {situacao}")
     
     
     # Relator: se no Senado, preferir Relator_Senado COM FOTO
-    if no_senado_flag and (prop.get("Relator_Senado") or "").strip():
-        relator_senado_txt = prop.get('Relator_Senado', '').strip()
+    # v33 CORRIGIDO: Se está no Senado mas não tem relator, mostrar "—" (não o da Câmara)
+    if no_senado_flag:
+        relator_senado_txt = (prop.get('Relator_Senado') or '').strip()
         
-        # Extrair nome do relator (antes do parêntese)
-        relator_nome_sen = relator_senado_txt.split('(')[0].strip()
-        
-        # Buscar foto do senador
-        foto_senador_url = get_foto_senador(relator_nome_sen)
-        
-        if foto_senador_url:
-            col_foto_sen, col_info_sen = st.columns([1, 3])
-            with col_foto_sen:
-                try:
-                    st.image(foto_senador_url, width=120, caption=relator_nome_sen)
-                except:
-                    st.markdown("📷")
-            with col_info_sen:
+        if relator_senado_txt:
+            # Extrair nome do relator (antes do parêntese)
+            relator_nome_sen = relator_senado_txt.split('(')[0].strip()
+            
+            # Buscar foto do senador
+            foto_senador_url = get_foto_senador(relator_nome_sen)
+            
+            if foto_senador_url:
+                col_foto_sen, col_info_sen = st.columns([1, 3])
+                with col_foto_sen:
+                    try:
+                        st.image(foto_senador_url, width=120, caption=relator_nome_sen)
+                    except:
+                        st.markdown("📷")
+                with col_info_sen:
+                    st.markdown("**Relator(a):**")
+                    # Link para o senador no site do Senado
+                    st.markdown(f"**{relator_senado_txt}**")
+                    st.caption("🏛️ Tramitando no Senado Federal")
+            else:
                 st.markdown("**Relator(a):**")
-                # Link para o senador no site do Senado
                 st.markdown(f"**{relator_senado_txt}**")
                 st.caption("🏛️ Tramitando no Senado Federal")
         else:
-            st.markdown("**Relator(a):**")
-            st.markdown(f"**{relator_senado_txt}**")
-            st.caption("🏛️ Tramitando no Senado Federal")
+            # Está no Senado mas ainda não tem relator designado
+            st.markdown("**Relator(a):** —")
+            st.caption("🏛️ Tramitando no Senado Federal (aguardando designação de relator)")
         
         relator = None  # evita render do relator da Câmara
 
@@ -8781,17 +8850,36 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     row_data = df_tbl.iloc[row_idx]
                     selected_id = str(row_data["ID"])
                     
-                    # Extrair dados do Senado da linha selecionada
+                    # v33 CORRIGIDO: Extrair dados do Senado corretamente (pandas Series)
+                    # Usar .get() com fallback seguro e converter para tipos Python nativos
+                    def safe_get(series, key, default=""):
+                        try:
+                            val = series.get(key, default)
+                            if pd.isna(val):
+                                return default
+                            return val
+                        except:
+                            return default
+                    
+                    def safe_get_bool(series, key):
+                        try:
+                            val = series.get(key, False)
+                            if pd.isna(val):
+                                return False
+                            return bool(val)
+                        except:
+                            return False
+                    
                     senado_data_row = {
-                        "no_senado": row_data.get("no_senado", False),
-                        "codigo_materia_senado": row_data.get("codigo_materia_senado", ""),
-                        "id_processo_senado": row_data.get("id_processo_senado", ""),
-                        "situacao_senado": row_data.get("situacao_senado", ""),
-                        "url_senado": row_data.get("url_senado", ""),
-                        "Relator_Senado": row_data.get("Relator_Senado", ""),
-                        "Orgao_Senado_Sigla": row_data.get("Orgao_Senado_Sigla", ""),
-                        "Orgao_Senado_Nome": row_data.get("Orgao_Senado_Nome", ""),
-                        "UltimasMov_Senado": row_data.get("UltimasMov_Senado", ""),  # NOVO v32.1
+                        "no_senado": safe_get_bool(row_data, "no_senado"),
+                        "codigo_materia_senado": safe_get(row_data, "codigo_materia_senado", ""),
+                        "id_processo_senado": safe_get(row_data, "id_processo_senado", ""),
+                        "situacao_senado": safe_get(row_data, "situacao_senado", ""),
+                        "url_senado": safe_get(row_data, "url_senado", ""),
+                        "Relator_Senado": safe_get(row_data, "Relator_Senado", ""),
+                        "Orgao_Senado_Sigla": safe_get(row_data, "Orgao_Senado_Sigla", ""),
+                        "Orgao_Senado_Nome": safe_get(row_data, "Orgao_Senado_Nome", ""),
+                        "UltimasMov_Senado": safe_get(row_data, "UltimasMov_Senado", ""),
                     }
             except Exception:
                 selected_id = None
