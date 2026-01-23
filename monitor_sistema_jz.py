@@ -5,7 +5,8 @@
 # - parse_proposicao_input_v2() - aceita busca SEM ano (ex: "pl 321")
 # - Busca em múltiplos campos: Proposição, ementa, ID, número
 # - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
-# - BUSCA AUTOMÁTICA: "pl 321" busca TODOS os anos (2019-2025) e mostra TODOS
+# - BUSCA HÍBRIDA: busca local + API, combina resultados
+# - Marca corretamente quais são de autoria da deputada
 # - FIX: Adicionado @st.cache_data em fetch_proposicao_completa (erro .clear())
 #
 # ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
@@ -231,8 +232,26 @@ def busca_robusta_df(df, termo_busca: str):
     df_busca = df.copy()
     df_busca["_busca_robusta"] = criar_campo_busca_robusto(df)
     
-    # Faz a busca
+    # Faz a busca principal
     mascara = df_busca["_busca_robusta"].str.contains(termo_norm, na=False, regex=False)
+    
+    # FALLBACK: Se não encontrou, tenta busca direta no número
+    # Isso resolve casos onde a coluna "numero" tem "321" como int vs string
+    if not mascara.any() and "numero" in df.columns:
+        # Extrai apenas números do termo de busca
+        apenas_numeros = re.sub(r'[^0-9]', '', termo_busca)
+        if apenas_numeros:
+            mascara_numero = df["numero"].astype(str).str.strip() == apenas_numeros
+            mascara = mascara | mascara_numero
+    
+    # FALLBACK 2: Busca na coluna Proposicao com contains normal (case insensitive)
+    if not mascara.any() and "Proposicao" in df.columns:
+        termo_upper = termo_busca.strip().upper()
+        # Tenta encontrar o número na proposição
+        apenas_numeros = re.sub(r'[^0-9]', '', termo_busca)
+        if apenas_numeros:
+            mascara_prop = df["Proposicao"].fillna("").astype(str).str.contains(apenas_numeros, na=False, regex=False)
+            mascara = mascara | mascara_prop
     
     # Remove coluna auxiliar e retorna
     resultado = df_busca[mascara].drop(columns=["_busca_robusta"], errors="ignore")
@@ -8645,37 +8664,77 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
                 else:
                     # Busca parcial (sem ano completo) ou busca por texto na ementa
-                    # Usa busca robusta local primeiro
+                    # v32.5: Busca HÍBRIDA - local E API quando for proposição
+                    
+                    # Primeiro tenta busca local robusta
                     df_rast = busca_robusta_df(df_aut, q)
                     
-                    if df_rast.empty and parsed and not parsed[2]:
-                        # Usuário digitou algo como "pl 321" mas não foi encontrado nas proposições de autoria
-                        # Tenta busca direta na API para TODOS os anos (2019-2025)
+                    # Se parsed e não encontrou localmente (ou encontrou pouco), complementa com API
+                    if parsed and not parsed[2]:  # Tem sigla+número mas sem ano
                         sigla_busca, num_busca, _ = parsed
-                        anos_tentar = ["2025", "2024", "2023", "2022", "2021", "2020", "2019"]
                         
-                        resultados_encontrados = []
+                        # Buscar todos os anos na API
+                        anos_tentar = ["2025", "2024", "2023", "2022", "2021", "2020", "2019"]
+                        resultados_api = []
+                        
                         with st.spinner(f"🔍 Buscando {sigla_busca} {num_busca} na API (verificando anos 2019-2025)..."):
                             for ano_tentativa in anos_tentar:
                                 resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_tentativa)
                                 if resultado:
-                                    resultados_encontrados.append(resultado)
+                                    resultados_api.append(resultado)
                         
-                        if resultados_encontrados:
-                            # Encontrou uma ou mais proposições
-                            if len(resultados_encontrados) == 1:
-                                st.success(f"✅ **{resultados_encontrados[0].get('Proposicao', '')}** encontrada! (não é de autoria da deputada)")
-                            else:
-                                anos_encontrados = [r.get('ano', '?') for r in resultados_encontrados]
-                                st.success(f"✅ Encontradas **{len(resultados_encontrados)}** proposições: {sigla_busca} {num_busca} nos anos {', '.join(anos_encontrados)} (não são de autoria da deputada)")
+                        if resultados_api:
+                            # Criar set de IDs da busca local
+                            ids_local = set(df_rast["id"].astype(str).tolist()) if not df_rast.empty else set()
+                            ids_autoria = set(df_aut["id"].astype(str).tolist()) if not df_aut.empty else set()
                             
-                            df_direta = pd.DataFrame(resultados_encontrados)
-                            df_rast = df_direta.copy()
-                        else:
+                            # Classificar resultados da API
+                            resultados_autoria = []
+                            resultados_outros = []
+                            novos_resultados = []
+                            
+                            for r in resultados_api:
+                                rid = str(r.get("id", ""))
+                                is_autoria = rid in ids_autoria
+                                r["_is_autoria"] = is_autoria
+                                
+                                if is_autoria:
+                                    resultados_autoria.append(r)
+                                else:
+                                    resultados_outros.append(r)
+                                
+                                # Adicionar aos novos se não estava na busca local
+                                if rid not in ids_local:
+                                    novos_resultados.append(r)
+                            
+                            # Se encontrou proposições de autoria que não estavam na busca local, adicionar
+                            if novos_resultados:
+                                df_novos = pd.DataFrame(novos_resultados)
+                                if df_rast.empty:
+                                    df_rast = df_novos
+                                else:
+                                    df_rast = pd.concat([df_rast, df_novos], ignore_index=True)
+                                    df_rast = df_rast.drop_duplicates(subset=["id"], keep="first")
+                            
+                            # Montar mensagem
+                            if resultados_autoria and resultados_outros:
+                                props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
+                                props_outros = ", ".join([r.get('Proposicao', '?') for r in resultados_outros])
+                                st.success(f"✅ Encontradas **{len(resultados_api)}** proposições:\n"
+                                          f"- **De autoria:** {props_autoria}\n"
+                                          f"- **Outras:** {props_outros}")
+                            elif resultados_autoria:
+                                props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
+                                st.success(f"✅ **{props_autoria}** encontrada(s)! (de autoria da deputada)")
+                            else:
+                                anos_encontrados = [r.get('ano', '?') for r in resultados_api]
+                                st.success(f"✅ Encontradas **{len(resultados_api)}** proposições: {sigla_busca} {num_busca} nos anos {', '.join(anos_encontrados)} (não são de autoria da deputada)")
+                        
+                        elif df_rast.empty:
                             st.warning(f"⚠️ **{sigla_busca} {num_busca}** não encontrada nos anos 2019-2025. "
                                       f"Tente especificar o ano exato: `{sigla_busca} {num_busca}/AAAA`")
                     
-                    st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
+                    st.caption(f"🔍 Busca em **todas** as {len(df_aut)} proposições de autoria")
             else:
                 # Sem filtro - mostra tudo (respeitando filtros de ano/tipo)
                 df_rast = df_base.copy()
