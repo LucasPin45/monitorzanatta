@@ -1,5 +1,11 @@
-# monitor_sistema_jz.py - v32.4 INTEGRAÇÃO TOTAL + BUSCA DIRETA
+# monitor_sistema_jz.py - v32.5 BUSCA ROBUSTA
 # 
+# ALTERAÇÕES v32.5 - BUSCA ROBUSTA:
+# - Nova função normalize_para_busca() - remove espaços, barras, acentos
+# - parse_proposicao_input_v2() - aceita busca SEM ano (ex: "pl 321")
+# - Busca em múltiplos campos: Proposição, ementa, ID, número
+# - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
+#
 # ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
 # - Verificação expandida para detecção de Senado
 # - Busca direta por número funciona para qualquer proposição
@@ -74,6 +80,167 @@ try:
     _REQUESTS_VERIFY = certifi.where()
 except Exception:
     _REQUESTS_VERIFY = True
+
+import unicodedata  # Garantir import para funções de busca
+
+# ============================================================
+# FUNÇÕES DE BUSCA ROBUSTA - v32.5
+# ============================================================
+
+def normalize_para_busca(texto: str) -> str:
+    """
+    Normaliza texto para busca ROBUSTA.
+    
+    Remove:
+    - Acentos
+    - Espaços
+    - Barras (/)
+    - Hífens (-)
+    - Pontuação
+    - Converte para minúsculas
+    
+    Exemplos:
+    - "PL 321/2023" → "pl3212023"
+    - "pl 321"      → "pl321"
+    - "321"         → "321"
+    - "Educação"    → "educacao"
+    """
+    if not isinstance(texto, str):
+        return ""
+    
+    # Remove acentos
+    nfkd = unicodedata.normalize("NFD", texto)
+    sem_acentos = "".join(c for c in nfkd if not unicodedata.combining(c))
+    
+    # Remove espaços, barras, hífens e outros caracteres especiais
+    # Mantém apenas letras e números
+    apenas_alfanum = re.sub(r'[^a-zA-Z0-9]', '', sem_acentos)
+    
+    return apenas_alfanum.lower()
+
+
+def parse_proposicao_input_v2(texto: str) -> Optional[Tuple[str, str, Optional[str]]]:
+    """
+    Extrai sigla, número e ano (opcional) de uma string de proposição.
+    
+    MELHORIA v32.5: Agora o ANO é OPCIONAL!
+    
+    Exemplos aceitos:
+    - "PL 321/2023"   → ("PL", "321", "2023")
+    - "PL321/2023"    → ("PL", "321", "2023")
+    - "pl 321 2023"   → ("PL", "321", "2023")
+    - "PL 321"        → ("PL", "321", None)     # NOVO!
+    - "pl321"         → ("PL", "321", None)     # NOVO!
+    - "PLP 223/2023"  → ("PLP", "223", "2023")
+    
+    Returns:
+        Tuple (sigla, numero, ano) ou None
+        ano pode ser None se não fornecido
+    """
+    texto = (texto or "").strip().upper()
+    if not texto:
+        return None
+    
+    # Siglas válidas
+    siglas = r"(PL|PLP|PEC|PDL|PRC|PLV|MPV|RIC|REQ|PDS|PRS)"
+    
+    # Padrão 1: SIGLA NUMERO/ANO ou SIGLA NUMERO ANO (com ano)
+    padrao_com_ano = rf"^{siglas}\s*(\d+)\s*[/\s]\s*(\d{{4}})$"
+    match_ano = re.match(padrao_com_ano, texto)
+    if match_ano:
+        return (match_ano.group(1), match_ano.group(2), match_ano.group(3))
+    
+    # Padrão 2: SIGLA NUMERO (sem ano) - NOVO!
+    padrao_sem_ano = rf"^{siglas}\s*(\d+)$"
+    match_sem_ano = re.match(padrao_sem_ano, texto)
+    if match_sem_ano:
+        return (match_sem_ano.group(1), match_sem_ano.group(2), None)
+    
+    return None
+
+
+def criar_campo_busca_robusto(df) -> pd.Series:
+    """
+    Cria campo de busca que concatena múltiplas colunas normalizadas.
+    
+    Campos incluídos:
+    - Proposicao (ex: "PL 321/2023")
+    - ementa
+    - id
+    - numero (se existir)
+    - siglaTipo (se existir)
+    """
+    campos = []
+    
+    # Proposição (principal)
+    if "Proposicao" in df.columns:
+        campos.append(df["Proposicao"].fillna("").astype(str))
+    
+    # Ementa
+    if "ementa" in df.columns:
+        campos.append(df["ementa"].fillna("").astype(str))
+    
+    # ID
+    if "id" in df.columns:
+        campos.append(df["id"].fillna("").astype(str))
+    
+    # Número separado
+    if "numero" in df.columns:
+        campos.append(df["numero"].fillna("").astype(str))
+    
+    # Tipo
+    if "siglaTipo" in df.columns:
+        campos.append(df["siglaTipo"].fillna("").astype(str))
+    
+    # Concatena tudo com espaço
+    if campos:
+        texto_completo = campos[0]
+        for c in campos[1:]:
+            texto_completo = texto_completo + " " + c
+        return texto_completo.apply(normalize_para_busca)
+    
+    return df.iloc[:, 0].astype(str).apply(normalize_para_busca)
+
+
+def busca_robusta_df(df, termo_busca: str):
+    """
+    Realiza busca robusta em um DataFrame.
+    
+    Aceita:
+    - "321"       → encontra PL 321/2023, PL 321/2024, etc.
+    - "pl321"     → encontra PL 321/qualquer ano
+    - "pl 321"    → mesmo que acima
+    - "321/2023"  → encontra especificamente 321/2023
+    - "conanda"   → busca na ementa
+    
+    Returns:
+        DataFrame filtrado
+    """
+    if df.empty or not termo_busca.strip():
+        return df
+    
+    # Normaliza o termo de busca
+    termo_norm = normalize_para_busca(termo_busca)
+    
+    if not termo_norm:
+        return df
+    
+    # Cria campo de busca robusto
+    df_busca = df.copy()
+    df_busca["_busca_robusta"] = criar_campo_busca_robusto(df)
+    
+    # Faz a busca
+    mascara = df_busca["_busca_robusta"].str.contains(termo_norm, na=False, regex=False)
+    
+    # Remove coluna auxiliar e retorna
+    resultado = df_busca[mascara].drop(columns=["_busca_robusta"], errors="ignore")
+    
+    return resultado
+
+# ============================================================
+# FIM - FUNÇÕES DE BUSCA ROBUSTA
+# ============================================================
+
 def extrair_numero_pl_camera(proposicao: str) -> Optional[Tuple[str, str, str]]:
     """
     Extrai tipo, número e ano de uma proposição.
@@ -8431,54 +8598,63 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
             st.markdown("---")
 
-            # Campo de busca - AGORA COM BUSCA DIRETA v32.2
+            # Campo de busca - v32.5 BUSCA ROBUSTA
             q = st.text_input(
                 "Filtrar proposições",
                 value="",
-                placeholder="Ex.: PL 321/2023 | 'pix' | 'conanda' | 'oab'",
-                help="Busque por sigla/número/ano (ex: PL 321/2023) para busca DIRETA ou palavras na ementa.",
+                placeholder="Ex.: 321 | pl 321 | PL 321/2023 | 'conanda' | 'pix'",
+                help="Busca flexível: digite apenas o número (321), sigla+número (pl321), formato completo (PL 321/2023) ou palavras da ementa.",
                 key="busca_tab5"
             )
 
-            # NOVO v32.2: Verificar se é busca direta por número de proposição
+            # v32.5: Busca robusta
             busca_direta_resultado = None
-            parsed = parse_proposicao_input(q) if q.strip() else None
             
-            if parsed:
-                sigla_busca, num_busca, ano_busca = parsed
-                # Verificar se está na lista de autoria
-                prop_formatada = f"{sigla_busca} {num_busca}/{ano_busca}"
-                ja_na_lista = df_aut[df_aut["Proposicao"].str.upper() == prop_formatada.upper()].copy() if not df_aut.empty else pd.DataFrame()
+            if q.strip():
+                # Tenta parse para busca direta (se tiver formato de proposição COM ano)
+                parsed = parse_proposicao_input_v2(q)
                 
-                if ja_na_lista.empty:
-                    # Não está na lista de autoria - fazer busca direta
-                    with st.spinner(f"🔍 Buscando {prop_formatada} diretamente na API..."):
-                        busca_direta_resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_busca)
+                if parsed and parsed[2]:  # Tem sigla, número E ano
+                    sigla_busca, num_busca, ano_busca = parsed
+                    prop_formatada = f"{sigla_busca} {num_busca}/{ano_busca}"
+                    
+                    # Verifica se está na lista de autoria (usando normalização robusta)
+                    ja_na_lista = df_aut[
+                        df_aut["Proposicao"].fillna("").apply(normalize_para_busca) == 
+                        normalize_para_busca(prop_formatada)
+                    ].copy() if not df_aut.empty else pd.DataFrame()
+                    
+                    if ja_na_lista.empty:
+                        # Não está na lista - fazer busca direta na API
+                        with st.spinner(f"🔍 Buscando {prop_formatada} diretamente na API..."):
+                            busca_direta_resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_busca)
                         
-                    if busca_direta_resultado:
-                        st.success(f"✅ **{prop_formatada}** encontrada! (não é de autoria da deputada)")
-                        
-                        # Criar DataFrame com a proposição encontrada
-                        df_direta = pd.DataFrame([busca_direta_resultado])
-                        df_rast = df_direta.copy()
+                        if busca_direta_resultado:
+                            st.success(f"✅ **{prop_formatada}** encontrada! (não é de autoria da deputada)")
+                            df_direta = pd.DataFrame([busca_direta_resultado])
+                            df_rast = df_direta.copy()
+                        else:
+                            st.warning(f"⚠️ **{prop_formatada}** não encontrada na API da Câmara")
+                            df_rast = pd.DataFrame()
                     else:
-                        st.warning(f"⚠️ **{prop_formatada}** não encontrada na API da Câmara")
-                        df_rast = pd.DataFrame()
+                        # Está na lista - usar busca robusta local
+                        df_rast = busca_robusta_df(df_aut, q)
+                        st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
                 else:
-                    # Está na lista - usar filtro normal
-                    qn = normalize_text(q)
-                    df_busca_completa = df_aut.copy()
-                    df_busca_completa["_search"] = (df_busca_completa["Proposicao"].fillna("").astype(str) + " " + df_busca_completa["ementa"].fillna("").astype(str)).apply(normalize_text)
-                    df_rast = df_busca_completa[df_busca_completa["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
+                    # Busca parcial (sem ano completo) ou busca por texto na ementa
+                    # Usa busca robusta local
+                    df_rast = busca_robusta_df(df_aut, q)
+                    
+                    if df_rast.empty and parsed and not parsed[2]:
+                        # Usuário digitou algo como "pl 321" mas não foi encontrado
+                        # Informa que pode especificar o ano para busca direta
+                        sigla_busca, num_busca, _ = parsed
+                        st.info(f"💡 **Dica:** Para buscar {sigla_busca} {num_busca} fora das proposições de autoria, "
+                               f"especifique o ano: `{sigla_busca} {num_busca}/2023` ou `{sigla_busca} {num_busca}/2024`")
+                    
                     st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
-            elif q.strip():
-                # Busca textual normal
-                qn = normalize_text(q)
-                df_busca_completa = df_aut.copy()
-                df_busca_completa["_search"] = (df_busca_completa["Proposicao"].fillna("").astype(str) + " " + df_busca_completa["ementa"].fillna("").astype(str)).apply(normalize_text)
-                df_rast = df_busca_completa[df_busca_completa["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
-                st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
             else:
+                # Sem filtro - mostra tudo (respeitando filtros de ano/tipo)
                 df_rast = df_base.copy()
 
             # Verificar se tem resultados
