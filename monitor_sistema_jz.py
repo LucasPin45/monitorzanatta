@@ -1937,6 +1937,30 @@ COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
 
 TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 
+
+
+def default_anos_sel(anos: list) -> list:
+    """Define anos padrão do filtro garantindo que 2023 apareça (ex.: PL 321/2023).
+
+    Regra: pega os 3 anos mais recentes disponíveis + 2023 (se existir no dataset).
+    """
+    anos_clean = [str(a).strip() for a in (anos or []) if str(a).strip().isdigit()]
+    if not anos_clean:
+        return []
+
+    # Preferir anos mais recentes (do próprio dataset)
+    anos_sorted = sorted(set(anos_clean), reverse=True)
+    top3 = anos_sorted[:3]
+
+    defaults = []
+    for a in top3:
+        if a in anos_sorted and a not in defaults:
+            defaults.append(a)
+    if "2023" in anos_sorted and "2023" not in defaults:
+        defaults.append("2023")
+
+    # fallback (nunca vazio)
+    return defaults or (anos_sorted[:3] if len(anos_sorted) >= 3 else anos_sorted)
 STATUS_PREDEFINIDOS = [
     "Arquivada",
     "Aguardando Despacho do Presidente da Câmara dos Deputados",
@@ -8380,7 +8404,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             col_ano, col_tipo = st.columns([1, 1])
             with col_ano:
                 anos = sorted([a for a in df_aut["ano"].dropna().unique().tolist() if str(a).strip().isdigit()], reverse=True)
-                anos_sel = st.multiselect("Ano", options=anos, default=anos[:3] if len(anos) >= 3 else anos, key="anos_tab5")
+                anos_sel = st.multiselect("Ano", options=anos, default=default_anos_sel(anos), key="anos_tab5")
             with col_tipo:
                 tipos = sorted([t for t in df_aut["siglaTipo"].dropna().unique().tolist() if str(t).strip()])
                 tipos_sel = st.multiselect("Tipo", options=tipos, default=tipos, key="tipos_tab5")
