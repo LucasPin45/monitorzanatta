@@ -1,31 +1,17 @@
-# monitor_sistema_jz.py - v32.6 CORREÇÃO BUG API CÂMARA
+# monitor_sistema_jz.py - v33 INTEGRAÇÃO CORRIGIDA + WORKAROUND API
 # 
-# ALTERAÇÕES v32.6 - CORREÇÃO BUG API CÂMARA:
-# - FIX CRÍTICO: A API da Câmara não retorna algumas proposições via idDeputadoAutor
-# - PL 321/2023 (ID 2347150) é de autoria da Julia Zanatta mas não aparecia na lista
-# - Adicionado mecanismo de "proposições faltantes" para corrigir falhas da API
-# - Proposições são verificadas e adicionadas em todas as funções de busca
-# - Busca apenas número (ex: "321") agora tenta PL/PLP/PEC/PDL automaticamente
-# 
-# ALTERAÇÕES v32.5 - BUSCA ROBUSTA:
-# - Nova função normalize_para_busca() - remove espaços, barras, acentos
-# - parse_proposicao_input_v2() - aceita busca SEM ano (ex: "pl 321")
-# - Busca em múltiplos campos: Proposição, ementa, ID, número
-# - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
-# - BUSCA HÍBRIDA: busca local + API, combina resultados
-# - verificar_autoria_proposicao() - verifica CO-AUTORIAS via API /autores
-# - FIX: Adicionado @st.cache_data em fetch_proposicao_completa (erro .clear())
+# ALTERAÇÕES v33 - CORREÇÕES CRÍTICAS:
+# - REMOVIDO: Busca direta de projetos que NÃO são da deputada na Aba 5
+# - CORRIGIDO: Workaround para PL 321/2023 e outras proposições faltantes na API
+# - CORRIGIDO: "Situação atual" agora mostra status do SENADO (não da Câmara)
+# - CORRIGIDO: Órgão e Relator mostram dados do Senado automaticamente
+# - CONCEITO: Sistema Monitor Zanatta = SOMENTE proposições de autoria da deputada
 #
 # ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
 # - Verificação expandida para detecção de Senado
-# - Busca direta por número funciona para qualquer proposição
 # - Filtro de anos: garantir que 2023 está incluído por padrão
 #
-# ALTERAÇÕES v32.3 - BUSCA DIRETA POR NÚMERO:
-# - Nova função buscar_proposicao_direta() - busca QUALQUER proposição
-# - Campo de busca aceita "PL 321/2023" e busca diretamente na API
-# - Não depende de autoria - permite monitorar qualquer proposição
-# - Indicadores de detecção do Senado expandidos
+# (v32.3 removida - funcionalidade de busca direta incompatível com conceito do sistema)
 #
 # ALTERAÇÕES v32.2 - DADOS INTEGRADOS NA TABELA E DETALHES:
 # - "Último andamento" mostra do Senado quando matéria está lá
@@ -90,185 +76,6 @@ try:
     _REQUESTS_VERIFY = certifi.where()
 except Exception:
     _REQUESTS_VERIFY = True
-
-import unicodedata  # Garantir import para funções de busca
-
-# ============================================================
-# FUNÇÕES DE BUSCA ROBUSTA - v32.5
-# ============================================================
-
-def normalize_para_busca(texto: str) -> str:
-    """
-    Normaliza texto para busca ROBUSTA.
-    
-    Remove:
-    - Acentos
-    - Espaços
-    - Barras (/)
-    - Hífens (-)
-    - Pontuação
-    - Converte para minúsculas
-    
-    Exemplos:
-    - "PL 321/2023" → "pl3212023"
-    - "pl 321"      → "pl321"
-    - "321"         → "321"
-    - "Educação"    → "educacao"
-    """
-    if not isinstance(texto, str):
-        return ""
-    
-    # Remove acentos
-    nfkd = unicodedata.normalize("NFD", texto)
-    sem_acentos = "".join(c for c in nfkd if not unicodedata.combining(c))
-    
-    # Remove espaços, barras, hífens e outros caracteres especiais
-    # Mantém apenas letras e números
-    apenas_alfanum = re.sub(r'[^a-zA-Z0-9]', '', sem_acentos)
-    
-    return apenas_alfanum.lower()
-
-
-def parse_proposicao_input_v2(texto: str) -> Optional[Tuple[str, str, Optional[str]]]:
-    """
-    Extrai sigla, número e ano (opcional) de uma string de proposição.
-    
-    MELHORIA v32.5: Agora o ANO é OPCIONAL!
-    
-    Exemplos aceitos:
-    - "PL 321/2023"   → ("PL", "321", "2023")
-    - "PL321/2023"    → ("PL", "321", "2023")
-    - "pl 321 2023"   → ("PL", "321", "2023")
-    - "PL 321"        → ("PL", "321", None)     # NOVO!
-    - "pl321"         → ("PL", "321", None)     # NOVO!
-    - "PLP 223/2023"  → ("PLP", "223", "2023")
-    
-    Returns:
-        Tuple (sigla, numero, ano) ou None
-        ano pode ser None se não fornecido
-    """
-    texto = (texto or "").strip().upper()
-    if not texto:
-        return None
-    
-    # Siglas válidas
-    siglas = r"(PL|PLP|PEC|PDL|PRC|PLV|MPV|RIC|REQ|PDS|PRS)"
-    
-    # Padrão 1: SIGLA NUMERO/ANO ou SIGLA NUMERO ANO (com ano)
-    padrao_com_ano = rf"^{siglas}\s*(\d+)\s*[/\s]\s*(\d{{4}})$"
-    match_ano = re.match(padrao_com_ano, texto)
-    if match_ano:
-        return (match_ano.group(1), match_ano.group(2), match_ano.group(3))
-    
-    # Padrão 2: SIGLA NUMERO (sem ano) - NOVO!
-    padrao_sem_ano = rf"^{siglas}\s*(\d+)$"
-    match_sem_ano = re.match(padrao_sem_ano, texto)
-    if match_sem_ano:
-        return (match_sem_ano.group(1), match_sem_ano.group(2), None)
-    
-    return None
-
-
-def criar_campo_busca_robusto(df) -> pd.Series:
-    """
-    Cria campo de busca que concatena múltiplas colunas normalizadas.
-    
-    Campos incluídos:
-    - Proposicao (ex: "PL 321/2023")
-    - ementa
-    - id
-    - numero (se existir)
-    - siglaTipo (se existir)
-    """
-    campos = []
-    
-    # Proposição (principal)
-    if "Proposicao" in df.columns:
-        campos.append(df["Proposicao"].fillna("").astype(str))
-    
-    # Ementa
-    if "ementa" in df.columns:
-        campos.append(df["ementa"].fillna("").astype(str))
-    
-    # ID
-    if "id" in df.columns:
-        campos.append(df["id"].fillna("").astype(str))
-    
-    # Número separado
-    if "numero" in df.columns:
-        campos.append(df["numero"].fillna("").astype(str))
-    
-    # Tipo
-    if "siglaTipo" in df.columns:
-        campos.append(df["siglaTipo"].fillna("").astype(str))
-    
-    # Concatena tudo com espaço
-    if campos:
-        texto_completo = campos[0]
-        for c in campos[1:]:
-            texto_completo = texto_completo + " " + c
-        return texto_completo.apply(normalize_para_busca)
-    
-    return df.iloc[:, 0].astype(str).apply(normalize_para_busca)
-
-
-def busca_robusta_df(df, termo_busca: str):
-    """
-    Realiza busca robusta em um DataFrame.
-    
-    Aceita:
-    - "321"       → encontra PL 321/2023, PL 321/2024, etc.
-    - "pl321"     → encontra PL 321/qualquer ano
-    - "pl 321"    → mesmo que acima
-    - "321/2023"  → encontra especificamente 321/2023
-    - "conanda"   → busca na ementa
-    
-    Returns:
-        DataFrame filtrado
-    """
-    if df.empty or not termo_busca.strip():
-        return df
-    
-    # Normaliza o termo de busca
-    termo_norm = normalize_para_busca(termo_busca)
-    
-    if not termo_norm:
-        return df
-    
-    # Cria campo de busca robusto
-    df_busca = df.copy()
-    df_busca["_busca_robusta"] = criar_campo_busca_robusto(df)
-    
-    # Faz a busca principal
-    mascara = df_busca["_busca_robusta"].str.contains(termo_norm, na=False, regex=False)
-    
-    # FALLBACK: Se não encontrou, tenta busca direta no número
-    # Isso resolve casos onde a coluna "numero" tem "321" como int vs string
-    if not mascara.any() and "numero" in df.columns:
-        # Extrai apenas números do termo de busca
-        apenas_numeros = re.sub(r'[^0-9]', '', termo_busca)
-        if apenas_numeros:
-            mascara_numero = df["numero"].astype(str).str.strip() == apenas_numeros
-            mascara = mascara | mascara_numero
-    
-    # FALLBACK 2: Busca na coluna Proposicao com contains normal (case insensitive)
-    if not mascara.any() and "Proposicao" in df.columns:
-        termo_upper = termo_busca.strip().upper()
-        # Tenta encontrar o número na proposição
-        apenas_numeros = re.sub(r'[^0-9]', '', termo_busca)
-        if apenas_numeros:
-            mascara_prop = df["Proposicao"].fillna("").astype(str).str.contains(apenas_numeros, na=False, regex=False)
-            mascara = mascara | mascara_prop
-    
-    # Remove coluna auxiliar e retorna
-    resultado = df_busca[mascara].drop(columns=["_busca_robusta"], errors="ignore")
-    
-    return resultado
-
-# ============================================================
-# FIM - FUNÇÕES DE BUSCA ROBUSTA
-# ============================================================
-
 def extrair_numero_pl_camera(proposicao: str) -> Optional[Tuple[str, str, str]]:
     """
     Extrai tipo, número e ano de uma proposição.
@@ -2131,6 +1938,33 @@ PALAVRAS_CHAVE_PADRAO = [
 COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
 
 TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
+
+# ============================================================
+# WORKAROUND: Proposições faltantes na API da Câmara
+# ============================================================
+# A API da Câmara (endpoint idDeputadoAutor) não retorna algumas
+# proposições que são OFICIALMENTE de autoria da deputada.
+# 
+# Exemplo: PL 321/2023 (ID 2347150)
+# - Página oficial confirma: "Autor: Julia Zanatta - PL/SC"
+# - URL: https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=2347150
+# - Mas a API NÃO retorna esse PL quando consultamos por idDeputadoAutor=220559
+#
+# Este dicionário serve como FALLBACK para garantir monitoramento correto.
+# Chave: ID do deputado(a)
+# Valor: Lista de dicionários com dados das proposições faltantes
+# ============================================================
+PROPOSICOES_FALTANTES_API = {
+    "220559": [  # Julia Zanatta
+        {
+            "id": "2347150",
+            "siglaTipo": "PL",
+            "numero": "321",
+            "ano": "2023",
+            "ementa": "Altera a Lei nº 8.069, de 13 de julho de 1990 (Estatuto da Criança e do Adolescente), para dispor sobre a divulgação de informação acerca de criança e adolescente a quem se atribua ato infracional."
+        },
+    ]
+}
 
 
 
@@ -5202,11 +5036,6 @@ def buscar_pauta_semana_atual(id_deputada: int, nome_deputada: str, partido: str
             url = next_link
             params = {}
         
-        # CORREÇÃO: Adicionar proposições que a API não retorna
-        PROPOSICOES_FALTANTES = {"220559": ["2347150"]}  # PL 321/2023
-        for id_prop in PROPOSICOES_FALTANTES.get(str(id_deputada), []):
-            ids_autoria.add(str(id_prop))
-        
         # Escanear eventos para encontrar matérias de autoria/relatoria
         registros = []
         for ev in eventos:
@@ -6074,7 +5903,6 @@ def format_relator_text(relator_info: dict) -> tuple[str, str]:
         txt = nome
     return (txt, relator_id)
 
-@st.cache_data(show_spinner=False, ttl=1800)
 def fetch_proposicao_completa(id_proposicao: str) -> dict:
     """
     FUNÇÃO CENTRAL: Busca TODAS as informações da proposição de uma vez.
@@ -6507,13 +6335,6 @@ def pauta_item_palavras_chave(item, palavras_chave_normalizadas, id_prop=None):
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_ids_autoria_deputada(id_deputada):
-    """
-    Busca IDs de proposições de autoria da deputada.
-    
-    NOTA: A API da Câmara tem um bug conhecido onde algumas proposições
-    de autoria não são retornadas pelo endpoint idDeputadoAutor.
-    Por isso, mantemos uma lista de IDs conhecidos que precisam ser adicionados manualmente.
-    """
     ids = set()
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "ASC", "ordenarPor": "id"}
@@ -6537,23 +6358,6 @@ def fetch_ids_autoria_deputada(id_deputada):
 
         url = next_link
         params = {}
-
-    # ============================================================
-    # CORREÇÃO: Adicionar proposições que a API não retorna corretamente
-    # Bug conhecido: algumas proposições de autoria não aparecem no endpoint idDeputadoAutor
-    # ============================================================
-    PROPOSICOES_FALTANTES_API = {
-        "220559": [  # Julia Zanatta
-            "2347150",  # PL 321/2023 - Audiência de custódia por videoconferência
-        ]
-    }
-    
-    ids_faltantes = PROPOSICOES_FALTANTES_API.get(str(id_deputada), [])
-    for id_prop in ids_faltantes:
-        ids.add(str(id_prop))
-    
-    if ids_faltantes:
-        print(f"[AUTORIA] Adicionadas {len(ids_faltantes)} proposições que a API não retorna: {ids_faltantes}")
 
     return ids
 
@@ -6706,11 +6510,6 @@ def escanear_eventos(
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_lista_proposicoes_autoria_geral(id_deputada):
-    """
-    Busca lista completa de proposições de autoria da deputada.
-    
-    NOTA: Inclui correção para proposições que a API não retorna corretamente.
-    """
     rows = []
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "DESC", "ordenarPor": "ano"}
@@ -6742,28 +6541,14 @@ def fetch_lista_proposicoes_autoria_geral(id_deputada):
         url = next_link
         params = {}
 
-    # ============================================================
-    # CORREÇÃO: Adicionar proposições que a API não retorna corretamente
-    # ============================================================
-    PROPOSICOES_FALTANTES_API = {
-        "220559": [  # Julia Zanatta
-            {
-                "id": "2347150",
-                "siglaTipo": "PL",
-                "numero": "321",
-                "ano": "2023",
-                "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941, para dispor sobre a possibilidade de realização da audiência de custódia por videoconferência."
-            },
-        ]
-    }
-    
-    props_faltantes = PROPOSICOES_FALTANTES_API.get(str(id_deputada), [])
-    ids_existentes = {r["id"] for r in rows}
-    
-    for prop in props_faltantes:
-        if prop["id"] not in ids_existentes:
-            rows.append(prop)
-            print(f"[AUTORIA] Adicionada proposição faltante: {prop['siglaTipo']} {prop['numero']}/{prop['ano']} (ID: {prop['id']})")
+    # WORKAROUND v33: Adicionar proposições que a API não retorna (bug da Câmara)
+    id_str = str(id_deputada)
+    if id_str in PROPOSICOES_FALTANTES_API:
+        ids_existentes = {r["id"] for r in rows}
+        for prop_faltante in PROPOSICOES_FALTANTES_API[id_str]:
+            if prop_faltante["id"] not in ids_existentes:
+                rows.append(prop_faltante)
+                print(f"[API-WORKAROUND] ✅ Adicionada proposição faltante: {prop_faltante['siglaTipo']} {prop_faltante['numero']}/{prop_faltante['ano']} (ID {prop_faltante['id']})")
 
     df = pd.DataFrame(rows)
     if not df.empty:
@@ -6844,59 +6629,6 @@ def buscar_proposicao_direta(sigla_tipo: str, numero: str, ano: str) -> Optional
     except Exception as e:
         print(f"[BUSCA-DIRETA] Erro: {e}")
         return None
-
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def verificar_autoria_proposicao(id_proposicao: str, id_deputada: int) -> bool:
-    """
-    Verifica se um deputado é autor/co-autor de uma proposição.
-    
-    Consulta diretamente a API /proposicoes/{id}/autores
-    
-    Args:
-        id_proposicao: ID da proposição
-        id_deputada: ID do deputado
-        
-    Returns:
-        True se o deputado é autor/co-autor
-    """
-    import requests
-    
-    pid = str(id_proposicao).strip()
-    if not pid:
-        return False
-    
-    url = f"{BASE_URL}/proposicoes/{pid}/autores"
-    
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code != 200:
-            return False
-        
-        data = resp.json()
-        autores = data.get("dados", [])
-        
-        id_dep_str = str(id_deputada)
-        
-        for autor in autores:
-            # O ID pode estar na URI do autor
-            uri = autor.get("uri", "") or ""
-            if uri:
-                # Extrair ID da URI (ex: .../deputados/220559)
-                autor_id = uri.rstrip("/").split("/")[-1]
-                if autor_id == id_dep_str:
-                    return True
-            
-            # Também verificar por nome (backup)
-            nome = (autor.get("nome", "") or "").lower()
-            if "julia zanatta" in nome or "júlia zanatta" in nome:
-                return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"[VERIFICAR-AUTORIA] Erro: {e}")
-        return False
 
 
 def parse_proposicao_input(texto: str) -> Optional[Tuple[str, str, str]]:
@@ -8737,149 +8469,28 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
             st.markdown("---")
 
-            # Campo de busca - v32.5 BUSCA ROBUSTA
+            # Campo de busca - SOMENTE proposições de autoria (v33)
             q = st.text_input(
-                "Filtrar proposições",
+                "Filtrar proposições de autoria",
                 value="",
-                placeholder="Ex.: 321 | pl 321 | PL 321/2023 | 'conanda' | 'pix'",
-                help="Busca flexível: digite apenas o número (321), sigla+número (pl321), formato completo (PL 321/2023) ou palavras da ementa.",
+                placeholder="Ex.: PL 321/2023 | 'pix' | 'conanda' | 'oab'",
+                help="Busca entre as proposições de AUTORIA da deputada. Use sigla/número/ano ou palavras da ementa.",
                 key="busca_tab5"
             )
 
-            # v32.5: Busca robusta
-            busca_direta_resultado = None
-            
+            # v33: APENAS busca textual nas proposições de autoria
+            # Removida funcionalidade de busca direta de outras proposições
             if q.strip():
-                # Tenta parse para busca direta (se tiver formato de proposição COM ano)
-                parsed = parse_proposicao_input_v2(q)
+                qn = normalize_text(q)
+                df_busca_completa = df_aut.copy()
+                df_busca_completa["_search"] = (df_busca_completa["Proposicao"].fillna("").astype(str) + " " + df_busca_completa["ementa"].fillna("").astype(str)).apply(normalize_text)
+                df_rast = df_busca_completa[df_busca_completa["_search"].str.contains(qn, na=False)].drop(columns=["_search"], errors="ignore")
                 
-                if parsed and parsed[2]:  # Tem sigla, número E ano
-                    sigla_busca, num_busca, ano_busca = parsed
-                    prop_formatada = f"{sigla_busca} {num_busca}/{ano_busca}"
-                    
-                    # Verifica se está na lista de autoria (usando normalização robusta)
-                    ja_na_lista = df_aut[
-                        df_aut["Proposicao"].fillna("").apply(normalize_para_busca) == 
-                        normalize_para_busca(prop_formatada)
-                    ].copy() if not df_aut.empty else pd.DataFrame()
-                    
-                    if ja_na_lista.empty:
-                        # Não está na lista - fazer busca direta na API
-                        with st.spinner(f"🔍 Buscando {prop_formatada} diretamente na API..."):
-                            busca_direta_resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_busca)
-                        
-                        if busca_direta_resultado:
-                            st.success(f"✅ **{prop_formatada}** encontrada! (não é de autoria da deputada)")
-                            df_direta = pd.DataFrame([busca_direta_resultado])
-                            df_rast = df_direta.copy()
-                        else:
-                            st.warning(f"⚠️ **{prop_formatada}** não encontrada na API da Câmara")
-                            df_rast = pd.DataFrame()
-                    else:
-                        # Está na lista - usar busca robusta local
-                        df_rast = busca_robusta_df(df_aut, q)
-                        st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
+                if df_rast.empty:
+                    st.warning(f"⚠️ Nenhuma proposição de autoria encontrada com '{q}'")
                 else:
-                    # Busca parcial (sem ano completo) ou busca por texto na ementa
-                    # v32.5: Busca HÍBRIDA - local E API quando for proposição
-                    
-                    # Primeiro tenta busca local robusta
-                    df_rast = busca_robusta_df(df_aut, q)
-                    
-                    # Verifica se o termo é apenas um número (ex: "321")
-                    termo_limpo = q.strip()
-                    apenas_numero = termo_limpo.isdigit() and len(termo_limpo) >= 2
-                    
-                    # Se parsed (tem sigla+número) OU se é apenas número, complementa com API
-                    if (parsed and not parsed[2]) or apenas_numero:
-                        if parsed and not parsed[2]:
-                            # Tem sigla+número (ex: "pl 321")
-                            sigla_busca, num_busca, _ = parsed
-                            siglas_tentar = [sigla_busca]
-                        else:
-                            # Apenas número (ex: "321") - tentar principais siglas
-                            num_busca = termo_limpo
-                            siglas_tentar = ["PL", "PLP", "PEC", "PDL"]
-                        
-                        # Buscar todos os anos na API
-                        anos_tentar = ["2025", "2024", "2023", "2022", "2021", "2020", "2019"]
-                        resultados_api = []
-                        
-                        siglas_display = "/".join(siglas_tentar) if len(siglas_tentar) > 1 else siglas_tentar[0]
-                        with st.spinner(f"🔍 Buscando {siglas_display} {num_busca} na API (verificando anos 2019-2025)..."):
-                            for sigla_tentativa in siglas_tentar:
-                                for ano_tentativa in anos_tentar:
-                                    resultado = buscar_proposicao_direta(sigla_tentativa, num_busca, ano_tentativa)
-                                    if resultado:
-                                        # Evitar duplicatas
-                                        rid = str(resultado.get("id", ""))
-                                        if not any(str(r.get("id", "")) == rid for r in resultados_api):
-                                            resultados_api.append(resultado)
-                        
-                        if resultados_api:
-                            # Criar set de IDs da busca local
-                            ids_local = set(df_rast["id"].astype(str).tolist()) if not df_rast.empty else set()
-                            ids_autoria_local = set(df_aut["id"].astype(str).tolist()) if not df_aut.empty else set()
-                            
-                            # Classificar resultados da API
-                            # AGORA VERIFICA AUTORIA VIA API DE AUTORES (para pegar co-autorias)
-                            resultados_autoria = []
-                            resultados_outros = []
-                            novos_resultados = []
-                            
-                            with st.spinner("Verificando autorias..."):
-                                for r in resultados_api:
-                                    rid = str(r.get("id", ""))
-                                    
-                                    # Primeiro verifica no cache local
-                                    is_autoria = rid in ids_autoria_local
-                                    
-                                    # Se não está no cache local, VERIFICA NA API DE AUTORES
-                                    # (isso pega co-autorias que o idDeputadoAutor não retorna)
-                                    if not is_autoria:
-                                        is_autoria = verificar_autoria_proposicao(rid, id_deputada)
-                                    
-                                    r["_is_autoria"] = is_autoria
-                                    
-                                    if is_autoria:
-                                        resultados_autoria.append(r)
-                                    else:
-                                        resultados_outros.append(r)
-                                    
-                                    # Adicionar aos novos se não estava na busca local
-                                    if rid not in ids_local:
-                                        novos_resultados.append(r)
-                            
-                            # Se encontrou proposições que não estavam na busca local, adicionar
-                            if novos_resultados:
-                                df_novos = pd.DataFrame(novos_resultados)
-                                if df_rast.empty:
-                                    df_rast = df_novos
-                                else:
-                                    df_rast = pd.concat([df_rast, df_novos], ignore_index=True)
-                                    df_rast = df_rast.drop_duplicates(subset=["id"], keep="first")
-                            
-                            # Montar mensagem
-                            if resultados_autoria and resultados_outros:
-                                props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
-                                props_outros = ", ".join([r.get('Proposicao', '?') for r in resultados_outros])
-                                st.success(f"✅ Encontradas **{len(resultados_api)}** proposições via API:\n"
-                                          f"- **De autoria/co-autoria:** {props_autoria}\n"
-                                          f"- **Outras:** {props_outros}")
-                            elif resultados_autoria:
-                                props_autoria = ", ".join([r.get('Proposicao', '?') for r in resultados_autoria])
-                                st.success(f"✅ **{props_autoria}** encontrada(s)! (de autoria/co-autoria da deputada)")
-                            elif apenas_numero and resultados_outros:
-                                # Se buscou apenas número e encontrou proposições (mas não de autoria), mostrar
-                                props_outros = ", ".join([r.get('Proposicao', '?') for r in resultados_outros])
-                                st.info(f"ℹ️ Encontradas **{len(resultados_outros)}** proposições com número {num_busca}: {props_outros} (não são de autoria da deputada)")
-                        
-                        elif apenas_numero and df_rast.empty:
-                            st.info(f"ℹ️ Nenhuma proposição PL/PLP/PEC/PDL {num_busca} encontrada nos anos 2019-2025.")
-                    
-                    st.caption(f"🔍 Busca em **todas** as {len(df_aut)} proposições de autoria")
+                    st.caption(f"🔍 Encontrado(s) {len(df_rast)} resultado(s) entre as {len(df_aut)} proposições de autoria")
             else:
-                # Sem filtro - mostra tudo (respeitando filtros de ano/tipo)
                 df_rast = df_base.copy()
 
             # Verificar se tem resultados
@@ -9003,6 +8614,17 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     df_tbl["Último andamento"] = df_tbl.apply(get_ultimo_andamento_integrado, axis=1)
                     df_tbl["Data do status"] = df_tbl.apply(get_data_status_integrado, axis=1)
                     df_tbl["Parado (dias)"] = df_tbl.apply(get_parado_dias_integrado, axis=1)
+                    
+                    # v33: IMPORTANTE - Atualizar "Situação atual" com status do SENADO
+                    def get_situacao_integrada(row):
+                        if row.get("no_senado"):
+                            # Priorizar situação do Senado
+                            sit_senado = row.get("situacao_senado", "")
+                            if sit_senado and sit_senado.strip():
+                                return f"🏛️ {sit_senado}"  # Emoji indica Senado
+                        return row.get("Situação atual", "")
+                    
+                    df_tbl["Situação atual"] = df_tbl.apply(get_situacao_integrada, axis=1)
                     
                     # Recalcular alerta com novos valores
                     df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
@@ -9550,6 +9172,16 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         
                         df_tbl_status["Última tramitação"] = df_tbl_status.apply(get_ultima_tram_integrado_tab6, axis=1)
                         df_tbl_status["Parado há"] = df_tbl_status.apply(get_parado_integrado_tab6, axis=1)
+                        
+                        # v33: IMPORTANTE - Atualizar "Situação atual" com status do SENADO
+                        def get_situacao_integrada_tab6(row):
+                            if row.get("no_senado"):
+                                sit_senado = row.get("situacao_senado", "")
+                                if sit_senado and sit_senado.strip():
+                                    return f"🏛️ {sit_senado}"  # Emoji indica Senado
+                            return row.get("Situação atual", "")
+                        
+                        df_tbl_status["Situação atual"] = df_tbl_status.apply(get_situacao_integrada_tab6, axis=1)
                         
                     else:
                         df_tbl_status["Relator_Exibido"] = df_tbl_status.get("Relator(a)", "—")
