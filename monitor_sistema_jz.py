@@ -1,5 +1,11 @@
-# monitor_sistema_jz.py - v33 INTEGRAÇÃO CORRIGIDA + WORKAROUND API
+# monitor_sistema_jz.py - v34 PROPOSIÇÕES FALTANTES ADICIONADAS
 # 
+# ALTERAÇÕES v34 - PROPOSIÇÕES FALTANTES:
+# - ADICIONADO: PL 2472/2023 (TEA/acompanhante escolas) - Apensado ao PL 1620/2023
+# - ADICIONADO: PL 2815/2023 (Bagagem de mão aeronaves) - Apensado ao PL 9417/2017
+# - ADICIONADO: PL 4045/2023 (Impedimento OAB) - Apensado ao PL 3593/2020
+# - NOTA: Proposições apensadas não tramitam mais individualmente
+#
 # ALTERAÇÕES v33 - CORREÇÕES CRÍTICAS:
 # - REMOVIDO: Busca direta de projetos que NÃO são da deputada na Aba 5
 # - CORRIGIDO: Workaround para PL 321/2023 e outras proposições faltantes na API
@@ -1956,12 +1962,41 @@ TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 # ============================================================
 PROPOSICOES_FALTANTES_API = {
     "220559": [  # Julia Zanatta
+        # PL 321/2023 - Audiência de custódia por videoconferência
+        # Status: Aguardando Apreciação pelo Senado Federal
         {
             "id": "2347150",
             "siglaTipo": "PL",
             "numero": "321",
             "ano": "2023",
             "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941, para dispor sobre a possibilidade de realização da audiência de custódia por videoconferência."
+        },
+        # PL 2472/2023 - Acompanhante especializado para TEA em escolas
+        # Status: Apensado ao PL 1620/2023
+        {
+            "id": "2361454",
+            "siglaTipo": "PL",
+            "numero": "2472",
+            "ano": "2023",
+            "ementa": "Altera as Leis nº 12.764, de 27 de dezembro de 2012, e nº 13.146, de 6 de julho de 2015, para assegurar à pessoa com transtorno do espectro autista e às pessoas com transtornos mentais, incluídas nas classes comuns de ensino regular, em casos de comprovada necessidade, acompanhante especializado com formação específica em Pedagogia ou em Educação Especial."
+        },
+        # PL 2815/2023 - Bagagem de mão em aeronaves
+        # Status: Apensado ao PL 9417/2017
+        {
+            "id": "2365600",
+            "siglaTipo": "PL",
+            "numero": "2815",
+            "ano": "2023",
+            "ementa": "Altera a Lei nº 7.565, de 1986 (Código Brasileiro de Aeronáutica), para dispor sobre a acomodação de bagagem de mão nas aeronaves."
+        },
+        # PL 4045/2023 - Impedimento de cônjuges/parentes de Ministros na OAB
+        # Status: Apensado ao PL 3593/2020
+        {
+            "id": "2381193",
+            "siglaTipo": "PL",
+            "numero": "4045",
+            "ano": "2023",
+            "ementa": "Altera a Lei n. 8.906, de 4 de julho de 1994, que dispõe sobre o Estatuto da Advocacia e a Ordem dos Advogados do Brasil (OAB), para instituir o impedimento da atuação de cônjuges, parentes, sócios e ex-sócios de Ministros nas Cortes Superiores que cita, e estabelece outras providências."
         },
     ]
 }
