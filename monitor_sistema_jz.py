@@ -5,6 +5,8 @@
 # - parse_proposicao_input_v2() - aceita busca SEM ano (ex: "pl 321")
 # - Busca em múltiplos campos: Proposição, ementa, ID, número
 # - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
+# - BUSCA AUTOMÁTICA: "pl 321" tenta anos 2023-2025 automaticamente na API
+# - FIX: Adicionado @st.cache_data em fetch_proposicao_completa (erro .clear())
 #
 # ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
 # - Verificação expandida para detecção de Senado
@@ -6041,6 +6043,7 @@ def format_relator_text(relator_info: dict) -> tuple[str, str]:
         txt = nome
     return (txt, relator_id)
 
+@st.cache_data(show_spinner=False, ttl=1800)
 def fetch_proposicao_completa(id_proposicao: str) -> dict:
     """
     FUNÇÃO CENTRAL: Busca TODAS as informações da proposição de uma vez.
@@ -8642,15 +8645,27 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
                 else:
                     # Busca parcial (sem ano completo) ou busca por texto na ementa
-                    # Usa busca robusta local
+                    # Usa busca robusta local primeiro
                     df_rast = busca_robusta_df(df_aut, q)
                     
                     if df_rast.empty and parsed and not parsed[2]:
-                        # Usuário digitou algo como "pl 321" mas não foi encontrado
-                        # Informa que pode especificar o ano para busca direta
+                        # Usuário digitou algo como "pl 321" mas não foi encontrado nas proposições de autoria
+                        # Tenta busca direta na API para os anos mais prováveis (2023, 2024, 2025)
                         sigla_busca, num_busca, _ = parsed
-                        st.info(f"💡 **Dica:** Para buscar {sigla_busca} {num_busca} fora das proposições de autoria, "
-                               f"especifique o ano: `{sigla_busca} {num_busca}/2023` ou `{sigla_busca} {num_busca}/2024`")
+                        anos_tentar = ["2025", "2024", "2023"]
+                        
+                        with st.spinner(f"🔍 Buscando {sigla_busca} {num_busca} na API (tentando anos {', '.join(anos_tentar)})..."):
+                            for ano_tentativa in anos_tentar:
+                                busca_direta_resultado = buscar_proposicao_direta(sigla_busca, num_busca, ano_tentativa)
+                                if busca_direta_resultado:
+                                    st.success(f"✅ **{sigla_busca} {num_busca}/{ano_tentativa}** encontrada! (não é de autoria da deputada)")
+                                    df_direta = pd.DataFrame([busca_direta_resultado])
+                                    df_rast = df_direta.copy()
+                                    break
+                        
+                        if df_rast.empty:
+                            st.warning(f"⚠️ **{sigla_busca} {num_busca}** não encontrada nos anos 2023-2025. "
+                                      f"Tente especificar o ano exato: `{sigla_busca} {num_busca}/AAAA`")
                     
                     st.caption(f"🔍 Busca textual em **todas** as {len(df_aut)} proposições de autoria")
             else:
