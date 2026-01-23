@@ -1,4 +1,11 @@
-# monitor_sistema_jz.py - v32.5 BUSCA ROBUSTA
+# monitor_sistema_jz.py - v32.6 CORREÇÃO BUG API CÂMARA
+# 
+# ALTERAÇÕES v32.6 - CORREÇÃO BUG API CÂMARA:
+# - FIX CRÍTICO: A API da Câmara não retorna algumas proposições via idDeputadoAutor
+# - PL 321/2023 (ID 2347150) é de autoria da Julia Zanatta mas não aparecia na lista
+# - Adicionado mecanismo de "proposições faltantes" para corrigir falhas da API
+# - Proposições são verificadas e adicionadas em todas as funções de busca
+# - Busca apenas número (ex: "321") agora tenta PL/PLP/PEC/PDL automaticamente
 # 
 # ALTERAÇÕES v32.5 - BUSCA ROBUSTA:
 # - Nova função normalize_para_busca() - remove espaços, barras, acentos
@@ -6,9 +13,7 @@
 # - Busca em múltiplos campos: Proposição, ementa, ID, número
 # - Aceita: "321", "pl321", "pl 321", "321/2023", "PL 321/2023"
 # - BUSCA HÍBRIDA: busca local + API, combina resultados
-# - NOVA: verificar_autoria_proposicao() - verifica CO-AUTORIAS via API /autores
-# - NOVA: Busca apenas número (ex: "321") tenta PL/PLP/PEC/PDL automaticamente
-# - Corrige problema onde co-autorias não eram identificadas
+# - verificar_autoria_proposicao() - verifica CO-AUTORIAS via API /autores
 # - FIX: Adicionado @st.cache_data em fetch_proposicao_completa (erro .clear())
 #
 # ALTERAÇÕES v32.4 - CORREÇÕES E MELHORIAS:
@@ -5197,6 +5202,11 @@ def buscar_pauta_semana_atual(id_deputada: int, nome_deputada: str, partido: str
             url = next_link
             params = {}
         
+        # CORREÇÃO: Adicionar proposições que a API não retorna
+        PROPOSICOES_FALTANTES = {"220559": ["2347150"]}  # PL 321/2023
+        for id_prop in PROPOSICOES_FALTANTES.get(str(id_deputada), []):
+            ids_autoria.add(str(id_prop))
+        
         # Escanear eventos para encontrar matérias de autoria/relatoria
         registros = []
         for ev in eventos:
@@ -6497,6 +6507,13 @@ def pauta_item_palavras_chave(item, palavras_chave_normalizadas, id_prop=None):
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_ids_autoria_deputada(id_deputada):
+    """
+    Busca IDs de proposições de autoria da deputada.
+    
+    NOTA: A API da Câmara tem um bug conhecido onde algumas proposições
+    de autoria não são retornadas pelo endpoint idDeputadoAutor.
+    Por isso, mantemos uma lista de IDs conhecidos que precisam ser adicionados manualmente.
+    """
     ids = set()
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "ASC", "ordenarPor": "id"}
@@ -6520,6 +6537,23 @@ def fetch_ids_autoria_deputada(id_deputada):
 
         url = next_link
         params = {}
+
+    # ============================================================
+    # CORREÇÃO: Adicionar proposições que a API não retorna corretamente
+    # Bug conhecido: algumas proposições de autoria não aparecem no endpoint idDeputadoAutor
+    # ============================================================
+    PROPOSICOES_FALTANTES_API = {
+        "220559": [  # Julia Zanatta
+            "2347150",  # PL 321/2023 - Audiência de custódia por videoconferência
+        ]
+    }
+    
+    ids_faltantes = PROPOSICOES_FALTANTES_API.get(str(id_deputada), [])
+    for id_prop in ids_faltantes:
+        ids.add(str(id_prop))
+    
+    if ids_faltantes:
+        print(f"[AUTORIA] Adicionadas {len(ids_faltantes)} proposições que a API não retorna: {ids_faltantes}")
 
     return ids
 
@@ -6672,6 +6706,11 @@ def escanear_eventos(
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_lista_proposicoes_autoria_geral(id_deputada):
+    """
+    Busca lista completa de proposições de autoria da deputada.
+    
+    NOTA: Inclui correção para proposições que a API não retorna corretamente.
+    """
     rows = []
     url = f"{BASE_URL}/proposicoes"
     params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "DESC", "ordenarPor": "ano"}
@@ -6702,6 +6741,29 @@ def fetch_lista_proposicoes_autoria_geral(id_deputada):
             break
         url = next_link
         params = {}
+
+    # ============================================================
+    # CORREÇÃO: Adicionar proposições que a API não retorna corretamente
+    # ============================================================
+    PROPOSICOES_FALTANTES_API = {
+        "220559": [  # Julia Zanatta
+            {
+                "id": "2347150",
+                "siglaTipo": "PL",
+                "numero": "321",
+                "ano": "2023",
+                "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941, para dispor sobre a possibilidade de realização da audiência de custódia por videoconferência."
+            },
+        ]
+    }
+    
+    props_faltantes = PROPOSICOES_FALTANTES_API.get(str(id_deputada), [])
+    ids_existentes = {r["id"] for r in rows}
+    
+    for prop in props_faltantes:
+        if prop["id"] not in ids_existentes:
+            rows.append(prop)
+            print(f"[AUTORIA] Adicionada proposição faltante: {prop['siglaTipo']} {prop['numero']}/{prop['ano']} (ID: {prop['id']})")
 
     df = pd.DataFrame(rows)
     if not df.empty:
