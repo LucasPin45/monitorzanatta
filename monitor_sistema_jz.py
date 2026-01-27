@@ -2015,26 +2015,39 @@ PROPOSICOES_FALTANTES_API = {
 # Mapeamento conhecido: ID da proposição → PL principal
 # Fonte: Relatório de Pesquisa da Câmara dos Deputados
 MAPEAMENTO_APENSADOS = {
+    # === PLs ===
     "2361454": "PL 1620/2023",      # PL 2472/2023 - TEA/Acompanhante escolas
     "2361794": "PL 2782/2022",      # PL 2501/2023 - Crime de censura
     "2365600": "PL 9417/2017",      # PL 2815/2023 - Bagagem de mão
-    "2372482": "PLP 316/2016",      # PLP 141/2023 - Inelegibilidade
     "2381193": "PL 3593/2020",      # PL 4045/2023 - OAB/STF
-    "2390310": "PLP 156/2012",      # PLP (coautoria) 
     "2396351": "PL 5065/2016",      # PL 5021/2023 - Organizações terroristas
     "2399426": "PL 736/2022",       # PL 5198/2023 - ONGs estrangeiras
     "2423254": "PL 776/2024",       # PL 955/2024 - Vacinação
     "2436763": "PL 5499/2020",      # PL 2098/2024 - Produtos alimentícios
-    "2439451": "PL 4019/2021",      # PL (coautoria)
     "2455562": "PL 2829/2023",      # PL 3338/2024 - Direito dos pais
     "2455568": "PL 4068/2020",      # PL 3341/2024 - Moeda digital/DREX
     "2462038": "PL 1036/2019",      # PL 3887/2024 - CLT/Contribuição sindical
-    "2483453": "PLP 235/2024",      # PLP 19/2025 - Sigilo financeiro
     "2485135": "PL 606/2022",       # PL 623/2025 - CPC
     "2531615": "PL 2617/2025",      # PL 3222/2025 - Prisão preventiva
     "2567301": "PL 1500/2025",      # PL 4954/2025 - Maria da Penha masculina
     "2570510": "PL 503/2025",       # PL 5072/2025 - Paternidade socioafetiva
     "2571359": "PL 6198/2023",      # PL 5128/2025 - Maria da Penha/Falsas denúncias
+    # === PLPs ===
+    "2372482": "PLP 316/2016",      # PLP 141/2023 - Inelegibilidade
+    "2390310": "PLP 156/2012",      # PLP (coautoria) 
+    "2439451": "PL 4019/2021",      # PL (coautoria)
+    "2483453": "PLP 235/2024",      # PLP 19/2025 - Sigilo financeiro
+    # === PDLs ===
+    "2482260": "PDL 3/2025",        # PDL 24/2025 - Susta Decreto 12.341 (PIX)
+    "2482169": "PDL 3/2025",        # PDL 16/2025 - Susta Decreto 12.341 (PIX)
+    "2374405": "PDL 174/2023",      # PDL 194/2023 - Susta Decreto armas
+    "2374340": "PDL 174/2023",      # PDL 189/2023 - Susta Decreto armas
+    "2419264": "PDL 3/2024",        # PDL 30/2024 - Susta Resolução TSE
+    "2375447": "PDL 183/2023",      # PDL 209/2023 - Susta Resolução ANS
+    "2456691": "PDL 285/2024",      # PDL 348/2024 - Susta IN banheiros
+    "2390075": "PDL 302/2023",      # PDL 337/2023 - Susta Resolução CONAMA
+    # === PECs ===
+    "2448732": "PEC 8/2021",        # PEC 28/2024 - Mandado de segurança coletivo
 }
 
 
@@ -2142,12 +2155,13 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     1. Identifica projetos com situação "Tramitando em Conjunto"
     2. Usa dicionário de mapeamentos para encontrar o PL principal
     3. Se não estiver no dicionário, tenta buscar nas tramitações
-    4. Busca dados atualizados do PL principal
+    4. Busca dados atualizados do PL principal (autor, foto, última movimentação)
     
     Returns:
         Lista de dicionários com dados dos projetos apensados e seus PLs principais
     """
     import re
+    from datetime import datetime, timezone
     
     print(f"[APENSADOS] Buscando projetos apensados...")
     
@@ -2211,6 +2225,10 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                 status = dados_prop.get("statusProposicao", {})
                 situacao = status.get("descricaoSituacao", "")
                 
+                # Se não tem ementa, buscar do detalhe
+                if not ementa:
+                    ementa = dados_prop.get("ementa", "")
+                
                 # 3. Verificar se está apensada
                 situacao_lower = situacao.lower()
                 
@@ -2243,41 +2261,72 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                             # Buscar ID do PL principal
                             id_principal = buscar_id_proposicao(tipo_principal, numero_principal, ano_principal)
                             
-                            # Buscar autor e situação do PL principal
+                            # Inicializar dados
                             autor_principal = "—"
+                            id_autor_principal = ""
+                            foto_autor = ""
                             situacao_principal = "—"
                             orgao_principal = "—"
+                            ementa_principal = "—"
+                            data_ultima_mov = ""
+                            dias_parado = 0
                             
                             if id_principal:
                                 try:
-                                    # Autor
+                                    # Autor e ID do autor
                                     url_autores = f"{BASE_URL}/proposicoes/{id_principal}/autores"
                                     resp_autores = requests.get(url_autores, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
                                     if resp_autores.status_code == 200:
                                         autores = resp_autores.json().get("dados", [])
                                         if autores:
                                             autor_principal = autores[0].get("nome", "—")
+                                            # Extrair ID do deputado da URI
+                                            uri_autor = autores[0].get("uri", "")
+                                            if "/deputados/" in uri_autor:
+                                                id_autor_principal = uri_autor.split("/deputados/")[-1].split("?")[0]
+                                                # Foto do deputado
+                                                if id_autor_principal:
+                                                    foto_autor = f"https://www.camara.leg.br/internet/deputado/bandep/{id_autor_principal}.jpg"
                                     
-                                    # Situação
+                                    # Situação, órgão, ementa
                                     url_det = f"{BASE_URL}/proposicoes/{id_principal}"
-                                    resp_det = requests.get(url_det, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
-                                    if resp_det.status_code == 200:
-                                        dados_det = resp_det.json().get("dados", {})
+                                    resp_det2 = requests.get(url_det, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                    if resp_det2.status_code == 200:
+                                        dados_det = resp_det2.json().get("dados", {})
                                         status_det = dados_det.get("statusProposicao", {})
                                         situacao_principal = status_det.get("descricaoSituacao", "—")
                                         orgao_principal = status_det.get("siglaOrgao", "—")
-                                except:
-                                    pass
+                                        ementa_principal = dados_det.get("ementa", "—")
+                                        
+                                        # Data da última movimentação
+                                        data_hora_status = status_det.get("dataHora", "")
+                                        if data_hora_status:
+                                            try:
+                                                dt = datetime.fromisoformat(data_hora_status.replace("Z", "+00:00"))
+                                                data_ultima_mov = dt.strftime("%d/%m/%Y")
+                                                # Calcular dias parado
+                                                agora = datetime.now(timezone.utc)
+                                                diferenca = agora - dt
+                                                dias_parado = diferenca.days
+                                            except:
+                                                data_ultima_mov = data_hora_status[:10] if data_hora_status else ""
+                                except Exception as e:
+                                    print(f"[APENSADOS]    ⚠️ Erro ao buscar dados do PL principal: {e}")
                             
                             projetos_apensados.append({
                                 "pl_zanatta": prop_nome,
                                 "id_zanatta": prop_id,
-                                "ementa_zanatta": ementa[:150] + "..." if len(ementa) > 150 else ementa,
+                                "ementa_zanatta": ementa[:200] + "..." if len(ementa) > 200 else ementa,
                                 "pl_principal": pl_principal,
                                 "id_principal": id_principal,
                                 "autor_principal": autor_principal,
+                                "id_autor_principal": id_autor_principal,
+                                "foto_autor": foto_autor,
                                 "situacao_principal": situacao_principal,
                                 "orgao_principal": orgao_principal,
+                                "ementa_principal": ementa_principal[:200] + "..." if len(ementa_principal) > 200 else ementa_principal,
+                                "data_ultima_mov": data_ultima_mov,
+                                "dias_parado": dias_parado,
                             })
             
             except Exception as e:
@@ -10275,7 +10324,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
 
     # ============================================================
-    # ABA 9 - PROJETOS APENSADOS (v35 - AUTOMÁTICO)
+    # ABA 9 - PROJETOS APENSADOS (v35 - COMPLETO)
     # ============================================================
     with tab9:
         st.title("📎 Projetos Apensados")
@@ -10290,8 +10339,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         > As movimentações passam a ocorrer no **PL principal** (que não é da deputada).
         > Por isso, monitoramos o PL principal para acompanhar o andamento.
         
-        ✅ **Sistema HÍBRIDO** - usa base de dados conhecida + detecção automática para novos projetos!
-        
         ---
         """)
         
@@ -10300,105 +10347,202 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         with col_btn:
             carregar_apensados = st.button("🔄 Detectar Projetos Apensados", type="primary", key="btn_apensados")
         with col_info:
-            st.caption("🤖 Detecção automática via API da Câmara")
+            st.caption("🤖 Detecção via API da Câmara (pode demorar alguns segundos)")
         
         if carregar_apensados or st.session_state.get("apensados_carregados"):
             st.session_state["apensados_carregados"] = True
             
-            with st.spinner("🔍 Detectando projetos apensados automaticamente..."):
-                # Usar função de detecção automática
+            with st.spinner("🔍 Detectando projetos apensados e buscando dados atualizados..."):
+                # Usar função de detecção
                 projetos_apensados = buscar_projetos_apensados_automatico(id_deputada)
             
             if not projetos_apensados:
                 st.warning("Nenhum projeto apensado encontrado ou erro na detecção.")
                 st.info("💡 Isso pode significar que nenhum projeto da deputada está apensado no momento.")
             else:
-                # Converter para DataFrame
-                df_apensados = pd.DataFrame(projetos_apensados)
-                
-                # Métricas
+                # ============================================================
+                # MÉTRICAS
+                # ============================================================
                 st.markdown("### 📊 Resumo")
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
+                
                 with col1:
                     st.metric("Total de PLs Apensados", len(projetos_apensados))
+                
                 with col2:
-                    aguardando = len([p for p in projetos_apensados if "Aguardando" in p.get("situacao_principal", "")])
-                    st.metric("Aguardando Parecer/Relator", aguardando)
+                    aguardando_parecer = len([p for p in projetos_apensados 
+                        if "Aguardando Parecer" in p.get("situacao_principal", "")])
+                    st.metric("Aguardando Parecer", aguardando_parecer)
+                
                 with col3:
-                    pronta = len([p for p in projetos_apensados if "Pronta para Pauta" in p.get("situacao_principal", "")])
+                    aguardando_relator = len([p for p in projetos_apensados 
+                        if "Designação de Relator" in p.get("situacao_principal", "")])
+                    st.metric("Aguardando Relator", aguardando_relator)
+                
+                with col4:
+                    pronta = len([p for p in projetos_apensados 
+                        if "Pronta para Pauta" in p.get("situacao_principal", "")])
                     st.metric("Pronta para Pauta", pronta, delta="⚠️ Atenção!" if pronta > 0 else None)
                 
                 st.markdown("---")
                 
-                # Tabela principal
+                # ============================================================
+                # TABELA PRINCIPAL
+                # ============================================================
                 st.markdown("### 📋 Projetos Apensados Detectados")
                 
-                # Renomear colunas para exibição
-                df_view = df_apensados.copy()
-                df_view = df_view.rename(columns={
-                    "pl_zanatta": "PL Zanatta",
-                    "pl_principal": "PL Principal",
-                    "autor_principal": "Autor Principal",
-                    "situacao_principal": "Situação Atual",
-                    "orgao_principal": "Órgão",
-                    "ementa_zanatta": "Ementa (Zanatta)",
-                })
+                # Preparar dados para tabela
+                dados_tabela = []
+                for p in projetos_apensados:
+                    # Formatar "Parado há X dias"
+                    dias = p.get("dias_parado", 0)
+                    if dias == 0:
+                        parado_str = "Hoje"
+                    elif dias == 1:
+                        parado_str = "1 dia"
+                    elif dias < 30:
+                        parado_str = f"{dias} dias"
+                    elif dias < 365:
+                        meses = dias // 30
+                        parado_str = f"{meses} {'mês' if meses == 1 else 'meses'}"
+                    else:
+                        anos = dias // 365
+                        parado_str = f"{anos} {'ano' if anos == 1 else 'anos'}"
+                    
+                    # Sinalização de alerta
+                    sinal = ""
+                    situacao = p.get("situacao_principal", "")
+                    if "Pronta para Pauta" in situacao:
+                        sinal = "🔴"
+                    elif "Aguardando Parecer" in situacao or "Aguardando Designação" in situacao:
+                        sinal = "🟡"
+                    else:
+                        sinal = "🟢"
+                    
+                    dados_tabela.append({
+                        "Sinal": sinal,
+                        "PL Zanatta": p.get("pl_zanatta", ""),
+                        "PL Principal": p.get("pl_principal", ""),
+                        "Autor Principal": p.get("autor_principal", ""),
+                        "Situação": p.get("situacao_principal", "")[:60] + ("..." if len(p.get("situacao_principal", "")) > 60 else ""),
+                        "Órgão": p.get("orgao_principal", ""),
+                        "Parado há": parado_str,
+                        "Ementa (PL Principal)": p.get("ementa_principal", "")[:80] + ("..." if len(p.get("ementa_principal", "")) > 80 else ""),
+                        "id_principal": p.get("id_principal", ""),
+                    })
+                
+                df_tabela = pd.DataFrame(dados_tabela)
                 
                 # Adicionar link
-                df_view["Link"] = df_view["id_principal"].apply(
-                    lambda x: f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={x}"
+                df_tabela["Link"] = df_tabela["id_principal"].apply(
+                    lambda x: f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={x}" if x else ""
                 )
                 
-                cols_exibir = ["PL Zanatta", "PL Principal", "Autor Principal", "Situação Atual", "Órgão", "Link"]
-                cols_exibir = [c for c in cols_exibir if c in df_view.columns]
+                # Colunas para exibir
+                cols_exibir = ["Sinal", "PL Zanatta", "PL Principal", "Autor Principal", "Situação", "Órgão", "Parado há", "Ementa (PL Principal)", "Link"]
                 
                 st.dataframe(
-                    df_view[cols_exibir],
+                    df_tabela[cols_exibir],
                     use_container_width=True,
                     hide_index=True,
+                    height=400,
                     column_config={
-                        "Link": st.column_config.LinkColumn("Link", display_text="🔗 Ver"),
-                        "Situação Atual": st.column_config.TextColumn("Situação", width="medium"),
+                        "Sinal": st.column_config.TextColumn("🚦", width="small"),
+                        "Link": st.column_config.LinkColumn("🔗", display_text="Ver"),
+                        "Situação": st.column_config.TextColumn("Situação", width="medium"),
+                        "Ementa (PL Principal)": st.column_config.TextColumn("Ementa", width="large"),
+                        "Parado há": st.column_config.TextColumn("Parado há", width="small"),
                     },
                 )
                 
+                # Legenda
+                st.caption("🔴 Pronta para Pauta | 🟡 Aguardando Parecer/Relator | 🟢 Outros")
+                
                 st.markdown("---")
                 
-                # Detalhes por projeto
+                # ============================================================
+                # DETALHES DOS PROJETOS
+                # ============================================================
                 st.markdown("### 🔍 Detalhes dos Projetos")
                 
                 for ap in projetos_apensados:
-                    with st.expander(f"📄 {ap['pl_zanatta']} → {ap['pl_principal']}", expanded=False):
-                        col_a, col_b = st.columns(2)
+                    situacao = ap.get("situacao_principal", "")
+                    
+                    # Ícone baseado na situação
+                    if "Pronta para Pauta" in situacao:
+                        icone = "🔴"
+                    elif "Aguardando" in situacao:
+                        icone = "🟡"
+                    else:
+                        icone = "📄"
+                    
+                    with st.expander(f"{icone} {ap['pl_zanatta']} → {ap['pl_principal']} | {ap.get('dias_parado', 0)} dias parado", expanded=False):
+                        # Layout com foto do autor
+                        col_foto, col_info1, col_info2 = st.columns([1, 2, 2])
                         
-                        with col_a:
+                        with col_foto:
+                            # Foto do autor do PL principal
+                            foto_url = ap.get("foto_autor", "")
+                            if foto_url:
+                                st.image(foto_url, width=100, caption=ap.get("autor_principal", ""))
+                            else:
+                                st.markdown("👤")
+                                st.caption(ap.get("autor_principal", "—"))
+                        
+                        with col_info1:
                             st.markdown("**📌 Projeto da Deputada:**")
                             st.markdown(f"**{ap['pl_zanatta']}**")
-                            st.caption(ap['ementa_zanatta'])
+                            st.caption(ap.get('ementa_zanatta', ''))
+                            st.markdown(f"🔗 [Ver PL da deputada](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_zanatta', '')})")
                         
-                        with col_b:
+                        with col_info2:
                             st.markdown("**📎 Apensado a:**")
                             st.markdown(f"**{ap['pl_principal']}**")
-                            st.markdown(f"👤 Autor: {ap['autor_principal']}")
-                            st.markdown(f"📊 Situação: {ap['situacao_principal']}")
-                            st.markdown(f"🏛️ Órgão: {ap['orgao_principal']}")
+                            st.markdown(f"👤 **Autor:** {ap.get('autor_principal', '—')}")
+                            st.markdown(f"📊 **Situação:** {ap.get('situacao_principal', '—')}")
+                            st.markdown(f"🏛️ **Órgão:** {ap.get('orgao_principal', '—')}")
+                            st.markdown(f"📅 **Última mov.:** {ap.get('data_ultima_mov', '—')} ({ap.get('dias_parado', 0)} dias)")
                         
-                        st.markdown(f"🔗 [Ver tramitação completa](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap['id_principal']})")
+                        st.markdown("---")
                         
-                        # Botão para detalhes
-                        if st.button(f"🔄 Carregar tramitações de {ap['pl_principal']}", key=f"btn_detalhe_{ap['id_principal']}"):
-                            exibir_detalhes_proposicao(ap['id_principal'], key_prefix=f"apensado_{ap['id_principal']}")
+                        # Ementa do PL principal
+                        st.markdown("**📝 Ementa do PL Principal:**")
+                        st.info(ap.get("ementa_principal", "—"))
+                        
+                        # Link para tramitação
+                        st.markdown(f"🔗 [Ver tramitação completa do PL principal](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_principal', '')})")
+                        
+                        # Botão para carregar tramitações
+                        if st.button(f"🔄 Carregar tramitações recentes", key=f"btn_tram_{ap.get('id_principal', '')}"):
+                            exibir_detalhes_proposicao(ap.get('id_principal', ''), key_prefix=f"apensado_{ap.get('id_principal', '')}")
                 
                 st.markdown("---")
                 
-                # Download
+                # ============================================================
+                # DOWNLOADS
+                # ============================================================
                 st.markdown("### ⬇️ Downloads")
+                
+                # Preparar DataFrame completo para download
+                df_download = pd.DataFrame(projetos_apensados)
+                df_download = df_download.rename(columns={
+                    "pl_zanatta": "PL Zanatta",
+                    "pl_principal": "PL Principal",
+                    "autor_principal": "Autor Principal",
+                    "situacao_principal": "Situação",
+                    "orgao_principal": "Órgão",
+                    "ementa_zanatta": "Ementa (Zanatta)",
+                    "ementa_principal": "Ementa (Principal)",
+                    "data_ultima_mov": "Última Movimentação",
+                    "dias_parado": "Dias Parado",
+                })
+                
                 col_dl1, col_dl2 = st.columns(2)
                 
                 with col_dl1:
-                    bytes_out, mime, ext = to_xlsx_bytes(df_view, "Projetos_Apensados")
+                    bytes_out, mime, ext = to_xlsx_bytes(df_download, "Projetos_Apensados")
                     st.download_button(
-                        "⬇️ Baixar XLSX",
+                        "⬇️ Baixar XLSX Completo",
                         data=bytes_out,
                         file_name=f"projetos_apensados_zanatta.{ext}",
                         mime=mime,
@@ -10407,23 +10551,16 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 
                 st.markdown("---")
                 
-                # Alerta sobre monitoramento
-                st.success("""
-                **✅ Sistema Híbrido de Detecção Ativado!**
-                
-                O sistema usa duas fontes para identificar projetos apensados:
-                
-                1. **Dicionário de mapeamentos** (20 projetos conhecidos) - fonte confiável
-                2. **Busca nas tramitações** (para novos projetos) - detecção automática
-                
-                Se um novo projeto for apensado e não estiver no dicionário, o sistema 
-                tentará encontrar o PL principal automaticamente nas tramitações.
-                
-                O robô `monitorar_apensados.py` usa a mesma lógica para notificar via Telegram.
+                # Info
+                st.info(f"""
+                **📊 Estatísticas da detecção:**
+                - Total de projetos apensados encontrados: **{len(projetos_apensados)}**
+                - Mapeamentos no dicionário: **{len(MAPEAMENTO_APENSADOS)}**
+                - Projetos no cadastro manual: **{len(PROPOSICOES_FALTANTES_API.get('220559', []))}**
                 """)
         
         else:
-            st.info("👆 Clique em **Detectar Projetos Apensados** para buscar automaticamente.")
+            st.info("👆 Clique em **Detectar Projetos Apensados** para buscar os dados.")
         
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
