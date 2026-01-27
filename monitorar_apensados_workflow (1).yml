@@ -1,0 +1,70 @@
+# .github/workflows/monitorar_apensados.yml
+# ============================================================
+# Workflow: Monitor de Projetos Apensados - Dep. Júlia Zanatta
+# ============================================================
+# Verifica tramitações dos PLs PRINCIPAIS que têm projetos 
+# da deputada apensados e notifica via Telegram.
+#
+# Horário: 08:00 às 20:00 (Brasília) - A cada 3 horas
+# ============================================================
+
+name: Monitor Projetos Apensados
+
+on:
+  # Execução agendada (cron em UTC - Brasília é UTC-3)
+  schedule:
+    # 11:00 UTC = 08:00 BRT
+    - cron: '0 11 * * 1-5'
+    # 14:00 UTC = 11:00 BRT
+    - cron: '0 14 * * 1-5'
+    # 17:00 UTC = 14:00 BRT
+    - cron: '0 17 * * 1-5'
+    # 20:00 UTC = 17:00 BRT
+    - cron: '0 20 * * 1-5'
+    # 23:00 UTC = 20:00 BRT
+    - cron: '0 23 * * 1-5'
+  
+  # Execução manual (para testes)
+  workflow_dispatch:
+
+jobs:
+  monitorar:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 📦 Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      
+      - name: 📂 Baixar estado anterior (se existir)
+        continue-on-error: true
+        run: |
+          # Tentar baixar arquivos de estado do artifact anterior
+          echo "Tentando recuperar estado anterior..."
+      
+      - name: 🔍 Executar monitor de apensados
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python monitorar_apensados.py
+      
+      - name: 💾 Salvar estado para próxima execução
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: estado-apensados
+          path: |
+            estado_apensados.json
+            historico_apensados.json
+          retention-days: 7
+          if-no-files-found: ignore
