@@ -1,13 +1,15 @@
-# monitor_sistema_jz.py - v35 PROJETOS APENSADOS (AUTOMÁTICO)
+# monitor_sistema_jz.py - v35 PROJETOS APENSADOS (HÍBRIDO)
 # 
-# ALTERAÇÕES v35 - PROJETOS APENSADOS (DETECÇÃO AUTOMÁTICA):
+# ALTERAÇÕES v35 - PROJETOS APENSADOS (DETECÇÃO HÍBRIDA):
 # - NOVA ABA: "📎 Projetos Apensados" para monitorar PLs tramitando em conjunto
-# - ✅ DETECÇÃO AUTOMÁTICA: Detecta novos apensamentos automaticamente via API!
-# - FUNÇÃO: buscar_projetos_apensados_automatico() - busca e extrai PLs principais
+# - ✅ DETECÇÃO HÍBRIDA: 
+#   1. Usa dicionário MAPEAMENTO_APENSADOS (fonte: CSV da Câmara - confiável)
+#   2. Para novos projetos, tenta buscar nas tramitações (automático)
+# - DICIONÁRIO: 20 mapeamentos conhecidos de PL → PL principal
 # - EXIBE: Situação atual, órgão, última movimentação dos PLs principais
 # - ALERTA: Quando PL principal está "Pronta para Pauta"
 # - DOWNLOAD: Planilha XLSX com todos os projetos apensados
-# - INTEGRAÇÃO: Com robô monitorar_apensados.py (também automático)
+# - INTEGRAÇÃO: Com robô monitorar_apensados.py (também híbrido)
 #
 # ALTERAÇÕES v34 - PROPOSIÇÕES FALTANTES:
 # - ADICIONADO: PL 2472/2023 (TEA/acompanhante escolas) - Apensado ao PL 1620/2023
@@ -2011,37 +2013,156 @@ PROPOSICOES_FALTANTES_API = {
 }
 
 # ============================================================
-# PROJETOS APENSADOS - v35 (DETECÇÃO AUTOMÁTICA)
+# PROJETOS APENSADOS - v35 (DETECÇÃO HÍBRIDA)
 # ============================================================
-# Sistema AUTOMATIZADO para detectar projetos apensados.
-# Quando a deputada apresentar um novo projeto e ele for apensado,
-# o sistema detecta automaticamente e adiciona à lista de monitoramento.
+# Sistema HÍBRIDO para detectar projetos apensados:
+# 1. Usa dicionário de mapeamentos conhecidos (mais confiável)
+# 2. Para novos projetos, tenta buscar nas tramitações (automático)
 # ============================================================
 
-@st.cache_data(ttl=3600, show_spinner=False)  # Cache de 1 hora
-def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
+# Mapeamento conhecido: ID da proposição → PL principal
+# Fonte: Relatório de Pesquisa da Câmara dos Deputados
+MAPEAMENTO_APENSADOS = {
+    "2361454": "PL 1620/2023",      # PL 2472/2023 - TEA/Acompanhante escolas
+    "2361794": "PL 2782/2022",      # PL 2501/2023 - Crime de censura
+    "2365600": "PL 9417/2017",      # PL 2815/2023 - Bagagem de mão
+    "2372482": "PLP 316/2016",      # PLP 141/2023 - Inelegibilidade
+    "2381193": "PL 3593/2020",      # PL 4045/2023 - OAB/STF
+    "2390310": "PLP 156/2012",      # PLP (coautoria) 
+    "2396351": "PL 5065/2016",      # PL 5021/2023 - Organizações terroristas
+    "2399426": "PL 736/2022",       # PL 5198/2023 - ONGs estrangeiras
+    "2423254": "PL 776/2024",       # PL 955/2024 - Vacinação
+    "2436763": "PL 5499/2020",      # PL 2098/2024 - Produtos alimentícios
+    "2439451": "PL 4019/2021",      # PL (coautoria)
+    "2455562": "PL 2829/2023",      # PL 3338/2024 - Direito dos pais
+    "2455568": "PL 4068/2020",      # PL 3341/2024 - Moeda digital/DREX
+    "2462038": "PL 1036/2019",      # PL 3887/2024 - CLT/Contribuição sindical
+    "2483453": "PLP 235/2024",      # PLP 19/2025 - Sigilo financeiro
+    "2485135": "PL 606/2022",       # PL 623/2025 - CPC
+    "2531615": "PL 2617/2025",      # PL 3222/2025 - Prisão preventiva
+    "2567301": "PL 1500/2025",      # PL 4954/2025 - Maria da Penha masculina
+    "2570510": "PL 503/2025",       # PL 5072/2025 - Paternidade socioafetiva
+    "2571359": "PL 6198/2023",      # PL 5128/2025 - Maria da Penha/Falsas denúncias
+}
+
+
+def extrair_pl_principal_do_texto(texto: str) -> dict:
     """
-    Busca AUTOMATICAMENTE todos os projetos da deputada que estão apensados.
+    Extrai o PL principal de um texto de despacho/tramitação.
     
-    Funciona assim:
-    1. Busca todas as proposições da deputada na API
-    2. Para cada proposição, verifica se a situação contém "Apensado" ou "Tramitando em Conjunto"
-    3. Extrai o PL principal do texto da situação
-    4. Busca dados do PL principal
-    5. Retorna lista completa para monitoramento
+    Args:
+        texto: Texto contendo "Apense-se à(ao) PL X" ou similar
+    
+    Returns:
+        Dict com {pl_principal, tipo, numero, ano} ou None
+    """
+    import re
+    
+    patterns = [
+        r'[Aa]pense-se\s+[àa](?:\(ao\))?\s*([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})',
+        r'[Aa]pensad[oa]\s+(?:à|ao|a)\s*(?:\(ao\))?\s*([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})',
+        r'[Aa]pensad[oa]\s+[àa](?:\(ao\))?\s*([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, texto, re.IGNORECASE)
+        if match:
+            tipo = match.group(1).upper()
+            numero = match.group(2)
+            ano = match.group(3)
+            return {
+                "pl_principal": f"{tipo} {numero}/{ano}",
+                "tipo": tipo,
+                "numero": numero,
+                "ano": ano
+            }
+    
+    return None
+
+
+def buscar_pl_principal_nas_tramitacoes(prop_id: str) -> str:
+    """
+    Busca nas tramitações de uma proposição para encontrar o PL principal.
+    
+    Usa como fallback quando não existe no dicionário de mapeamentos.
+    
+    Returns:
+        String com PL principal (ex: "PL 1234/2023") ou None
+    """
+    try:
+        url = f"{BASE_URL}/proposicoes/{prop_id}/tramitacoes"
+        params = {"itens": 30, "ordem": "DESC", "ordenarPor": "dataHora"}
+        
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
+        
+        if resp.status_code != 200:
+            return None
+        
+        tramitacoes = resp.json().get("dados", [])
+        
+        for tram in tramitacoes:
+            # Concatenar todos os campos de texto
+            texto = " ".join([
+                str(tram.get("despacho", "") or ""),
+                str(tram.get("descricaoTramitacao", "") or ""),
+                str(tram.get("descricaoSituacao", "") or ""),
+            ])
+            
+            resultado = extrair_pl_principal_do_texto(texto)
+            if resultado:
+                return resultado["pl_principal"]
+        
+        return None
+    
+    except Exception as e:
+        print(f"[APENSADOS] Erro ao buscar tramitações de {prop_id}: {e}")
+        return None
+
+
+def buscar_id_proposicao(sigla_tipo: str, numero: str, ano: str) -> str:
+    """Busca o ID de uma proposição pelo tipo/número/ano"""
+    try:
+        url = f"{BASE_URL}/proposicoes"
+        params = {
+            "siglaTipo": sigla_tipo,
+            "numero": numero,
+            "ano": ano,
+            "itens": 1
+        }
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+        
+        if resp.status_code == 200:
+            dados = resp.json().get("dados", [])
+            if dados:
+                return str(dados[0].get("id", ""))
+    except:
+        pass
+    
+    return ""
+
+
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache de 1 hora
+def buscar_projetos_apensados_completo(id_deputado: int) -> list:
+    """
+    Busca todos os projetos da deputada que estão apensados.
+    
+    Usa abordagem HÍBRIDA:
+    1. Identifica projetos com situação "Tramitando em Conjunto"
+    2. Usa dicionário de mapeamentos para encontrar o PL principal
+    3. Se não estiver no dicionário, tenta buscar nas tramitações
+    4. Busca dados atualizados do PL principal
     
     Returns:
         Lista de dicionários com dados dos projetos apensados e seus PLs principais
     """
     import re
     
-    print(f"[APENSADOS] Buscando projetos apensados automaticamente...")
+    print(f"[APENSADOS] Buscando projetos apensados...")
     
     projetos_apensados = []
     
-    # 1. Buscar todas as proposições da deputada
     try:
-        # Buscar da API
+        # 1. Buscar todas as proposições da deputada
         todas_props = []
         tipos = ["PL", "PLP", "PDL", "PEC", "PRC"]
         
@@ -2066,11 +2187,10 @@ def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
             
             time.sleep(0.2)
         
-        # Adicionar proposições faltantes (que a API não retorna)
+        # Adicionar proposições faltantes
         id_str = str(id_deputado)
         if id_str in PROPOSICOES_FALTANTES_API:
             for prop_faltante in PROPOSICOES_FALTANTES_API[id_str]:
-                # Verificar se já não está na lista
                 ids_existentes = [str(p.get("id")) for p in todas_props]
                 if str(prop_faltante.get("id")) not in ids_existentes:
                     todas_props.append(prop_faltante)
@@ -2087,7 +2207,7 @@ def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
             
             prop_nome = f"{sigla} {numero}/{ano}"
             
-            # Buscar detalhes da proposição para obter situação atual
+            # Buscar detalhes da proposição
             try:
                 url_detalhe = f"{BASE_URL}/proposicoes/{prop_id}"
                 resp_det = requests.get(url_detalhe, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
@@ -2102,94 +2222,78 @@ def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
                 # 3. Verificar se está apensada
                 situacao_lower = situacao.lower()
                 
-                if "apensad" in situacao_lower or "tramitando em conjunto" in situacao_lower:
-                    print(f"[APENSADOS] ✅ {prop_nome} está apensado: {situacao[:80]}...")
+                if "tramitando em conjunto" in situacao_lower or "apensad" in situacao_lower:
+                    print(f"[APENSADOS] ✅ {prop_nome} está apensado")
                     
-                    # 4. Extrair o PL principal do texto da situação
-                    # Padrões comuns: "Apensado ao PL 1234/2023", "Apensada à(ao) PL-1234/2023"
-                    match = re.search(r'(?:apensad[oa]|tramitando em conjunto).*?([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})', situacao, re.IGNORECASE)
+                    # 4. Encontrar o PL principal
+                    pl_principal = None
                     
-                    if match:
-                        tipo_principal = match.group(1).upper()
-                        numero_principal = match.group(2)
-                        ano_principal = match.group(3)
-                        pl_principal = f"{tipo_principal} {numero_principal}/{ano_principal}"
-                        
-                        print(f"[APENSADOS]    → PL Principal: {pl_principal}")
-                        
-                        # 5. Buscar ID e dados do PL principal
-                        url_busca = f"{BASE_URL}/proposicoes"
-                        params_busca = {
-                            "siglaTipo": tipo_principal,
-                            "numero": numero_principal,
-                            "ano": ano_principal,
-                            "itens": 1
-                        }
-                        
-                        try:
-                            resp_busca = requests.get(url_busca, params=params_busca, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
-                            
-                            if resp_busca.status_code == 200:
-                                dados_busca = resp_busca.json().get("dados", [])
-                                
-                                if dados_busca:
-                                    prop_principal = dados_busca[0]
-                                    id_principal = str(prop_principal.get("id", ""))
-                                    ementa_principal = prop_principal.get("ementa", "")[:100] + "..." if len(prop_principal.get("ementa", "")) > 100 else prop_principal.get("ementa", "")
-                                    
-                                    # Buscar autor do PL principal
-                                    autor_principal = "—"
-                                    try:
-                                        url_autores = f"{BASE_URL}/proposicoes/{id_principal}/autores"
-                                        resp_autores = requests.get(url_autores, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
-                                        if resp_autores.status_code == 200:
-                                            autores = resp_autores.json().get("dados", [])
-                                            if autores:
-                                                autor_principal = autores[0].get("nome", "—")
-                                    except:
-                                        pass
-                                    
-                                    # Buscar situação atual do PL principal
-                                    situacao_principal = "—"
-                                    orgao_principal = "—"
-                                    try:
-                                        url_det_principal = f"{BASE_URL}/proposicoes/{id_principal}"
-                                        resp_det_principal = requests.get(url_det_principal, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
-                                        if resp_det_principal.status_code == 200:
-                                            dados_det = resp_det_principal.json().get("dados", {})
-                                            status_det = dados_det.get("statusProposicao", {})
-                                            situacao_principal = status_det.get("descricaoSituacao", "—")
-                                            orgao_principal = status_det.get("siglaOrgao", "—")
-                                    except:
-                                        pass
-                                    
-                                    # Adicionar à lista
-                                    projetos_apensados.append({
-                                        "pl_zanatta": prop_nome,
-                                        "id_zanatta": prop_id,
-                                        "ementa_zanatta": ementa[:150] + "..." if len(ementa) > 150 else ementa,
-                                        "pl_principal": pl_principal,
-                                        "id_principal": id_principal,
-                                        "autor_principal": autor_principal,
-                                        "ementa_principal": ementa_principal,
-                                        "situacao_principal": situacao_principal,
-                                        "orgao_principal": orgao_principal,
-                                    })
-                                    
-                                    print(f"[APENSADOS]    → ID Principal: {id_principal}")
-                                    print(f"[APENSADOS]    → Autor: {autor_principal}")
-                                    print(f"[APENSADOS]    → Situação: {situacao_principal[:50]}...")
-                        except Exception as e:
-                            print(f"[APENSADOS]    ⚠️ Erro ao buscar PL principal: {e}")
+                    # Primeiro: verificar no dicionário de mapeamentos
+                    if prop_id in MAPEAMENTO_APENSADOS:
+                        pl_principal = MAPEAMENTO_APENSADOS[prop_id]
+                        print(f"[APENSADOS]    → PL Principal (dicionário): {pl_principal}")
                     else:
-                        print(f"[APENSADOS]    ⚠️ Não consegui extrair o PL principal da situação")
+                        # Fallback: buscar nas tramitações
+                        pl_principal = buscar_pl_principal_nas_tramitacoes(prop_id)
+                        if pl_principal:
+                            print(f"[APENSADOS]    → PL Principal (tramitações): {pl_principal}")
+                        else:
+                            print(f"[APENSADOS]    ⚠️ PL Principal não encontrado")
+                    
+                    if pl_principal:
+                        # 5. Extrair dados do PL principal
+                        match = re.match(r'([A-Z]{2,4})\s*(\d+)/(\d{4})', pl_principal)
+                        if match:
+                            tipo_principal = match.group(1)
+                            numero_principal = match.group(2)
+                            ano_principal = match.group(3)
+                            
+                            # Buscar ID do PL principal
+                            id_principal = buscar_id_proposicao(tipo_principal, numero_principal, ano_principal)
+                            
+                            # Buscar autor e situação do PL principal
+                            autor_principal = "—"
+                            situacao_principal = "—"
+                            orgao_principal = "—"
+                            
+                            if id_principal:
+                                try:
+                                    # Autor
+                                    url_autores = f"{BASE_URL}/proposicoes/{id_principal}/autores"
+                                    resp_autores = requests.get(url_autores, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                    if resp_autores.status_code == 200:
+                                        autores = resp_autores.json().get("dados", [])
+                                        if autores:
+                                            autor_principal = autores[0].get("nome", "—")
+                                    
+                                    # Situação
+                                    url_det = f"{BASE_URL}/proposicoes/{id_principal}"
+                                    resp_det = requests.get(url_det, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                    if resp_det.status_code == 200:
+                                        dados_det = resp_det.json().get("dados", {})
+                                        status_det = dados_det.get("statusProposicao", {})
+                                        situacao_principal = status_det.get("descricaoSituacao", "—")
+                                        orgao_principal = status_det.get("siglaOrgao", "—")
+                                except:
+                                    pass
+                            
+                            projetos_apensados.append({
+                                "pl_zanatta": prop_nome,
+                                "id_zanatta": prop_id,
+                                "ementa_zanatta": ementa[:150] + "..." if len(ementa) > 150 else ementa,
+                                "pl_principal": pl_principal,
+                                "id_principal": id_principal,
+                                "autor_principal": autor_principal,
+                                "situacao_principal": situacao_principal,
+                                "orgao_principal": orgao_principal,
+                            })
             
             except Exception as e:
                 print(f"[APENSADOS] ⚠️ Erro ao verificar {prop_nome}: {e}")
             
             time.sleep(0.15)  # Rate limit
         
-        print(f"[APENSADOS] ✅ Total de projetos apensados encontrados: {len(projetos_apensados)}")
+        print(f"[APENSADOS] ✅ Total de projetos apensados: {len(projetos_apensados)}")
         
         return projetos_apensados
     
@@ -2198,30 +2302,10 @@ def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
         return []
 
 
-def obter_pls_principais_para_monitorar(id_deputado: int) -> list:
-    """
-    Retorna lista formatada dos PLs principais para monitoramento.
-    Usa a detecção automática de apensados.
-    
-    Returns:
-        Lista no formato esperado pelo sistema de monitoramento
-    """
-    apensados = buscar_projetos_apensados_automatico(id_deputado)
-    
-    pls_monitorar = []
-    
-    for ap in apensados:
-        pls_monitorar.append({
-            "pl": ap["pl_principal"],
-            "id": ap["id_principal"],
-            "tema": ap["ementa_zanatta"][:50] + "..." if len(ap["ementa_zanatta"]) > 50 else ap["ementa_zanatta"],
-            "pl_zanatta": ap["pl_zanatta"],
-            "autor_principal": ap["autor_principal"],
-            "situacao_atual": ap["situacao_principal"],
-            "orgao_atual": ap["orgao_principal"],
-        })
-    
-    return pls_monitorar
+# Alias para compatibilidade
+def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
+    """Alias para buscar_projetos_apensados_completo"""
+    return buscar_projetos_apensados_completo(id_deputado)
 
 
 
@@ -7900,7 +7984,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v33 - Integração com Senado; Monitoramento de apensados")
+    st.caption("v32 - Integração com Senado)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -7908,7 +7992,7 @@ def main():
     # Constantes fixas da deputada (não editáveis)
     nome_deputada = DEPUTADA_NOME_PADRAO
     partido_deputada = DEPUTADA_PARTIDO_PADRAO
-    uf_deputada = DEPUTADA_UF_PADRAOa
+    uf_deputada = DEPUTADA_UF_PADRAO
     id_deputada = DEPUTADA_ID_PADRAO
 
     # ============================================================
@@ -10214,7 +10298,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         > As movimentações passam a ocorrer no **PL principal** (que não é da deputada).
         > Por isso, monitoramos o PL principal para acompanhar o andamento.
         
-        ✅ **Este sistema é AUTOMÁTICO** - detecta novos apensamentos automaticamente!
+        ✅ **Sistema HÍBRIDO** - usa base de dados conhecida + detecção automática para novos projetos!
         
         ---
         """)
@@ -10333,13 +10417,17 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 
                 # Alerta sobre monitoramento
                 st.success("""
-                **✅ Detecção Automática Ativada!**
+                **✅ Sistema Híbrido de Detecção Ativado!**
                 
-                O sistema detecta automaticamente quando um novo projeto da deputada é apensado.
-                Basta clicar em "Detectar Projetos Apensados" para atualizar a lista.
+                O sistema usa duas fontes para identificar projetos apensados:
                 
-                O robô `monitorar_apensados.py` usa a mesma detecção automática para notificar 
-                via Telegram quando houver movimentação nos PLs principais.
+                1. **Dicionário de mapeamentos** (20 projetos conhecidos) - fonte confiável
+                2. **Busca nas tramitações** (para novos projetos) - detecção automática
+                
+                Se um novo projeto for apensado e não estiver no dicionário, o sistema 
+                tentará encontrar o PL principal automaticamente nas tramitações.
+                
+                O robô `monitorar_apensados.py` usa a mesma lógica para notificar via Telegram.
                 """)
         
         else:
