@@ -2297,19 +2297,24 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                         situacao_principal = status_det.get("descricaoSituacao", "—")
                                         orgao_principal = status_det.get("siglaOrgao", "—")
                                         ementa_principal = dados_det.get("ementa", "—")
-                                        
-                                        # Data da última movimentação
-                                        data_hora_status = status_det.get("dataHora", "")
-                                        if data_hora_status:
-                                            try:
-                                                dt = datetime.fromisoformat(data_hora_status.replace("Z", "+00:00"))
-                                                data_ultima_mov = dt.strftime("%d/%m/%Y")
-                                                # Calcular dias parado
-                                                agora = datetime.now(timezone.utc)
-                                                diferenca = agora - dt
-                                                dias_parado = diferenca.days
-                                            except:
-                                                data_ultima_mov = data_hora_status[:10] if data_hora_status else ""
+                                    
+                                    # Buscar última tramitação para data real
+                                    url_tram = f"{BASE_URL}/proposicoes/{id_principal}/tramitacoes"
+                                    resp_tram = requests.get(url_tram, params={"itens": 1, "ordem": "DESC"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                    if resp_tram.status_code == 200:
+                                        tramitacoes = resp_tram.json().get("dados", [])
+                                        if tramitacoes:
+                                            data_hora_tram = tramitacoes[0].get("dataHora", "")
+                                            if data_hora_tram:
+                                                try:
+                                                    dt = datetime.fromisoformat(data_hora_tram.replace("Z", "+00:00"))
+                                                    data_ultima_mov = dt.strftime("%d/%m/%Y")
+                                                    # Calcular dias parado
+                                                    agora = datetime.now(timezone.utc)
+                                                    diferenca = agora - dt
+                                                    dias_parado = diferenca.days
+                                                except:
+                                                    data_ultima_mov = data_hora_tram[:10] if data_hora_tram else "—"
                                 except Exception as e:
                                     print(f"[APENSADOS]    ⚠️ Erro ao buscar dados do PL principal: {e}")
                             
@@ -10476,6 +10481,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     else:
                         icone = "📄"
                     
+                    # Usar id_zanatta para key única (cada projeto da deputada é único)
+                    key_unica = ap.get('id_zanatta', '') or ap.get('pl_zanatta', '').replace(' ', '_').replace('/', '_')
+                    
                     with st.expander(f"{icone} {ap['pl_zanatta']} → {ap['pl_principal']} | {ap.get('dias_parado', 0)} dias parado", expanded=False):
                         # Layout com foto do autor
                         col_foto, col_info1, col_info2 = st.columns([1, 2, 2])
@@ -10512,9 +10520,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         # Link para tramitação
                         st.markdown(f"🔗 [Ver tramitação completa do PL principal](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_principal', '')})")
                         
-                        # Botão para carregar tramitações
-                        if st.button(f"🔄 Carregar tramitações recentes", key=f"btn_tram_{ap.get('id_principal', '')}"):
-                            exibir_detalhes_proposicao(ap.get('id_principal', ''), key_prefix=f"apensado_{ap.get('id_principal', '')}")
+                        # Botão para carregar tramitações - usando key_unica baseada no id_zanatta
+                        if st.button(f"🔄 Carregar tramitações recentes", key=f"btn_tram_{key_unica}"):
+                            exibir_detalhes_proposicao(ap.get('id_principal', ''), key_prefix=f"apensado_{key_unica}")
                 
                 st.markdown("---")
                 
