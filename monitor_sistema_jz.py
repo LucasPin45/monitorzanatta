@@ -7908,7 +7908,7 @@ def main():
     # Constantes fixas da deputada (não editáveis)
     nome_deputada = DEPUTADA_NOME_PADRAO
     partido_deputada = DEPUTADA_PARTIDO_PADRAO
-    uf_deputada = DEPUTADA_UF_PADRAO
+    uf_deputada = DEPUTADA_UF_PADRAOa
     id_deputada = DEPUTADA_ID_PADRAO
 
     # ============================================================
