@@ -2005,50 +2005,168 @@ PROPOSICOES_FALTANTES_API = {
 }
 
 # ============================================================
-# PROJETOS APENSADOS - v35 (DETECÇÃO HÍBRIDA)
+# PROJETOS APENSADOS - v35.1 (MAPEAMENTO COMPLETO)
 # ============================================================
-# Sistema HÍBRIDO para detectar projetos apensados:
-# 1. Usa dicionário de mapeamentos conhecidos (mais confiável)
-# 2. Para novos projetos, tenta buscar nas tramitações (automático)
+# Mapeamento DIRETO para o PL RAIZ (onde tramita de verdade)
+# Inclui: PL principal imediato, PL raiz, e cadeia completa
 # ============================================================
 
-# Mapeamento conhecido: ID da proposição → PL principal
-# Fonte: Relatório de Pesquisa da Câmara dos Deputados
-MAPEAMENTO_APENSADOS = {
+# Mapeamento principal: ID da proposição Zanatta → dados completos
+# Formato: {id: {"principal": "PL X", "raiz": "PL Y", "cadeia": ["PL A", "PL B", ...]}}
+MAPEAMENTO_APENSADOS_COMPLETO = {
     # === PLs ===
-    "2361454": "PL 1620/2023",      # PL 2472/2023 - TEA/Acompanhante escolas
-    "2361794": "PL 2782/2022",      # PL 2501/2023 - Crime de censura
-    "2365600": "PL 9417/2017",      # PL 2815/2023 - Bagagem de mão
-    "2381193": "PL 3593/2020",      # PL 4045/2023 - OAB/STF
-    "2396351": "PL 5065/2016",      # PL 5021/2023 - Organizações terroristas
-    "2399426": "PL 736/2022",       # PL 5198/2023 - ONGs estrangeiras
-    "2423254": "PL 776/2024",       # PL 955/2024 - Vacinação
-    "2436763": "PL 5499/2020",      # PL 2098/2024 - Produtos alimentícios
-    "2455562": "PL 2829/2023",      # PL 3338/2024 - Direito dos pais
-    "2455568": "PL 4068/2020",      # PL 3341/2024 - Moeda digital/DREX
-    "2462038": "PL 1036/2019",      # PL 3887/2024 - CLT/Contribuição sindical
-    "2485135": "PL 606/2022",       # PL 623/2025 - CPC
-    "2531615": "PL 2617/2025",      # PL 3222/2025 - Prisão preventiva
-    "2567301": "PL 1500/2025",      # PL 4954/2025 - Maria da Penha masculina
-    "2570510": "PL 503/2025",       # PL 5072/2025 - Paternidade socioafetiva
-    "2571359": "PL 6198/2023",      # PL 5128/2025 - Maria da Penha/Falsas denúncias
+    "2361454": {  # PL 2472/2023 - TEA/Acompanhante escolas
+        "principal": "PL 1620/2023",
+        "raiz": "PL 1620/2023",
+        "cadeia": ["PL 1620/2023"],
+    },
+    "2361794": {  # PL 2501/2023 - Crime de censura
+        "principal": "PL 2782/2022",
+        "raiz": "PL 2782/2022",
+        "cadeia": ["PL 2782/2022"],
+    },
+    "2365600": {  # PL 2815/2023 - Bagagem de mão
+        "principal": "PL 9417/2017",
+        "raiz": "PL 9417/2017",
+        "cadeia": ["PL 9417/2017"],
+    },
+    "2381193": {  # PL 4045/2023 - OAB/STF
+        "principal": "PL 3593/2020",
+        "raiz": "PL 3593/2020",
+        "cadeia": ["PL 3593/2020"],
+    },
+    "2396351": {  # PL 5021/2023 - Organizações terroristas
+        "principal": "PL 5065/2016",
+        "raiz": "PL 5065/2016",
+        "cadeia": ["PL 5065/2016"],
+    },
+    "2399426": {  # PL 5198/2023 - ONGs estrangeiras
+        "principal": "PL 736/2022",
+        "raiz": "PL 736/2022",
+        "cadeia": ["PL 736/2022"],
+    },
+    "2423254": {  # PL 955/2024 - Vacinação
+        "principal": "PL 776/2024",
+        "raiz": "PL 776/2024",
+        "cadeia": ["PL 776/2024"],
+    },
+    "2436763": {  # PL 2098/2024 - Produtos alimentícios (CADEIA LONGA!)
+        "principal": "PL 5499/2020",
+        "raiz": "PL 10556/2018",  # ← RAIZ REAL
+        "cadeia": ["PL 5499/2020", "PL 5344/2020", "PL 10556/2018"],
+    },
+    "2455562": {  # PL 3338/2024 - Direito dos pais
+        "principal": "PL 2829/2023",
+        "raiz": "PL 2829/2023",
+        "cadeia": ["PL 2829/2023"],
+    },
+    "2455568": {  # PL 3341/2024 - Moeda digital/DREX
+        "principal": "PL 4068/2020",
+        "raiz": "PL 4068/2020",
+        "cadeia": ["PL 4068/2020"],
+    },
+    "2462038": {  # PL 3887/2024 - CLT/Contribuição sindical
+        "principal": "PL 1036/2019",
+        "raiz": "PL 1036/2019",
+        "cadeia": ["PL 1036/2019"],
+    },
+    "2485135": {  # PL 623/2025 - CPC
+        "principal": "PL 606/2022",
+        "raiz": "PL 606/2022",
+        "cadeia": ["PL 606/2022"],
+    },
+    "2531615": {  # PL 3222/2025 - Prisão preventiva
+        "principal": "PL 2617/2025",
+        "raiz": "PL 2617/2025",
+        "cadeia": ["PL 2617/2025"],
+    },
+    "2567301": {  # PL 4954/2025 - Maria da Penha masculina
+        "principal": "PL 1500/2025",
+        "raiz": "PL 1500/2025",
+        "cadeia": ["PL 1500/2025"],
+    },
+    "2570510": {  # PL 5072/2025 - Paternidade socioafetiva
+        "principal": "PL 503/2025",
+        "raiz": "PL 503/2025",
+        "cadeia": ["PL 503/2025"],
+    },
+    "2571359": {  # PL 5128/2025 - Maria da Penha/Falsas denúncias
+        "principal": "PL 6198/2023",
+        "raiz": "PL 6198/2023",
+        "cadeia": ["PL 6198/2023"],
+    },
     # === PLPs ===
-    "2372482": "PLP 316/2016",      # PLP 141/2023 - Inelegibilidade
-    "2390310": "PLP 156/2012",      # PLP (coautoria) 
-    "2439451": "PL 4019/2021",      # PL (coautoria)
-    "2483453": "PLP 235/2024",      # PLP 19/2025 - Sigilo financeiro
+    "2372482": {  # PLP 141/2023 - Inelegibilidade
+        "principal": "PLP 316/2016",
+        "raiz": "PLP 316/2016",
+        "cadeia": ["PLP 316/2016"],
+    },
+    "2390310": {  # PLP (coautoria)
+        "principal": "PLP 156/2012",
+        "raiz": "PLP 156/2012",
+        "cadeia": ["PLP 156/2012"],
+    },
+    "2439451": {  # PL (coautoria)
+        "principal": "PL 4019/2021",
+        "raiz": "PL 4019/2021",
+        "cadeia": ["PL 4019/2021"],
+    },
+    "2483453": {  # PLP 19/2025 - Sigilo financeiro
+        "principal": "PLP 235/2024",
+        "raiz": "PLP 235/2024",
+        "cadeia": ["PLP 235/2024"],
+    },
     # === PDLs ===
-    "2482260": "PDL 3/2025",        # PDL 24/2025 - Susta Decreto 12.341 (PIX)
-    "2482169": "PDL 3/2025",        # PDL 16/2025 - Susta Decreto 12.341 (PIX)
-    "2374405": "PDL 174/2023",      # PDL 194/2023 - Susta Decreto armas
-    "2374340": "PDL 174/2023",      # PDL 189/2023 - Susta Decreto armas
-    "2419264": "PDL 3/2024",        # PDL 30/2024 - Susta Resolução TSE
-    "2375447": "PDL 183/2023",      # PDL 209/2023 - Susta Resolução ANS
-    "2456691": "PDL 285/2024",      # PDL 348/2024 - Susta IN banheiros
-    "2390075": "PDL 302/2023",      # PDL 337/2023 - Susta Resolução CONAMA
+    "2482260": {  # PDL 24/2025 - Susta Decreto 12.341 (PIX)
+        "principal": "PDL 3/2025",
+        "raiz": "PDL 3/2025",
+        "cadeia": ["PDL 3/2025"],
+    },
+    "2482169": {  # PDL 16/2025 - Susta Decreto 12.341 (PIX)
+        "principal": "PDL 3/2025",
+        "raiz": "PDL 3/2025",
+        "cadeia": ["PDL 3/2025"],
+    },
+    "2374405": {  # PDL 194/2023 - Susta Decreto armas
+        "principal": "PDL 174/2023",
+        "raiz": "PDL 174/2023",
+        "cadeia": ["PDL 174/2023"],
+    },
+    "2374340": {  # PDL 189/2023 - Susta Decreto armas
+        "principal": "PDL 174/2023",
+        "raiz": "PDL 174/2023",
+        "cadeia": ["PDL 174/2023"],
+    },
+    "2419264": {  # PDL 30/2024 - Susta Resolução TSE
+        "principal": "PDL 3/2024",
+        "raiz": "PDL 3/2024",
+        "cadeia": ["PDL 3/2024"],
+    },
+    "2375447": {  # PDL 209/2023 - Susta Resolução ANS
+        "principal": "PDL 183/2023",
+        "raiz": "PDL 183/2023",
+        "cadeia": ["PDL 183/2023"],
+    },
+    "2456691": {  # PDL 348/2024 - Susta IN banheiros
+        "principal": "PDL 285/2024",
+        "raiz": "PDL 285/2024",
+        "cadeia": ["PDL 285/2024"],
+    },
+    "2390075": {  # PDL 337/2023 - Susta Resolução CONAMA
+        "principal": "PDL 302/2023",
+        "raiz": "PDL 302/2023",
+        "cadeia": ["PDL 302/2023"],
+    },
     # === PECs ===
-    "2448732": "PEC 8/2021",        # PEC 28/2024 - Mandado de segurança coletivo
+    "2448732": {  # PEC 28/2024 - Mandado de segurança coletivo
+        "principal": "PEC 8/2021",
+        "raiz": "PEC 8/2021",
+        "cadeia": ["PEC 8/2021"],
+    },
 }
+
+# Mapeamento simples (compatibilidade): ID → PL principal imediato
+MAPEAMENTO_APENSADOS = {k: v["principal"] for k, v in MAPEAMENTO_APENSADOS_COMPLETO.items()}
 
 
 def buscar_cadeia_apensamentos(id_proposicao: str, max_niveis: int = 10) -> list:
@@ -2328,11 +2446,7 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     """
     Busca todos os projetos da deputada que estão apensados.
     
-    Usa abordagem HÍBRIDA:
-    1. Identifica projetos com situação "Tramitando em Conjunto"
-    2. Usa dicionário de mapeamentos para encontrar o PL principal
-    3. Busca cadeia COMPLETA de apensamento até o PL raiz
-    4. Busca dados atualizados do PL RAIZ (autor, foto, relator, última movimentação)
+    USA MAPEAMENTO COMPLETO: vai direto para o PL RAIZ!
     
     Returns:
         Lista de dicionários com dados dos projetos apensados
@@ -2340,7 +2454,7 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     import re
     from datetime import datetime, timezone
     
-    print(f"[APENSADOS] Buscando projetos apensados...")
+    print(f"[APENSADOS] Buscando projetos apensados (v35.1 - mapeamento completo)...")
     
     projetos_apensados = []
     
@@ -2380,7 +2494,7 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
         
         print(f"[APENSADOS] Total de proposições encontradas: {len(todas_props)}")
         
-        # 2. Para cada proposição, verificar se está apensada
+        # 2. Para cada proposição, verificar se está no mapeamento
         for prop in todas_props:
             prop_id = str(prop.get("id", ""))
             sigla = prop.get("siglaTipo", "")
@@ -2390,133 +2504,161 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
             
             prop_nome = f"{sigla} {numero}/{ano}"
             
-            # Buscar detalhes da proposição
-            try:
-                url_detalhe = f"{BASE_URL}/proposicoes/{prop_id}"
-                resp_det = requests.get(url_detalhe, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
+            # Verificar se está no mapeamento completo
+            if prop_id in MAPEAMENTO_APENSADOS_COMPLETO:
+                mapeamento = MAPEAMENTO_APENSADOS_COMPLETO[prop_id]
+                pl_principal = mapeamento.get("principal", "")
+                pl_raiz = mapeamento.get("raiz", pl_principal)
+                cadeia = mapeamento.get("cadeia", [pl_principal])
                 
-                if resp_det.status_code != 200:
-                    continue
+                print(f"[APENSADOS] ✅ {prop_nome} → RAIZ: {pl_raiz}")
+                if len(cadeia) > 1:
+                    print(f"[APENSADOS]    Cadeia: {prop_nome} → " + " → ".join(cadeia))
                 
-                dados_prop = resp_det.json().get("dados", {})
-                status = dados_prop.get("statusProposicao", {})
-                situacao = status.get("descricaoSituacao", "")
+                # Buscar ID do PL RAIZ
+                match_raiz = re.match(r'([A-Z]{2,4})\s*(\d+)/(\d{4})', pl_raiz)
+                id_raiz = ""
+                if match_raiz:
+                    id_raiz = buscar_id_proposicao(match_raiz.group(1), match_raiz.group(2), match_raiz.group(3))
                 
-                # Se não tem ementa, buscar do detalhe
+                # Buscar ID do PL principal (para autor)
+                match_principal = re.match(r'([A-Z]{2,4})\s*(\d+)/(\d{4})', pl_principal)
+                id_principal = ""
+                if match_principal:
+                    id_principal = buscar_id_proposicao(match_principal.group(1), match_principal.group(2), match_principal.group(3))
+                
+                # Buscar dados do PL RAIZ
+                situacao_raiz = "—"
+                orgao_raiz = "—"
+                relator_raiz = "—"
+                ementa_raiz = "—"
+                data_ultima_mov = "—"
+                dias_parado = 0
+                
+                if id_raiz:
+                    try:
+                        # Dados básicos do RAIZ
+                        url_raiz = f"{BASE_URL}/proposicoes/{id_raiz}"
+                        resp_raiz = requests.get(url_raiz, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                        if resp_raiz.status_code == 200:
+                            dados_raiz = resp_raiz.json().get("dados", {})
+                            status_raiz = dados_raiz.get("statusProposicao", {})
+                            situacao_raiz = status_raiz.get("descricaoSituacao", "—")
+                            orgao_raiz = status_raiz.get("siglaOrgao", "—")
+                            ementa_raiz = dados_raiz.get("ementa", "—")
+                            relator_raiz = status_raiz.get("nomeRelator") or status_raiz.get("relator") or "—"
+                        
+                        # Última tramitação do RAIZ
+                        url_tram = f"{BASE_URL}/proposicoes/{id_raiz}/tramitacoes"
+                        resp_tram = requests.get(url_tram, params={"itens": 1, "ordem": "DESC", "ordenarPor": "dataHora"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                        if resp_tram.status_code == 200:
+                            trams = resp_tram.json().get("dados", [])
+                            if trams:
+                                data_hora = trams[0].get("dataHora", "")
+                                if data_hora:
+                                    try:
+                                        if "T" in data_hora:
+                                            dt = datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
+                                        else:
+                                            dt = datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                        
+                                        data_ultima_mov = dt.strftime("%d/%m/%Y")
+                                        agora = datetime.now(timezone.utc)
+                                        dias_parado = (agora - dt).days
+                                        print(f"[APENSADOS]    Última mov: {data_ultima_mov} ({dias_parado} dias)")
+                                    except Exception as e:
+                                        print(f"[APENSADOS]    ⚠️ Erro ao parsear data: {e}")
+                                        data_ultima_mov = data_hora[:10] if data_hora else "—"
+                    except Exception as e:
+                        print(f"[APENSADOS]    ⚠️ Erro ao buscar dados do RAIZ: {e}")
+                
+                # Buscar autor e foto do PL principal
+                autor_principal = "—"
+                id_autor_principal = ""
+                foto_autor = ""
+                ementa_principal = "—"
+                
+                if id_principal:
+                    try:
+                        url_autores = f"{BASE_URL}/proposicoes/{id_principal}/autores"
+                        resp_autores = requests.get(url_autores, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                        if resp_autores.status_code == 200:
+                            autores = resp_autores.json().get("dados", [])
+                            if autores:
+                                autor_principal = autores[0].get("nome", "—")
+                                uri_autor = autores[0].get("uri", "")
+                                if "/deputados/" in uri_autor:
+                                    id_autor_principal = uri_autor.split("/deputados/")[-1].split("?")[0]
+                                    if id_autor_principal:
+                                        foto_autor = f"https://www.camara.leg.br/internet/deputado/bandep/{id_autor_principal}.jpg"
+                        
+                        url_det = f"{BASE_URL}/proposicoes/{id_principal}"
+                        resp_det = requests.get(url_det, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                        if resp_det.status_code == 200:
+                            dados_det = resp_det.json().get("dados", {})
+                            ementa_principal = dados_det.get("ementa", "—")
+                    except:
+                        pass
+                
+                # Buscar ementa da proposição Zanatta
                 if not ementa:
-                    ementa = dados_prop.get("ementa", "")
+                    try:
+                        url_zanatta = f"{BASE_URL}/proposicoes/{prop_id}"
+                        resp_zanatta = requests.get(url_zanatta, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                        if resp_zanatta.status_code == 200:
+                            ementa = resp_zanatta.json().get("dados", {}).get("ementa", "")
+                    except:
+                        pass
                 
-                # 3. Verificar se está apensada
-                situacao_lower = situacao.lower()
+                # Construir cadeia formatada
+                cadeia_formatada = [{"pl": pl, "id": ""} for pl in cadeia]
                 
-                if "tramitando em conjunto" in situacao_lower or "apensad" in situacao_lower:
-                    print(f"[APENSADOS] ✅ {prop_nome} está apensado")
+                projetos_apensados.append({
+                    "pl_zanatta": prop_nome,
+                    "id_zanatta": prop_id,
+                    "ementa_zanatta": ementa[:200] + "..." if len(ementa) > 200 else ementa,
+                    "pl_principal": pl_principal,
+                    "id_principal": id_principal,
+                    "autor_principal": autor_principal,
+                    "id_autor_principal": id_autor_principal,
+                    "foto_autor": foto_autor,
+                    "ementa_principal": ementa_principal[:200] + "..." if len(ementa_principal) > 200 else ementa_principal,
+                    "pl_raiz": pl_raiz,
+                    "id_raiz": id_raiz,
+                    "situacao_raiz": situacao_raiz,
+                    "orgao_raiz": orgao_raiz,
+                    "relator_raiz": relator_raiz,
+                    "data_ultima_mov": data_ultima_mov,
+                    "dias_parado": dias_parado,
+                    "ementa_raiz": ementa_raiz[:200] if ementa_raiz else "—",
+                    "cadeia_apensamento": cadeia_formatada,
+                })
+            else:
+                # Verificar se está apensado mas não está no mapeamento
+                try:
+                    url_detalhe = f"{BASE_URL}/proposicoes/{prop_id}"
+                    resp_det = requests.get(url_detalhe, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
                     
-                    # 4. Encontrar o PL principal imediato
-                    pl_principal = None
-                    
-                    # Primeiro: verificar no dicionário de mapeamentos
-                    if prop_id in MAPEAMENTO_APENSADOS:
-                        pl_principal = MAPEAMENTO_APENSADOS[prop_id]
-                        print(f"[APENSADOS]    → PL Principal (dicionário): {pl_principal}")
-                    else:
-                        # Fallback: buscar nas tramitações
-                        pl_principal = buscar_pl_principal_nas_tramitacoes(prop_id)
-                        if pl_principal:
-                            print(f"[APENSADOS]    → PL Principal (tramitações): {pl_principal}")
-                        else:
-                            print(f"[APENSADOS]    ⚠️ PL Principal não encontrado")
-                    
-                    if pl_principal:
-                        # 5. Buscar ID do PL principal
-                        match = re.match(r'([A-Z]{2,4})\s*(\d+)/(\d{4})', pl_principal)
-                        if match:
-                            tipo_principal = match.group(1)
-                            numero_principal = match.group(2)
-                            ano_principal = match.group(3)
-                            
-                            id_principal = buscar_id_proposicao(tipo_principal, numero_principal, ano_principal)
-                            
-                            # 6. Buscar cadeia COMPLETA de apensamentos
-                            cadeia_completa = buscar_cadeia_apensamentos(id_principal)
-                            
-                            # O PL raiz é o ÚLTIMO da cadeia
-                            if cadeia_completa:
-                                pl_raiz = cadeia_completa[-1].get("pl", pl_principal)
-                                id_raiz = cadeia_completa[-1].get("id", id_principal)
-                                print(f"[APENSADOS]    → Cadeia completa: {prop_nome} → " + " → ".join([c["pl"] for c in cadeia_completa]))
-                                print(f"[APENSADOS]    → PL RAIZ: {pl_raiz}")
-                            else:
-                                pl_raiz = pl_principal
-                                id_raiz = id_principal
-                            
-                            # 7. Buscar dados do PL RAIZ (onde tramita de verdade)
-                            dados_raiz = buscar_dados_pl_raiz(id_raiz)
-                            
-                            # 8. Buscar autor do PL principal imediato
-                            autor_principal = "—"
-                            id_autor_principal = ""
-                            foto_autor = ""
-                            ementa_principal = "—"
-                            
-                            if id_principal:
-                                try:
-                                    # Autor
-                                    url_autores = f"{BASE_URL}/proposicoes/{id_principal}/autores"
-                                    resp_autores = requests.get(url_autores, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
-                                    if resp_autores.status_code == 200:
-                                        autores = resp_autores.json().get("dados", [])
-                                        if autores:
-                                            autor_principal = autores[0].get("nome", "—")
-                                            uri_autor = autores[0].get("uri", "")
-                                            if "/deputados/" in uri_autor:
-                                                id_autor_principal = uri_autor.split("/deputados/")[-1].split("?")[0]
-                                                if id_autor_principal:
-                                                    foto_autor = f"https://www.camara.leg.br/internet/deputado/bandep/{id_autor_principal}.jpg"
-                                    
-                                    # Ementa do PL principal imediato
-                                    url_det = f"{BASE_URL}/proposicoes/{id_principal}"
-                                    resp_det2 = requests.get(url_det, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
-                                    if resp_det2.status_code == 200:
-                                        dados_det = resp_det2.json().get("dados", {})
-                                        ementa_principal = dados_det.get("ementa", "—")
-                                except:
-                                    pass
-                            
-                            projetos_apensados.append({
-                                "pl_zanatta": prop_nome,
-                                "id_zanatta": prop_id,
-                                "ementa_zanatta": ementa[:200] + "..." if len(ementa) > 200 else ementa,
-                                "pl_principal": pl_principal,
-                                "id_principal": id_principal,
-                                "autor_principal": autor_principal,
-                                "id_autor_principal": id_autor_principal,
-                                "foto_autor": foto_autor,
-                                "ementa_principal": ementa_principal[:200] + "..." if len(ementa_principal) > 200 else ementa_principal,
-                                # Dados do PL RAIZ (onde tramita de verdade)
-                                "pl_raiz": pl_raiz,
-                                "id_raiz": id_raiz,
-                                "situacao_raiz": dados_raiz.get("situacao", "—"),
-                                "orgao_raiz": dados_raiz.get("orgao", "—"),
-                                "relator_raiz": dados_raiz.get("relator", "—"),
-                                "data_ultima_mov": dados_raiz.get("data_ultima_mov", "—"),
-                                "dias_parado": dados_raiz.get("dias_parado", 0),
-                                "ementa_raiz": dados_raiz.get("ementa", "—")[:200],
-                                # Cadeia completa para exibição
-                                "cadeia_apensamento": cadeia_completa,
-                            })
+                    if resp_det.status_code == 200:
+                        dados_prop = resp_det.json().get("dados", {})
+                        status = dados_prop.get("statusProposicao", {})
+                        situacao = status.get("descricaoSituacao", "")
+                        
+                        situacao_lower = situacao.lower()
+                        if "tramitando em conjunto" in situacao_lower or "apensad" in situacao_lower:
+                            print(f"[APENSADOS] ⚠️ {prop_nome} NÃO ESTÁ NO MAPEAMENTO!")
+                except:
+                    pass
             
-            except Exception as e:
-                print(f"[APENSADOS] ⚠️ Erro ao verificar {prop_nome}: {e}")
-            
-            time.sleep(0.15)  # Rate limit
+            time.sleep(0.1)
         
-        print(f"[APENSADOS] ✅ Total de projetos apensados: {len(projetos_apensados)}")
-        
+        print(f"[APENSADOS] ✅ Total: {len(projetos_apensados)}")
         return projetos_apensados
     
     except Exception as e:
         print(f"[APENSADOS] ❌ Erro geral: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
