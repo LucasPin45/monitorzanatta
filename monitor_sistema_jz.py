@@ -1972,43 +1972,35 @@ TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 # Valor: Lista de dicionários com dados das proposições faltantes
 # ============================================================
 PROPOSICOES_FALTANTES_API = {
-    "220559": [  # Julia Zanatta
-        # PL 321/2023 - Audiência de custódia por videoconferência
-        # Status: Aguardando Apreciação pelo Senado Federal
-        {
-            "id": "2347150",
-            "siglaTipo": "PL",
-            "numero": "321",
-            "ano": "2023",
-            "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941, para dispor sobre a possibilidade de realização da audiência de custódia por videoconferência."
-        },
-        # PL 2472/2023 - Acompanhante especializado para TEA em escolas
-        # Status: Apensado ao PL 1620/2023
-        {
-            "id": "2361454",
-            "siglaTipo": "PL",
-            "numero": "2472",
-            "ano": "2023",
-            "ementa": "Altera as Leis nº 12.764, de 27 de dezembro de 2012, e nº 13.146, de 6 de julho de 2015, para assegurar à pessoa com transtorno do espectro autista e às pessoas com transtornos mentais, incluídas nas classes comuns de ensino regular, em casos de comprovada necessidade, acompanhante especializado com formação específica em Pedagogia ou em Educação Especial."
-        },
-        # PL 2815/2023 - Bagagem de mão em aeronaves
-        # Status: Apensado ao PL 9417/2017
-        {
-            "id": "2365600",
-            "siglaTipo": "PL",
-            "numero": "2815",
-            "ano": "2023",
-            "ementa": "Altera a Lei nº 7.565, de 1986 (Código Brasileiro de Aeronáutica), para dispor sobre a acomodação de bagagem de mão nas aeronaves."
-        },
-        # PL 4045/2023 - Impedimento de cônjuges/parentes de Ministros na OAB
-        # Status: Apensado ao PL 3593/2020
-        {
-            "id": "2381193",
-            "siglaTipo": "PL",
-            "numero": "4045",
-            "ano": "2023",
-            "ementa": "Altera a Lei n. 8.906, de 4 de julho de 1994, que dispõe sobre o Estatuto da Advocacia e a Ordem dos Advogados do Brasil (OAB), para instituir o impedimento da atuação de cônjuges, parentes, sócios e ex-sócios de Ministros nas Cortes Superiores que cita, e estabelece outras providências."
-        },
+    "220559": [  # Julia Zanatta - Projetos que a API não retorna corretamente
+        # === PROJETOS APENSADOS (24 total) ===
+        {"id": "2570510", "siglaTipo": "PL", "numero": "5072", "ano": "2025"},   # PL 5072/2025
+        {"id": "2571359", "siglaTipo": "PL", "numero": "5128", "ano": "2025"},   # PL 5128/2025
+        {"id": "2483453", "siglaTipo": "PLP", "numero": "19", "ano": "2025"},    # PLP 19/2025
+        {"id": "2455568", "siglaTipo": "PL", "numero": "3341", "ano": "2024"},   # PL 3341/2024
+        {"id": "2436763", "siglaTipo": "PL", "numero": "2098", "ano": "2024"},   # PL 2098/2024
+        {"id": "2455562", "siglaTipo": "PL", "numero": "3338", "ano": "2024"},   # PL 3338/2024
+        {"id": "2482260", "siglaTipo": "PDL", "numero": "24", "ano": "2025"},    # PDL 24/2025
+        {"id": "2482169", "siglaTipo": "PDL", "numero": "16", "ano": "2025"},    # PDL 16/2025
+        {"id": "2567301", "siglaTipo": "PL", "numero": "4954", "ano": "2025"},   # PL 4954/2025
+        {"id": "2531615", "siglaTipo": "PL", "numero": "3222", "ano": "2025"},   # PL 3222/2025
+        {"id": "2372482", "siglaTipo": "PLP", "numero": "141", "ano": "2023"},   # PLP 141/2023
+        {"id": "2399426", "siglaTipo": "PL", "numero": "5198", "ano": "2023"},   # PL 5198/2023
+        {"id": "2423254", "siglaTipo": "PL", "numero": "955", "ano": "2024"},    # PL 955/2024
+        {"id": "2374405", "siglaTipo": "PDL", "numero": "194", "ano": "2023"},   # PDL 194/2023
+        {"id": "2374340", "siglaTipo": "PDL", "numero": "189", "ano": "2023"},   # PDL 189/2023
+        {"id": "2485135", "siglaTipo": "PL", "numero": "623", "ano": "2025"},    # PL 623/2025
+        {"id": "2419264", "siglaTipo": "PDL", "numero": "30", "ano": "2024"},    # PDL 30/2024
+        {"id": "2375447", "siglaTipo": "PDL", "numero": "209", "ano": "2023"},   # PDL 209/2023
+        {"id": "2456691", "siglaTipo": "PDL", "numero": "348", "ano": "2024"},   # PDL 348/2024
+        {"id": "2462038", "siglaTipo": "PL", "numero": "3887", "ano": "2024"},   # PL 3887/2024
+        {"id": "2448732", "siglaTipo": "PEC", "numero": "28", "ano": "2024"},    # PEC 28/2024
+        {"id": "2390075", "siglaTipo": "PDL", "numero": "337", "ano": "2023"},   # PDL 337/2023
+        {"id": "2361454", "siglaTipo": "PL", "numero": "2472", "ano": "2023"},   # PL 2472/2023
+        {"id": "2365600", "siglaTipo": "PL", "numero": "2815", "ano": "2023"},   # PL 2815/2023
+        # === OUTROS PROJETOS FALTANTES ===
+        {"id": "2347150", "siglaTipo": "PL", "numero": "321", "ano": "2023"},    # PL 321/2023 (no Senado)
+        {"id": "2381193", "siglaTipo": "PL", "numero": "4045", "ano": "2023"},   # PL 4045/2023
     ]
 }
 
