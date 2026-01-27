@@ -1,5 +1,14 @@
-# monitor_sistema_jz.py - v34 PROPOSIÇÕES FALTANTES ADICIONADAS
+# monitor_sistema_jz.py - v35 PROJETOS APENSADOS (AUTOMÁTICO)
 # 
+# ALTERAÇÕES v35 - PROJETOS APENSADOS (DETECÇÃO AUTOMÁTICA):
+# - NOVA ABA: "📎 Projetos Apensados" para monitorar PLs tramitando em conjunto
+# - ✅ DETECÇÃO AUTOMÁTICA: Detecta novos apensamentos automaticamente via API!
+# - FUNÇÃO: buscar_projetos_apensados_automatico() - busca e extrai PLs principais
+# - EXIBE: Situação atual, órgão, última movimentação dos PLs principais
+# - ALERTA: Quando PL principal está "Pronta para Pauta"
+# - DOWNLOAD: Planilha XLSX com todos os projetos apensados
+# - INTEGRAÇÃO: Com robô monitorar_apensados.py (também automático)
+#
 # ALTERAÇÕES v34 - PROPOSIÇÕES FALTANTES:
 # - ADICIONADO: PL 2472/2023 (TEA/acompanhante escolas) - Apensado ao PL 1620/2023
 # - ADICIONADO: PL 2815/2023 (Bagagem de mão aeronaves) - Apensado ao PL 9417/2017
@@ -2000,6 +2009,219 @@ PROPOSICOES_FALTANTES_API = {
         },
     ]
 }
+
+# ============================================================
+# PROJETOS APENSADOS - v35 (DETECÇÃO AUTOMÁTICA)
+# ============================================================
+# Sistema AUTOMATIZADO para detectar projetos apensados.
+# Quando a deputada apresentar um novo projeto e ele for apensado,
+# o sistema detecta automaticamente e adiciona à lista de monitoramento.
+# ============================================================
+
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache de 1 hora
+def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
+    """
+    Busca AUTOMATICAMENTE todos os projetos da deputada que estão apensados.
+    
+    Funciona assim:
+    1. Busca todas as proposições da deputada na API
+    2. Para cada proposição, verifica se a situação contém "Apensado" ou "Tramitando em Conjunto"
+    3. Extrai o PL principal do texto da situação
+    4. Busca dados do PL principal
+    5. Retorna lista completa para monitoramento
+    
+    Returns:
+        Lista de dicionários com dados dos projetos apensados e seus PLs principais
+    """
+    import re
+    
+    print(f"[APENSADOS] Buscando projetos apensados automaticamente...")
+    
+    projetos_apensados = []
+    
+    # 1. Buscar todas as proposições da deputada
+    try:
+        # Buscar da API
+        todas_props = []
+        tipos = ["PL", "PLP", "PDL", "PEC", "PRC"]
+        
+        for tipo in tipos:
+            url = f"{BASE_URL}/proposicoes"
+            params = {
+                "idDeputadoAutor": id_deputado,
+                "siglaTipo": tipo,
+                "dataApresentacaoInicio": "2023-01-01",
+                "itens": 100,
+                "ordem": "DESC",
+                "ordenarPor": "dataApresentacao"
+            }
+            
+            try:
+                resp = requests.get(url, params=params, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
+                if resp.status_code == 200:
+                    dados = resp.json().get("dados", [])
+                    todas_props.extend(dados)
+            except Exception as e:
+                print(f"[APENSADOS] Erro ao buscar {tipo}: {e}")
+            
+            time.sleep(0.2)
+        
+        # Adicionar proposições faltantes (que a API não retorna)
+        id_str = str(id_deputado)
+        if id_str in PROPOSICOES_FALTANTES_API:
+            for prop_faltante in PROPOSICOES_FALTANTES_API[id_str]:
+                # Verificar se já não está na lista
+                ids_existentes = [str(p.get("id")) for p in todas_props]
+                if str(prop_faltante.get("id")) not in ids_existentes:
+                    todas_props.append(prop_faltante)
+        
+        print(f"[APENSADOS] Total de proposições encontradas: {len(todas_props)}")
+        
+        # 2. Para cada proposição, verificar se está apensada
+        for prop in todas_props:
+            prop_id = str(prop.get("id", ""))
+            sigla = prop.get("siglaTipo", "")
+            numero = prop.get("numero", "")
+            ano = prop.get("ano", "")
+            ementa = prop.get("ementa", "")
+            
+            prop_nome = f"{sigla} {numero}/{ano}"
+            
+            # Buscar detalhes da proposição para obter situação atual
+            try:
+                url_detalhe = f"{BASE_URL}/proposicoes/{prop_id}"
+                resp_det = requests.get(url_detalhe, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
+                
+                if resp_det.status_code != 200:
+                    continue
+                
+                dados_prop = resp_det.json().get("dados", {})
+                status = dados_prop.get("statusProposicao", {})
+                situacao = status.get("descricaoSituacao", "")
+                
+                # 3. Verificar se está apensada
+                situacao_lower = situacao.lower()
+                
+                if "apensad" in situacao_lower or "tramitando em conjunto" in situacao_lower:
+                    print(f"[APENSADOS] ✅ {prop_nome} está apensado: {situacao[:80]}...")
+                    
+                    # 4. Extrair o PL principal do texto da situação
+                    # Padrões comuns: "Apensado ao PL 1234/2023", "Apensada à(ao) PL-1234/2023"
+                    match = re.search(r'(?:apensad[oa]|tramitando em conjunto).*?([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})', situacao, re.IGNORECASE)
+                    
+                    if match:
+                        tipo_principal = match.group(1).upper()
+                        numero_principal = match.group(2)
+                        ano_principal = match.group(3)
+                        pl_principal = f"{tipo_principal} {numero_principal}/{ano_principal}"
+                        
+                        print(f"[APENSADOS]    → PL Principal: {pl_principal}")
+                        
+                        # 5. Buscar ID e dados do PL principal
+                        url_busca = f"{BASE_URL}/proposicoes"
+                        params_busca = {
+                            "siglaTipo": tipo_principal,
+                            "numero": numero_principal,
+                            "ano": ano_principal,
+                            "itens": 1
+                        }
+                        
+                        try:
+                            resp_busca = requests.get(url_busca, params=params_busca, headers=HEADERS, timeout=15, verify=_REQUESTS_VERIFY)
+                            
+                            if resp_busca.status_code == 200:
+                                dados_busca = resp_busca.json().get("dados", [])
+                                
+                                if dados_busca:
+                                    prop_principal = dados_busca[0]
+                                    id_principal = str(prop_principal.get("id", ""))
+                                    ementa_principal = prop_principal.get("ementa", "")[:100] + "..." if len(prop_principal.get("ementa", "")) > 100 else prop_principal.get("ementa", "")
+                                    
+                                    # Buscar autor do PL principal
+                                    autor_principal = "—"
+                                    try:
+                                        url_autores = f"{BASE_URL}/proposicoes/{id_principal}/autores"
+                                        resp_autores = requests.get(url_autores, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                        if resp_autores.status_code == 200:
+                                            autores = resp_autores.json().get("dados", [])
+                                            if autores:
+                                                autor_principal = autores[0].get("nome", "—")
+                                    except:
+                                        pass
+                                    
+                                    # Buscar situação atual do PL principal
+                                    situacao_principal = "—"
+                                    orgao_principal = "—"
+                                    try:
+                                        url_det_principal = f"{BASE_URL}/proposicoes/{id_principal}"
+                                        resp_det_principal = requests.get(url_det_principal, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                        if resp_det_principal.status_code == 200:
+                                            dados_det = resp_det_principal.json().get("dados", {})
+                                            status_det = dados_det.get("statusProposicao", {})
+                                            situacao_principal = status_det.get("descricaoSituacao", "—")
+                                            orgao_principal = status_det.get("siglaOrgao", "—")
+                                    except:
+                                        pass
+                                    
+                                    # Adicionar à lista
+                                    projetos_apensados.append({
+                                        "pl_zanatta": prop_nome,
+                                        "id_zanatta": prop_id,
+                                        "ementa_zanatta": ementa[:150] + "..." if len(ementa) > 150 else ementa,
+                                        "pl_principal": pl_principal,
+                                        "id_principal": id_principal,
+                                        "autor_principal": autor_principal,
+                                        "ementa_principal": ementa_principal,
+                                        "situacao_principal": situacao_principal,
+                                        "orgao_principal": orgao_principal,
+                                    })
+                                    
+                                    print(f"[APENSADOS]    → ID Principal: {id_principal}")
+                                    print(f"[APENSADOS]    → Autor: {autor_principal}")
+                                    print(f"[APENSADOS]    → Situação: {situacao_principal[:50]}...")
+                        except Exception as e:
+                            print(f"[APENSADOS]    ⚠️ Erro ao buscar PL principal: {e}")
+                    else:
+                        print(f"[APENSADOS]    ⚠️ Não consegui extrair o PL principal da situação")
+            
+            except Exception as e:
+                print(f"[APENSADOS] ⚠️ Erro ao verificar {prop_nome}: {e}")
+            
+            time.sleep(0.15)  # Rate limit
+        
+        print(f"[APENSADOS] ✅ Total de projetos apensados encontrados: {len(projetos_apensados)}")
+        
+        return projetos_apensados
+    
+    except Exception as e:
+        print(f"[APENSADOS] ❌ Erro geral: {e}")
+        return []
+
+
+def obter_pls_principais_para_monitorar(id_deputado: int) -> list:
+    """
+    Retorna lista formatada dos PLs principais para monitoramento.
+    Usa a detecção automática de apensados.
+    
+    Returns:
+        Lista no formato esperado pelo sistema de monitoramento
+    """
+    apensados = buscar_projetos_apensados_automatico(id_deputado)
+    
+    pls_monitorar = []
+    
+    for ap in apensados:
+        pls_monitorar.append({
+            "pl": ap["pl_principal"],
+            "id": ap["id_principal"],
+            "tema": ap["ementa_zanatta"][:50] + "..." if len(ap["ementa_zanatta"]) > 50 else ap["ementa_zanatta"],
+            "pl_zanatta": ap["pl_zanatta"],
+            "autor_principal": ap["autor_principal"],
+            "situacao_atual": ap["situacao_principal"],
+            "orgao_atual": ap["orgao_principal"],
+        })
+    
+    return pls_monitorar
 
 
 
@@ -7678,7 +7900,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v32 - Integração com Senado)")
+    st.caption("v33 - Integração com Senado; Monitoramento de apensados")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -7740,10 +7962,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     st.markdown("---")
 
     # ============================================================
-    # ABAS REORGANIZADAS (8 abas - SEM aba separada do Senado)
+    # ABAS REORGANIZADAS (9 abas - com nova aba de Projetos Apensados)
     # Dados do Senado são exibidos nas Abas 5 e 6 quando aplicável
     # ============================================================
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "1️⃣ Apresentação",
         "2️⃣ Autoria & Relatoria na pauta",
         "3️⃣ Palavras-chave na pauta",
@@ -7751,7 +7973,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
         "7️⃣ RICs (Requerimentos de Informação)",
-        "📧 Receber Notificações"
+        "📧 Receber Notificações",
+        "📎 Projetos Apensados"
     ])
 
     # ============================================================
@@ -9974,6 +10197,156 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # Os dados do Senado são exibidos nas Abas 5 e 6 apenas quando
     # a situação da proposição for "Apreciação pelo Senado Federal".
     # ============================================================
+
+    # ============================================================
+    # ABA 9 - PROJETOS APENSADOS (v35 - AUTOMÁTICO)
+    # ============================================================
+    with tab9:
+        st.title("📎 Projetos Apensados")
+        
+        st.markdown("""
+        ### 🔗 Monitoramento de Projetos Tramitando em Conjunto
+        
+        Esta aba exibe os **projetos da Dep. Júlia Zanatta que estão apensados** a outros projetos.
+        
+        **O que significa "apensado"?**
+        > Quando um PL é apensado a outro, ele **para de tramitar sozinho**. 
+        > As movimentações passam a ocorrer no **PL principal** (que não é da deputada).
+        > Por isso, monitoramos o PL principal para acompanhar o andamento.
+        
+        ✅ **Este sistema é AUTOMÁTICO** - detecta novos apensamentos automaticamente!
+        
+        ---
+        """)
+        
+        # Botão para carregar dados
+        col_btn, col_info = st.columns([1, 2])
+        with col_btn:
+            carregar_apensados = st.button("🔄 Detectar Projetos Apensados", type="primary", key="btn_apensados")
+        with col_info:
+            st.caption("🤖 Detecção automática via API da Câmara")
+        
+        if carregar_apensados or st.session_state.get("apensados_carregados"):
+            st.session_state["apensados_carregados"] = True
+            
+            with st.spinner("🔍 Detectando projetos apensados automaticamente..."):
+                # Usar função de detecção automática
+                projetos_apensados = buscar_projetos_apensados_automatico(id_deputada)
+            
+            if not projetos_apensados:
+                st.warning("Nenhum projeto apensado encontrado ou erro na detecção.")
+                st.info("💡 Isso pode significar que nenhum projeto da deputada está apensado no momento.")
+            else:
+                # Converter para DataFrame
+                df_apensados = pd.DataFrame(projetos_apensados)
+                
+                # Métricas
+                st.markdown("### 📊 Resumo")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total de PLs Apensados", len(projetos_apensados))
+                with col2:
+                    aguardando = len([p for p in projetos_apensados if "Aguardando" in p.get("situacao_principal", "")])
+                    st.metric("Aguardando Parecer/Relator", aguardando)
+                with col3:
+                    pronta = len([p for p in projetos_apensados if "Pronta para Pauta" in p.get("situacao_principal", "")])
+                    st.metric("Pronta para Pauta", pronta, delta="⚠️ Atenção!" if pronta > 0 else None)
+                
+                st.markdown("---")
+                
+                # Tabela principal
+                st.markdown("### 📋 Projetos Apensados Detectados")
+                
+                # Renomear colunas para exibição
+                df_view = df_apensados.copy()
+                df_view = df_view.rename(columns={
+                    "pl_zanatta": "PL Zanatta",
+                    "pl_principal": "PL Principal",
+                    "autor_principal": "Autor Principal",
+                    "situacao_principal": "Situação Atual",
+                    "orgao_principal": "Órgão",
+                    "ementa_zanatta": "Ementa (Zanatta)",
+                })
+                
+                # Adicionar link
+                df_view["Link"] = df_view["id_principal"].apply(
+                    lambda x: f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={x}"
+                )
+                
+                cols_exibir = ["PL Zanatta", "PL Principal", "Autor Principal", "Situação Atual", "Órgão", "Link"]
+                cols_exibir = [c for c in cols_exibir if c in df_view.columns]
+                
+                st.dataframe(
+                    df_view[cols_exibir],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Link": st.column_config.LinkColumn("Link", display_text="🔗 Ver"),
+                        "Situação Atual": st.column_config.TextColumn("Situação", width="medium"),
+                    },
+                )
+                
+                st.markdown("---")
+                
+                # Detalhes por projeto
+                st.markdown("### 🔍 Detalhes dos Projetos")
+                
+                for ap in projetos_apensados:
+                    with st.expander(f"📄 {ap['pl_zanatta']} → {ap['pl_principal']}", expanded=False):
+                        col_a, col_b = st.columns(2)
+                        
+                        with col_a:
+                            st.markdown("**📌 Projeto da Deputada:**")
+                            st.markdown(f"**{ap['pl_zanatta']}**")
+                            st.caption(ap['ementa_zanatta'])
+                        
+                        with col_b:
+                            st.markdown("**📎 Apensado a:**")
+                            st.markdown(f"**{ap['pl_principal']}**")
+                            st.markdown(f"👤 Autor: {ap['autor_principal']}")
+                            st.markdown(f"📊 Situação: {ap['situacao_principal']}")
+                            st.markdown(f"🏛️ Órgão: {ap['orgao_principal']}")
+                        
+                        st.markdown(f"🔗 [Ver tramitação completa](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap['id_principal']})")
+                        
+                        # Botão para detalhes
+                        if st.button(f"🔄 Carregar tramitações de {ap['pl_principal']}", key=f"btn_detalhe_{ap['id_principal']}"):
+                            exibir_detalhes_proposicao(ap['id_principal'], key_prefix=f"apensado_{ap['id_principal']}")
+                
+                st.markdown("---")
+                
+                # Download
+                st.markdown("### ⬇️ Downloads")
+                col_dl1, col_dl2 = st.columns(2)
+                
+                with col_dl1:
+                    bytes_out, mime, ext = to_xlsx_bytes(df_view, "Projetos_Apensados")
+                    st.download_button(
+                        "⬇️ Baixar XLSX",
+                        data=bytes_out,
+                        file_name=f"projetos_apensados_zanatta.{ext}",
+                        mime=mime,
+                        key="download_apensados_xlsx"
+                    )
+                
+                st.markdown("---")
+                
+                # Alerta sobre monitoramento
+                st.success("""
+                **✅ Detecção Automática Ativada!**
+                
+                O sistema detecta automaticamente quando um novo projeto da deputada é apensado.
+                Basta clicar em "Detectar Projetos Apensados" para atualizar a lista.
+                
+                O robô `monitorar_apensados.py` usa a mesma detecção automática para notificar 
+                via Telegram quando houver movimentação nos PLs principais.
+                """)
+        
+        else:
+            st.info("👆 Clique em **Detectar Projetos Apensados** para buscar automaticamente.")
+        
+        st.markdown("---")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
 
