@@ -2051,6 +2051,159 @@ MAPEAMENTO_APENSADOS = {
 }
 
 
+def buscar_cadeia_apensamentos(id_proposicao: str, max_niveis: int = 5) -> list:
+    """
+    Busca a cadeia completa de apensamentos até o PL raiz.
+    
+    Ex: PL 2098/2024 → PL 5499/2020 → PL 5344/2020 → PL 10556/2018
+    
+    Returns:
+        Lista de dicionários com {pl, id, situacao} de cada nível
+    """
+    import re
+    
+    cadeia = []
+    id_atual = id_proposicao
+    visitados = set()
+    
+    for _ in range(max_niveis):
+        if not id_atual or id_atual in visitados:
+            break
+        
+        visitados.add(id_atual)
+        
+        try:
+            # Buscar dados da proposição
+            url = f"{BASE_URL}/proposicoes/{id_atual}"
+            resp = requests.get(url, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+            
+            if resp.status_code != 200:
+                break
+            
+            dados = resp.json().get("dados", {})
+            status = dados.get("statusProposicao", {})
+            situacao = status.get("descricaoSituacao", "")
+            
+            sigla = dados.get("siglaTipo", "")
+            numero = dados.get("numero", "")
+            ano = dados.get("ano", "")
+            pl_nome = f"{sigla} {numero}/{ano}"
+            
+            cadeia.append({
+                "pl": pl_nome,
+                "id": id_atual,
+                "situacao": situacao
+            })
+            
+            # Verificar se está apensado a outro
+            situacao_lower = situacao.lower()
+            if "tramitando em conjunto" not in situacao_lower and "apensad" not in situacao_lower:
+                # Este é o PL raiz
+                break
+            
+            # Buscar o próximo nível nas tramitações
+            url_tram = f"{BASE_URL}/proposicoes/{id_atual}/tramitacoes"
+            resp_tram = requests.get(url_tram, params={"itens": 30, "ordem": "DESC"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+            
+            if resp_tram.status_code != 200:
+                break
+            
+            tramitacoes = resp_tram.json().get("dados", [])
+            
+            proximo_pl = None
+            for tram in tramitacoes:
+                texto = " ".join([
+                    str(tram.get("despacho", "") or ""),
+                    str(tram.get("descricaoTramitacao", "") or ""),
+                ])
+                
+                # Procurar padrão "Apense-se à(ao) PL X"
+                match = re.search(r'[Aa]pense-se\s+[àa](?:\(ao\))?\s*([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})', texto, re.IGNORECASE)
+                if match:
+                    tipo = match.group(1).upper()
+                    num = match.group(2)
+                    ano_pl = match.group(3)
+                    proximo_pl = f"{tipo} {num}/{ano_pl}"
+                    break
+            
+            if proximo_pl:
+                # Buscar ID do próximo PL
+                match = re.match(r'([A-Z]{2,4})\s*(\d+)/(\d{4})', proximo_pl)
+                if match:
+                    id_atual = buscar_id_proposicao(match.group(1), match.group(2), match.group(3))
+                else:
+                    break
+            else:
+                break
+            
+            time.sleep(0.1)
+            
+        except Exception as e:
+            print(f"[CADEIA] Erro ao buscar nível: {e}")
+            break
+    
+    return cadeia
+
+
+def buscar_relator_proposicao(id_proposicao: str) -> dict:
+    """
+    Busca o relator atual de uma proposição.
+    
+    Returns:
+        Dict com {nome, id, foto} ou None
+    """
+    try:
+        url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
+        params = {"itens": 50, "ordem": "DESC"}
+        
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+        
+        if resp.status_code != 200:
+            return None
+        
+        tramitacoes = resp.json().get("dados", [])
+        
+        for tram in tramitacoes:
+            despacho = str(tram.get("despacho", "") or "")
+            
+            # Procurar padrões de designação de relator
+            # "Designado Relator, Dep. Fulano de Tal"
+            import re
+            match = re.search(r'[Dd]esignad[oa]\s+[Rr]elator[a]?,?\s*(?:Dep\.?|Deputad[oa])?\s*([A-Za-zÀ-ÿ\s]+?)(?:\s*\(|\s*-|\s*$)', despacho)
+            if match:
+                nome_relator = match.group(1).strip()
+                
+                # Tentar buscar ID do deputado
+                try:
+                    url_dep = f"{BASE_URL}/deputados"
+                    params_dep = {"nome": nome_relator.split()[0], "itens": 5}
+                    resp_dep = requests.get(url_dep, params=params_dep, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                    
+                    if resp_dep.status_code == 200:
+                        deputados = resp_dep.json().get("dados", [])
+                        for dep in deputados:
+                            if nome_relator.lower() in dep.get("nome", "").lower():
+                                id_dep = str(dep.get("id", ""))
+                                foto = f"https://www.camara.leg.br/internet/deputado/bandep/{id_dep}.jpg"
+                                return {
+                                    "nome": dep.get("nome", nome_relator),
+                                    "id": id_dep,
+                                    "foto": foto,
+                                    "partido": dep.get("siglaPartido", ""),
+                                    "uf": dep.get("siglaUf", "")
+                                }
+                except:
+                    pass
+                
+                return {"nome": nome_relator, "id": "", "foto": "", "partido": "", "uf": ""}
+        
+        return None
+    
+    except Exception as e:
+        print(f"[RELATOR] Erro ao buscar relator: {e}")
+        return None
+
+
 def extrair_pl_principal_do_texto(texto: str) -> dict:
     """
     Extrai o PL principal de um texto de despacho/tramitação.
@@ -2155,7 +2308,8 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     1. Identifica projetos com situação "Tramitando em Conjunto"
     2. Usa dicionário de mapeamentos para encontrar o PL principal
     3. Se não estiver no dicionário, tenta buscar nas tramitações
-    4. Busca dados atualizados do PL principal (autor, foto, última movimentação)
+    4. Busca dados atualizados do PL principal (autor, foto, relator, última movimentação)
+    5. Busca cadeia de apensamento (PL principal do principal)
     
     Returns:
         Lista de dicionários com dados dos projetos apensados e seus PLs principais
@@ -2166,6 +2320,67 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     print(f"[APENSADOS] Buscando projetos apensados...")
     
     projetos_apensados = []
+    
+    def buscar_pl_principal_do_principal(id_prop: str, visitados: set = None) -> list:
+        """Busca cadeia de apensamento recursivamente (máx 5 níveis)"""
+        if visitados is None:
+            visitados = set()
+        
+        if id_prop in visitados or len(visitados) >= 5:
+            return []
+        
+        visitados.add(id_prop)
+        cadeia = []
+        
+        try:
+            # Buscar detalhes da proposição
+            url = f"{BASE_URL}/proposicoes/{id_prop}"
+            resp = requests.get(url, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+            if resp.status_code != 200:
+                return cadeia
+            
+            dados = resp.json().get("dados", {})
+            status = dados.get("statusProposicao", {})
+            situacao = status.get("descricaoSituacao", "")
+            
+            # Verificar se este também está apensado
+            if "tramitando em conjunto" in situacao.lower() or "apensad" in situacao.lower():
+                # Buscar nas tramitações o PL ao qual está apensado
+                url_tram = f"{BASE_URL}/proposicoes/{id_prop}/tramitacoes"
+                resp_tram = requests.get(url_tram, params={"itens": 30, "ordem": "DESC"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                
+                if resp_tram.status_code == 200:
+                    tramitacoes = resp_tram.json().get("dados", [])
+                    for tram in tramitacoes:
+                        texto = " ".join([
+                            str(tram.get("despacho", "") or ""),
+                            str(tram.get("descricaoTramitacao", "") or ""),
+                        ])
+                        
+                        # Procurar PL principal
+                        match = re.search(r'[Aa]pens[ea][r-]?[sd]?[oe]?\s+[àa](?:\(ao\))?\s*([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})', texto, re.IGNORECASE)
+                        if match:
+                            tipo = match.group(1).upper()
+                            numero = match.group(2)
+                            ano = match.group(3)
+                            pl_str = f"{tipo} {numero}/{ano}"
+                            
+                            # Buscar ID deste PL
+                            url_busca = f"{BASE_URL}/proposicoes"
+                            resp_busca = requests.get(url_busca, params={"siglaTipo": tipo, "numero": numero, "ano": ano, "itens": 1}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                            
+                            if resp_busca.status_code == 200:
+                                dados_busca = resp_busca.json().get("dados", [])
+                                if dados_busca:
+                                    id_pl = str(dados_busca[0].get("id", ""))
+                                    cadeia.append({"pl": pl_str, "id": id_pl})
+                                    # Buscar recursivamente
+                                    cadeia.extend(buscar_pl_principal_do_principal(id_pl, visitados))
+                            break
+        except:
+            pass
+        
+        return cadeia
     
     try:
         # 1. Buscar todas as proposições da deputada
@@ -2268,8 +2483,10 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                             situacao_principal = "—"
                             orgao_principal = "—"
                             ementa_principal = "—"
-                            data_ultima_mov = ""
+                            relator_principal = "—"
+                            data_ultima_mov = "—"
                             dias_parado = 0
+                            cadeia_apensamento = []
                             
                             if id_principal:
                                 try:
@@ -2280,11 +2497,9 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                         autores = resp_autores.json().get("dados", [])
                                         if autores:
                                             autor_principal = autores[0].get("nome", "—")
-                                            # Extrair ID do deputado da URI
                                             uri_autor = autores[0].get("uri", "")
                                             if "/deputados/" in uri_autor:
                                                 id_autor_principal = uri_autor.split("/deputados/")[-1].split("?")[0]
-                                                # Foto do deputado
                                                 if id_autor_principal:
                                                     foto_autor = f"https://www.camara.leg.br/internet/deputado/bandep/{id_autor_principal}.jpg"
                                     
@@ -2297,24 +2512,40 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                         situacao_principal = status_det.get("descricaoSituacao", "—")
                                         orgao_principal = status_det.get("siglaOrgao", "—")
                                         ementa_principal = dados_det.get("ementa", "—")
+                                        
+                                        # Relator (se disponível no status)
+                                        relator_nome = status_det.get("nomeRelator", "")
+                                        if relator_nome:
+                                            relator_principal = relator_nome
                                     
                                     # Buscar última tramitação para data real
                                     url_tram = f"{BASE_URL}/proposicoes/{id_principal}/tramitacoes"
-                                    resp_tram = requests.get(url_tram, params={"itens": 1, "ordem": "DESC"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
+                                    resp_tram = requests.get(url_tram, params={"itens": 1, "ordem": "DESC", "ordenarPor": "dataHora"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
                                     if resp_tram.status_code == 200:
                                         tramitacoes = resp_tram.json().get("dados", [])
                                         if tramitacoes:
                                             data_hora_tram = tramitacoes[0].get("dataHora", "")
                                             if data_hora_tram:
                                                 try:
-                                                    dt = datetime.fromisoformat(data_hora_tram.replace("Z", "+00:00"))
+                                                    # Tentar diferentes formatos
+                                                    if "T" in data_hora_tram:
+                                                        dt = datetime.fromisoformat(data_hora_tram.replace("Z", "+00:00"))
+                                                    else:
+                                                        dt = datetime.strptime(data_hora_tram[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                                    
                                                     data_ultima_mov = dt.strftime("%d/%m/%Y")
-                                                    # Calcular dias parado
                                                     agora = datetime.now(timezone.utc)
                                                     diferenca = agora - dt
                                                     dias_parado = diferenca.days
-                                                except:
+                                                except Exception as e:
+                                                    print(f"[APENSADOS]    ⚠️ Erro ao parsear data: {e} - {data_hora_tram}")
                                                     data_ultima_mov = data_hora_tram[:10] if data_hora_tram else "—"
+                                    
+                                    # Buscar cadeia de apensamento usando função externa
+                                    cadeia_apensamento = buscar_cadeia_apensamentos(id_principal)
+                                    if cadeia_apensamento and len(cadeia_apensamento) > 1:
+                                        print(f"[APENSADOS]    → Cadeia: {' → '.join([c['pl'] for c in cadeia_apensamento])}")
+                                    
                                 except Exception as e:
                                     print(f"[APENSADOS]    ⚠️ Erro ao buscar dados do PL principal: {e}")
                             
@@ -2330,8 +2561,13 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                 "situacao_principal": situacao_principal,
                                 "orgao_principal": orgao_principal,
                                 "ementa_principal": ementa_principal[:200] + "..." if len(ementa_principal) > 200 else ementa_principal,
+                                "relator_principal": relator_principal,
                                 "data_ultima_mov": data_ultima_mov,
                                 "dias_parado": dias_parado,
+                                "cadeia_apensamento": cadeia_apensamento,
+                                "relator_principal": relator_principal,
+                                "pl_raiz": cadeia_apensamento[-1]["pl"] if cadeia_apensamento else pl_principal,
+                                "id_raiz": cadeia_apensamento[-1]["id"] if cadeia_apensamento else id_principal,
                             })
             
             except Exception as e:
@@ -10466,63 +10702,107 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.markdown("---")
                 
                 # ============================================================
-                # DETALHES DOS PROJETOS
+                # DETALHES DOS PROJETOS (em caixinhas)
                 # ============================================================
                 st.markdown("### 🔍 Detalhes dos Projetos")
                 
                 for ap in projetos_apensados:
                     situacao = ap.get("situacao_principal", "")
+                    dias = ap.get("dias_parado", 0)
                     
-                    # Ícone baseado na situação
+                    # Formatar dias parado
+                    if dias == 0:
+                        parado_str = "Hoje"
+                    elif dias == 1:
+                        parado_str = "1 dia"
+                    elif dias < 30:
+                        parado_str = f"{dias} dias"
+                    elif dias < 365:
+                        meses = dias // 30
+                        parado_str = f"{meses} {'mês' if meses == 1 else 'meses'}"
+                    else:
+                        anos_p = dias // 365
+                        parado_str = f"{anos_p} {'ano' if anos_p == 1 else 'anos'}"
+                    
+                    # Cor baseada na situação
                     if "Pronta para Pauta" in situacao:
+                        cor_borda = "#dc3545"  # vermelho
                         icone = "🔴"
                     elif "Aguardando" in situacao:
+                        cor_borda = "#ffc107"  # amarelo
                         icone = "🟡"
                     else:
-                        icone = "📄"
+                        cor_borda = "#28a745"  # verde
+                        icone = "🟢"
                     
-                    # Usar id_zanatta para key única (cada projeto da deputada é único)
                     key_unica = ap.get('id_zanatta', '') or ap.get('pl_zanatta', '').replace(' ', '_').replace('/', '_')
                     
-                    with st.expander(f"{icone} {ap['pl_zanatta']} → {ap['pl_principal']} | {ap.get('dias_parado', 0)} dias parado", expanded=False):
-                        # Layout com foto do autor
-                        col_foto, col_info1, col_info2 = st.columns([1, 2, 2])
+                    # Container principal (caixinha)
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="border: 2px solid {cor_borda}; border-radius: 10px; padding: 15px; margin-bottom: 20px; background-color: rgba(255,255,255,0.02);">
+                        """, unsafe_allow_html=True)
                         
-                        with col_foto:
-                            # Foto do autor do PL principal
-                            foto_url = ap.get("foto_autor", "")
-                            if foto_url:
-                                st.image(foto_url, width=100, caption=ap.get("autor_principal", ""))
-                            else:
-                                st.markdown("👤")
-                                st.caption(ap.get("autor_principal", "—"))
+                        # Header da caixinha
+                        col_header1, col_header2 = st.columns([3, 1])
+                        with col_header1:
+                            st.markdown(f"#### {icone} {ap['pl_zanatta']} → {ap['pl_principal']}")
+                        with col_header2:
+                            st.markdown(f"**⏱️ Parado há {parado_str}**")
                         
-                        with col_info1:
-                            st.markdown("**📌 Projeto da Deputada:**")
-                            st.markdown(f"**{ap['pl_zanatta']}**")
-                            st.caption(ap.get('ementa_zanatta', ''))
-                            st.markdown(f"🔗 [Ver PL da deputada](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_zanatta', '')})")
-                        
-                        with col_info2:
-                            st.markdown("**📎 Apensado a:**")
-                            st.markdown(f"**{ap['pl_principal']}**")
-                            st.markdown(f"👤 **Autor:** {ap.get('autor_principal', '—')}")
-                            st.markdown(f"📊 **Situação:** {ap.get('situacao_principal', '—')}")
-                            st.markdown(f"🏛️ **Órgão:** {ap.get('orgao_principal', '—')}")
-                            st.markdown(f"📅 **Última mov.:** {ap.get('data_ultima_mov', '—')} ({ap.get('dias_parado', 0)} dias)")
+                        # Cadeia de apensamento (se existir)
+                        cadeia = ap.get("cadeia_apensamento", [])
+                        if cadeia and len(cadeia) > 1:
+                            cadeia_str = " → ".join([c.get("pl", "") for c in cadeia])
+                            st.info(f"📎 **Cadeia de apensamento:** {ap['pl_zanatta']} → {cadeia_str}")
                         
                         st.markdown("---")
                         
+                        # Layout principal: foto + infos
+                        col_foto, col_pl_zanatta, col_pl_principal = st.columns([1, 2, 2])
+                        
+                        with col_foto:
+                            foto_url = ap.get("foto_autor", "")
+                            if foto_url:
+                                st.image(foto_url, width=100)
+                            st.caption(f"**{ap.get('autor_principal', '—')}**")
+                            st.caption("Autor do PL Principal")
+                        
+                        with col_pl_zanatta:
+                            st.markdown("**📌 Projeto da Deputada**")
+                            st.markdown(f"### {ap['pl_zanatta']}")
+                            st.caption(ap.get('ementa_zanatta', '')[:150] + "..." if len(ap.get('ementa_zanatta', '')) > 150 else ap.get('ementa_zanatta', ''))
+                            st.markdown(f"[🔗 Ver PL](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_zanatta', '')})")
+                        
+                        with col_pl_principal:
+                            st.markdown("**📎 Apensado ao PL Principal**")
+                            st.markdown(f"### {ap['pl_principal']}")
+                            
+                            # Métricas do PL principal
+                            m1, m2 = st.columns(2)
+                            with m1:
+                                st.markdown(f"🏛️ **Órgão:** {ap.get('orgao_principal', '—')}")
+                                st.markdown(f"📅 **Última mov.:** {ap.get('data_ultima_mov', '—')}")
+                            with m2:
+                                relator = ap.get("relator_principal", "—")
+                                st.markdown(f"👨‍⚖️ **Relator:** {relator}")
+                            
+                            st.markdown(f"[🔗 Ver PL Principal](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_principal', '')})")
+                        
+                        st.markdown("---")
+                        
+                        # Situação atual
+                        st.markdown(f"**📊 Situação atual:** {situacao}")
+                        
                         # Ementa do PL principal
-                        st.markdown("**📝 Ementa do PL Principal:**")
-                        st.info(ap.get("ementa_principal", "—"))
+                        with st.expander("📝 Ver ementa do PL Principal", expanded=False):
+                            st.write(ap.get("ementa_principal", "—"))
                         
-                        # Link para tramitação
-                        st.markdown(f"🔗 [Ver tramitação completa do PL principal](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_principal', '')})")
-                        
-                        # Botão para carregar tramitações - usando key_unica baseada no id_zanatta
-                        if st.button(f"🔄 Carregar tramitações recentes", key=f"btn_tram_{key_unica}"):
+                        # Botão para tramitações
+                        if st.button(f"🔄 Ver tramitações recentes", key=f"btn_tram_{key_unica}"):
                             exibir_detalhes_proposicao(ap.get('id_principal', ''), key_prefix=f"apensado_{key_unica}")
+                        
+                        st.markdown("</div>", unsafe_allow_html=True)
                 
                 st.markdown("---")
                 
