@@ -347,7 +347,7 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
 
     # Endpoint (Swagger) — aceita codigoMateria e (opcional) dataReferencia
     # Alguns ambientes ignoram Accept e retornam XML; suportar ambos.
-    data_ref = date.today().isoformat()
+    data_ref = datetime.date.today().isoformat()
     url = f"https://legis.senado.leg.br/dadosabertos/processo/relatoria?codigoMateria={codigo_materia}&dataReferencia={data_ref}&v=1"
 
     print(f"[SENADO-RELATORIA] Buscando relatoria: {url}")
@@ -7774,7 +7774,7 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
                                     prop["Orgao_Senado_Nome"] = status_sen.get("orgao_senado_nome", "")
                             
                             # Buscar relator do Senado
-                            rel_sen = buscar_relator_atual_senado(prop.get("codigo_materia_senado", ""), id_proc_sen, debug=False)
+                            rel_sen_dict = buscar_detalhes_senado(prop.get("codigo_materia_senado", ""), debug=False)
                             if rel_sen:
                                 prop["Relator_Senado"] = rel_sen
                             
