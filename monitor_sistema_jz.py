@@ -93,6 +93,19 @@ from typing import Optional, Dict, List, Tuple
 # IMPORTANTE: o Streamlit precisa estar importado ANTES do primeiro @st.cache_data
 import streamlit as st
 import pandas as pd
+import datetime
+import requests
+import time
+import json
+import concurrent.futures
+import unicodedata
+from functools import lru_cache
+from io import BytesIO
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
+import matplotlib.pyplot as plt
+import matplotlib
+import base64
 
 # Certificados SSL: em alguns ambientes (ex.: Streamlit Cloud), a cadeia de CAs do sistema pode não estar disponível.
 # Usamos o bundle do certifi quando possível para evitar SSL: CERTIFICATE_VERIFY_FAILED.
@@ -198,8 +211,6 @@ def buscar_tramitacao_senado_mesmo_numero(
     Returns:
         Dict com dados do Senado ou None se não encontrado
     """
-    import requests
-    import json
 
     tipo_norm = (tipo or "").strip().upper()
     numero_norm = (numero or "").strip()
@@ -318,8 +329,6 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
       - relator_nome, relator_partido, relator_uf
       - orgao_senado_sigla (ex: "CAE"), orgao_senado_nome
     """
-    import requests
-    import json
     import xml.etree.ElementTree as ET
     from datetime import date
 
@@ -483,7 +492,6 @@ def buscar_movimentacoes_senado(
     Onde {id} é o id do processo (vem no retorno do /processo?sigla=...).
     A resposta normalmente vem em JSON, mas pode vir em XML mesmo com Accept: application/json.
     """
-    import requests
     import xml.etree.ElementTree as ET
     from datetime import datetime
 
@@ -587,7 +595,6 @@ def buscar_status_senado_por_processo(
       - orgao_senado_sigla
       - orgao_senado_nome
     """
-    import requests
     import xml.etree.ElementTree as ET
 
     out = {"situacao_senado": "", "orgao_senado_sigla": "", "orgao_senado_nome": ""}
@@ -769,7 +776,6 @@ def buscar_codigo_senador_por_nome(nome_senador: str) -> Optional[str]:
     Returns:
         Código do senador ou None
     """
-    import requests
     
     if not nome_senador:
         return None
@@ -1034,7 +1040,6 @@ def processar_lista_com_senado(
             proposicoes_enriquecidas.append(prop_enriquecida)
             
             if i < total - 1:
-                import time
                 time.sleep(0.1)
         except Exception as e:
             # LOG: Erro ao processar proposição específica
@@ -1105,26 +1110,10 @@ def processar_lista_com_senado(
 # - [v30.1] ✅ Validação de respostas, timeouts, mensagens claras, modo debug
 # ============================================================
 
-import datetime
-import concurrent.futures
-import time
-import unicodedata
-import json
-from functools import lru_cache
-from io import BytesIO
-from urllib.parse import urlparse
-import re
-from zoneinfo import ZoneInfo
 
-import pandas as pd
-import requests
-import streamlit as st
-import matplotlib.pyplot as plt
-import matplotlib
 matplotlib.use('Agg')  # Backend não-interativo
 
 
-import base64
 
 # Função para cadastrar email via GitHub API
 def cadastrar_email_github(novo_email: str) -> tuple[bool, str]:
@@ -1144,7 +1133,6 @@ def cadastrar_email_github(novo_email: str) -> tuple[bool, str]:
             return False, "Token do GitHub não configurado"
 
         # Validar email
-        import re
         if not re.match(r"[^@]+@[^@]+\.[^@]+", novo_email):
             return False, "Email inválido"
 
@@ -1465,10 +1453,6 @@ def registrar_login(usuario: str):
 # Versão com tratamento robusto de erros e debug
 # ============================================================
 
-import requests
-import pandas as pd
-import streamlit as st
-from typing import Optional, Dict, List
 
 def validar_resposta_api(response) -> tuple[bool, str]:
     """
@@ -2186,7 +2170,6 @@ def buscar_cadeia_apensamentos(id_proposicao: str, max_niveis: int = 10) -> list
     Returns:
         Lista de dicionários com {pl, id, situacao} de cada nível (incluindo o inicial)
     """
-    import re
     
     cadeia = []
     id_atual = id_proposicao
@@ -2365,7 +2348,6 @@ def extrair_pl_principal_do_texto(texto: str) -> dict:
     Returns:
         Dict com {pl_principal, tipo, numero, ano} ou None
     """
-    import re
     
     patterns = [
         r'[Aa]pense-se\s+[àa](?:\(ao\))?\s*([A-Z]{2,4})[\s\-]*(\d+)/(\d{4})',
@@ -2459,7 +2441,6 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     Returns:
         Lista de dicionários com dados dos projetos apensados
     """
-    import re
     from datetime import datetime, timezone
     
     print(f"[APENSADOS] Buscando projetos apensados (v35.1 - mapeamento completo)...")
@@ -7282,7 +7263,6 @@ def buscar_proposicao_direta(sigla_tipo: str, numero: str, ano: str) -> Optional
     Returns:
         Dict com dados da proposição ou None
     """
-    import requests
     
     sigla = (sigla_tipo or "").strip().upper()
     num = (numero or "").strip()
@@ -7353,7 +7333,6 @@ def parse_proposicao_input(texto: str) -> Optional[Tuple[str, str, str]]:
     Returns:
         Tuple (sigla, numero, ano) ou None
     """
-    import re
     
     texto = (texto or "").strip().upper()
     if not texto:
@@ -8352,7 +8331,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v36 - Integração com Senado; Monitoramento de Apensados)")
+    st.caption("v36 - Integração com Senado; Monitiramento de apensados")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -9622,7 +9601,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 def normalizar_busca(txt):
                     if pd.isna(txt):
                         return ""
-                    import unicodedata
                     txt = str(txt).lower()
                     txt = unicodedata.normalize('NFD', txt)
                     txt = ''.join(c for c in txt if unicodedata.category(c) != 'Mn')
