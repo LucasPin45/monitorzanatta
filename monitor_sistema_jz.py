@@ -907,6 +907,19 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     resultado["Orgao_Senado_Nome"] = ""
     resultado["UltimasMov_Senado"] = ""
     
+    # PRÉ-FILTRO: Só processar tipos que podem ir ao Senado
+    proposicao_str = proposicao_dict.get("Proposição", "") or proposicao_dict.get("Proposicao", "")
+    tipo_proposicao = proposicao_str.split()[0] if proposicao_str else ""
+    
+    # Tipos permitidos: PL, PLP, PEC, PDL (que podem ir ao Senado)
+    # Não processar: RIC, PRC, REQ, INC, etc.
+    TIPOS_PERMITIDOS_SENADO = {"PL", "PLP", "PEC", "PDL"}
+    
+    if tipo_proposicao not in TIPOS_PERMITIDOS_SENADO:
+        # Não loga nada - silencioso para evitar poluição
+        return resultado
+    
+    
     # Verificar se está em apreciação pelo Senado
     situacao = proposicao_dict.get("Situação atual", "")
     despacho = proposicao_dict.get("despacho", "")
@@ -10795,7 +10808,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         "Situação": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
                         "Órgão": p.get("orgao_raiz", ""),
                         "Relator": p.get("relator_raiz", "—")[:30],
-                        "Parado": parado_str,
+                        "Parado há": parado_str,
                         "Última Mov.": p.get("data_ultima_mov", "—"),
                         "id_raiz": p.get("id_raiz", ""),
                         "id_zanatta": p.get("id_zanatta", ""),
@@ -10806,8 +10819,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 
                 # Editor de dados com checkboxes
                 edited_df = st.data_editor(
-                    df_tabela[["", "__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."]],
-                    disabled=["__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."],
+                    df_tabela[["", "__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
+                    disabled=["__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."],
                     hide_index=True,
                     use_container_width=True,
                     height=400,
@@ -10816,7 +10829,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         "__row_id": st.column_config.TextColumn("ID", width="small"),
                         "🚦": st.column_config.TextColumn("", width="small"),
                         "Relator": st.column_config.TextColumn("Relator", width="medium"),
-                        "Parado": st.column_config.TextColumn("Parado", width="small"),
+                        "Parado há": st.column_config.TextColumn("Parado há", width="small"),
                     },
                 )
 
