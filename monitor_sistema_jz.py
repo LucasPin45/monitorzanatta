@@ -94,6 +94,7 @@ from typing import Optional, Dict, List, Tuple
 import streamlit as st
 import pandas as pd
 import datetime
+from datetime import timezone
 import requests
 import time
 import json
@@ -330,7 +331,7 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
       - orgao_senado_sigla (ex: "CAE"), orgao_senado_nome
     """
     import xml.etree.ElementTree as ET
-    from datetime import date
+    # datetime já importado no topo
 
     if not codigo_materia:
         return None
@@ -493,7 +494,7 @@ def buscar_movimentacoes_senado(
     A resposta normalmente vem em JSON, mas pode vir em XML mesmo com Accept: application/json.
     """
     import xml.etree.ElementTree as ET
-    from datetime import datetime
+    # datetime já importado no topo
 
     if not id_processo_senado:
         return []
@@ -559,7 +560,7 @@ def buscar_movimentacoes_senado(
         dt = None
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S.%f"):
             try:
-                dt = datetime.strptime(data_txt[:26], fmt)
+                dt = datetime.datetime.strptime(data_txt[:26], fmt)
                 break
             except Exception:
                 continue
@@ -693,7 +694,7 @@ def unificar_tramitacoes_camara_senado(
     Returns:
         DataFrame unificado com coluna 'Casa' indicando origem
     """
-    from datetime import datetime
+    # datetime já importado no topo
     
     todas_tramitacoes = []
     
@@ -710,7 +711,7 @@ def unificar_tramitacoes_camara_senado(
             dt_sort = None
             for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%Y-%m-%dT%H:%M:%S"]:
                 try:
-                    dt_sort = datetime.strptime(data_str[:19], fmt)
+                    dt_sort = datetime.datetime.strptime(data_str[:19], fmt)
                     break
                 except:
                     continue
@@ -736,7 +737,7 @@ def unificar_tramitacoes_camara_senado(
         data_completa = f"{data_str} {hora}".strip() if hora else data_str
         for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"]:
             try:
-                dt_sort = datetime.strptime(data_completa[:16], fmt)
+                dt_sort = datetime.datetime.strptime(data_completa[:16], fmt)
                 break
             except:
                 continue
@@ -2279,7 +2280,7 @@ def buscar_dados_pl_raiz(id_raiz: str) -> dict:
     """
     Busca dados completos do PL raiz (última tramitação, relator, situação).
     """
-    from datetime import datetime, timezone
+    # datetime já importado no topo, timezone
     
     dados = {
         "situacao": "—",
@@ -2322,12 +2323,12 @@ def buscar_dados_pl_raiz(id_raiz: str) -> dict:
                     try:
                         # Tentar diferentes formatos
                         if "T" in data_hora:
-                            dt = datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
+                            dt = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
                         else:
-                            dt = datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            dt = datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                         
                         dados["data_ultima_mov"] = dt.strftime("%d/%m/%Y")
-                        agora = datetime.now(timezone.utc)
+                        agora = datetime.datetime.now(timezone.utc)
                         dados["dias_parado"] = (agora - dt).days
                     except:
                         dados["data_ultima_mov"] = data_hora[:10] if data_hora else "—"
@@ -2441,7 +2442,7 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     Returns:
         Lista de dicionários com dados dos projetos apensados
     """
-    from datetime import datetime, timezone
+    # datetime já importado no topo, timezone
     
     print(f"[APENSADOS] Buscando projetos apensados (v35.1 - mapeamento completo)...")
     
@@ -2547,12 +2548,12 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                 if data_hora:
                                     try:
                                         if "T" in data_hora:
-                                            dt = datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
+                                            dt = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
                                         else:
-                                            dt = datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                            dt = datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                                         
                                         data_ultima_mov = dt.strftime("%d/%m/%Y")
-                                        agora = datetime.now(timezone.utc)
+                                        agora = datetime.datetime.now(timezone.utc)
                                         dias_parado = (agora - dt).days
                                         print(f"[APENSADOS]    Última mov: {data_ultima_mov} ({dias_parado} dias)")
                                     except Exception as e:
@@ -7885,7 +7886,7 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
         st.markdown("**Relator(a):** Não identificado")
     
     # INTEGRAÇÃO v32.1: Métricas usando dados do Senado quando disponível
-    from datetime import datetime
+    # datetime já importado no topo
     
     data_status_exibir = status_dt
     ultima_mov_exibir = ultima_dt
@@ -7900,10 +7901,10 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
                 data_str = partes[0].strip()
                 for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
                     try:
-                        dt_senado = datetime.strptime(data_str[:16], fmt)
+                        dt_senado = datetime.datetime.strptime(data_str[:16], fmt)
                         ultima_mov_exibir = dt_senado
                         data_status_exibir = dt_senado
-                        parado_dias_exibir = (datetime.now() - dt_senado).days
+                        parado_dias_exibir = (datetime.datetime.now() - dt_senado).days
                         break
                     except:
                         continue
@@ -8331,7 +8332,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v36 - Integração com Senado; Monitiramento de apensados")
+    st.caption("v32 - Integração com Senado)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -9366,7 +9367,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         return row.get("Data do status", "")
                     
                     def get_parado_dias_integrado(row):
-                        from datetime import datetime
+                        # datetime já importado no topo
                         if row.get("no_senado") and row.get("UltimasMov_Senado"):
                             movs = str(row.get("UltimasMov_Senado", ""))
                             if movs and movs != "Sem movimentações disponíveis":
@@ -9377,8 +9378,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                                     # Tentar parsear a data
                                     for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
                                         try:
-                                            dt = datetime.strptime(data_str[:16], fmt)
-                                            dias = (datetime.now() - dt).days
+                                            dt = datetime.datetime.strptime(data_str[:16], fmt)
+                                            dias = (datetime.datetime.now() - dt).days
                                             return dias
                                         except:
                                             continue
@@ -9967,7 +9968,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             return row.get("Última tramitação", "") or ""
                         
                         def get_parado_integrado_tab6(row):
-                            from datetime import datetime
+                            # datetime já importado no topo
                             if row.get("no_senado") and row.get("UltimasMov_Senado"):
                                 movs = str(row.get("UltimasMov_Senado", ""))
                                 if movs and movs != "Sem movimentações disponíveis":
@@ -9977,8 +9978,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                                         data_str = partes[0].strip()
                                         for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
                                             try:
-                                                dt = datetime.strptime(data_str[:16], fmt)
-                                                dias = (datetime.now() - dt).days
+                                                dt = datetime.datetime.strptime(data_str[:16], fmt)
+                                                dias = (datetime.datetime.now() - dt).days
                                                 return f"{dias}d"
                                             except:
                                                 continue
@@ -10669,13 +10670,13 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 # ============================================================
                 # ORDENAR POR DATA MAIS RECENTE PRIMEIRO
                 # ============================================================
-                from datetime import datetime
+                # datetime já importado no topo
                 
                 def parse_data_br(data_str):
                     """Converte DD/MM/YYYY para datetime"""
                     try:
                         if data_str and data_str != "—":
-                            return datetime.strptime(data_str, "%d/%m/%Y")
+                            return datetime.datetime.strptime(data_str, "%d/%m/%Y")
                         return datetime.min
                     except:
                         return datetime.min
