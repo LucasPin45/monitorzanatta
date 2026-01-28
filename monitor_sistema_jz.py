@@ -1,5 +1,13 @@
-# monitor_sistema_jz.py - v35 PROJETOS APENSADOS (HÍBRIDO)
+# monitor_sistema_jz.py - v36 PROJETOS APENSADOS (COMPLETA)
 # 
+# ALTERAÇÕES v36 - PROJETOS APENSADOS (CORREÇÕES FINAIS):
+# - 🔧 CORRIGIDO: PL 5198/2023 → raiz é PL 4953/2016 (não PL 736/2022)
+# - ✅ ORDENAÇÃO: Projetos ordenados do mais recente para o mais antigo
+# - ✅ CHECKBOXES: Sistema de seleção igual às outras abas
+# - ✅ EMOJIS: Lógica igual à aba 5 (🔴 <30 dias, 🟡 30-90, 🟢 >90)
+# - ✅ RELATOR: Aparece na tabela principal
+# - ✅ AÇÕES: Copiar, abrir links, baixar selecionados
+#
 # ALTERAÇÕES v35 - PROJETOS APENSADOS (DETECÇÃO HÍBRIDA):
 # - NOVA ABA: "📎 Projetos Apensados" para monitorar PLs tramitando em conjunto
 # - ✅ DETECÇÃO HÍBRIDA: 
@@ -2040,10 +2048,10 @@ MAPEAMENTO_APENSADOS_COMPLETO = {
         "raiz": "PL 5065/2016",
         "cadeia": ["PL 5065/2016"],
     },
-    "2399426": {  # PL 5198/2023 - ONGs estrangeiras
+    "2399426": {  # PL 5198/2023 - ONGs estrangeiras (CADEIA CORRIGIDA!)
         "principal": "PL 736/2022",
-        "raiz": "PL 736/2022",
-        "cadeia": ["PL 736/2022"],
+        "raiz": "PL 4953/2016",  # ← RAIZ REAL (não é o 736/2022!)
+        "cadeia": ["PL 736/2022", "PL 4953/2016"],
     },
     "2423254": {  # PL 955/2024 - Vacinação
         "principal": "PL 776/2024",
@@ -10643,7 +10651,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
 
     # ============================================================
-    # ABA 9 - PROJETOS APENSADOS (v35 - COMPLETO)
+    # ============================================================
+    # ABA 9 - PROJETOS APENSADOS (v36 - COMPLETA COM SELEÇÃO)
     # ============================================================
     with tab9:
         st.title("📎 Projetos Apensados")
@@ -10680,6 +10689,27 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.info("💡 Isso pode significar que nenhum projeto da deputada está apensado no momento.")
             else:
                 # ============================================================
+                # ORDENAR POR DATA MAIS RECENTE PRIMEIRO
+                # ============================================================
+                from datetime import datetime
+                
+                def parse_data_br(data_str):
+                    """Converte DD/MM/YYYY para datetime"""
+                    try:
+                        if data_str and data_str != "—":
+                            return datetime.strptime(data_str, "%d/%m/%Y")
+                        return datetime.min
+                    except:
+                        return datetime.min
+                
+                # Ordenar do mais recente para o mais antigo
+                projetos_apensados = sorted(
+                    projetos_apensados,
+                    key=lambda x: parse_data_br(x.get("data_ultima_mov", "—")),
+                    reverse=True
+                )
+                
+                # ============================================================
                 # MÉTRICAS (usando dados do PL RAIZ)
                 # ============================================================
                 st.markdown("### 📊 Resumo")
@@ -10709,6 +10739,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 # TABELA PRINCIPAL (usando dados do PL RAIZ)
                 # ============================================================
                 st.markdown("### 📋 Projetos Apensados Detectados")
+                st.caption("👆 Clique em um projeto para ver detalhes completos")
                 
                 # Preparar dados para tabela
                 dados_tabela = []
@@ -10729,10 +10760,14 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         parado_str = f"{anos_calc} {'ano' if anos_calc == 1 else 'anos'}"
                     
                     # Sinalização de alerta - usando situação do PL RAIZ
+                    # LÓGICA IGUAL À ABA 5: 
+                    # 🔴 = menos de 30 dias
+                    # 🟡 = 30-90 dias  
+                    # 🟢 = mais de 90 dias
                     situacao_raiz = p.get("situacao_raiz", "")
-                    if "Pronta para Pauta" in situacao_raiz:
+                    if dias < 30:
                         sinal = "🔴"
-                    elif "Aguardando Parecer" in situacao_raiz or "Aguardando Designação" in situacao_raiz:
+                    elif dias < 90:
                         sinal = "🟡"
                     else:
                         sinal = "🟢"
@@ -10745,43 +10780,68 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         cadeia_str = p.get("pl_principal", "")
                     
                     dados_tabela.append({
-                        "Sinal": sinal,
+                        "": False,  # Checkbox
+                        "🚦": sinal,
                         "PL Zanatta": p.get("pl_zanatta", ""),
-                        "Cadeia": cadeia_str,
                         "PL Raiz": p.get("pl_raiz", ""),
-                        "Situação (Raiz)": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
+                        "Situação": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
                         "Órgão": p.get("orgao_raiz", ""),
-                        "Relator": p.get("relator_raiz", "—")[:20],
-                        "Parado há": parado_str,
+                        "Relator": p.get("relator_raiz", "—")[:30],
+                        "Parado": parado_str,
                         "Última Mov.": p.get("data_ultima_mov", "—"),
                         "id_raiz": p.get("id_raiz", ""),
+                        "id_zanatta": p.get("id_zanatta", ""),
+                        "cadeia": cadeia_str,
                     })
                 
                 df_tabela = pd.DataFrame(dados_tabela)
                 
-                # Adicionar link
-                df_tabela["Link"] = df_tabela["id_raiz"].apply(
-                    lambda x: f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={x}" if x else ""
-                )
-                
-                # Colunas para exibir
-                cols_exibir = ["Sinal", "PL Zanatta", "PL Raiz", "Situação (Raiz)", "Órgão", "Relator", "Parado há", "Última Mov.", "Link"]
-                
-                st.dataframe(
-                    df_tabela[cols_exibir],
-                    use_container_width=True,
+                # Editor de dados com checkboxes
+                edited_df = st.data_editor(
+                    df_tabela[["", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."]],
+                    disabled=["🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."],
                     hide_index=True,
+                    use_container_width=True,
                     height=400,
                     column_config={
-                        "Sinal": st.column_config.TextColumn("🚦", width="small"),
-                        "Link": st.column_config.LinkColumn("🔗", display_text="Ver"),
-                        "Situação (Raiz)": st.column_config.TextColumn("Situação", width="medium"),
-                        "Parado há": st.column_config.TextColumn("Parado", width="small"),
+                        "": st.column_config.CheckboxColumn("Selecionar", default=False, width="small"),
+                        "🚦": st.column_config.TextColumn("", width="small"),
+                        "Relator": st.column_config.TextColumn("Relator", width="medium"),
+                        "Parado": st.column_config.TextColumn("Parado", width="small"),
                     },
                 )
                 
                 # Legenda
-                st.caption("🔴 Pronta para Pauta | 🟡 Aguardando Parecer/Relator | 🟢 Outros")
+                st.caption("🔴 Menos de 30 dias parado | 🟡 30-90 dias | 🟢 Mais de 90 dias")
+                
+                # Exibir projetos selecionados
+                selecionados = df_tabela[edited_df[""]]
+                
+                if len(selecionados) > 0:
+                    st.info(f"✅ {len(selecionados)} projeto(s) selecionado(s)")
+                    
+                    # Botões de ação
+                    col_a1, col_a2, col_a3 = st.columns(3)
+                    with col_a1:
+                        if st.button("📋 Copiar PLs Raiz", key="copiar_raiz_sel"):
+                            pls_sel = "\n".join([f"{row['PL Raiz']}" for _, row in selecionados.iterrows()])
+                            st.code(pls_sel, language="text")
+                    
+                    with col_a2:
+                        if st.button("🔗 Abrir Links", key="abrir_links_sel"):
+                            for _, row in selecionados.iterrows():
+                                link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={row['id_raiz']}"
+                                st.markdown(f"[🔗 {row['PL Raiz']}]({link})")
+                    
+                    with col_a3:
+                        if st.button("⬇️ Baixar Selecionados", key="download_sel"):
+                            bytes_sel, mime_sel, ext_sel = to_xlsx_bytes(selecionados, "Selecionados")
+                            st.download_button(
+                                "📥 Download XLSX",
+                                data=bytes_sel,
+                                file_name=f"apensados_selecionados.{ext_sel}",
+                                mime=mime_sel,
+                            )
                 
                 st.markdown("---")
                 
@@ -10809,10 +10869,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         anos_p = dias // 365
                         parado_str = f"{anos_p} {'ano' if anos_p == 1 else 'anos'}"
                     
-                    # Ícone baseado na situação do PL RAIZ
-                    if "Pronta para Pauta" in situacao_raiz:
+                    # Ícone baseado na situação do PL RAIZ (mesma lógica da tabela)
+                    if dias < 30:
                         icone = "🔴"
-                    elif "Aguardando" in situacao_raiz:
+                    elif dias < 90:
                         icone = "🟡"
                     else:
                         icone = "🟢"
@@ -10864,6 +10924,72 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             st.markdown(f"[🔗 Ver PL Raiz](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_raiz', '')})")
                         
                         st.markdown("---")
+                        
+                        # Situação atual do PL RAIZ
+                        st.markdown(f"**📊 Situação atual (PL Raiz):** {situacao_raiz}")
+                        
+                        # Ementa do PL Raiz
+                        ementa_raiz = ap.get("ementa_raiz", ap.get("ementa_principal", "—"))
+                        st.markdown(f"**📝 Ementa:** {ementa_raiz[:300]}...")
+                        
+                        # Botão para carregar tramitações do PL RAIZ
+                        if st.button(f"🔄 Ver tramitações do PL Raiz", key=f"btn_tram_{key_unica}"):
+                            exibir_detalhes_proposicao(ap.get('id_raiz', ''), key_prefix=f"apensado_{key_unica}")
+                
+                st.markdown("---")
+                
+                # ============================================================
+                # DOWNLOADS
+                # ============================================================
+                st.markdown("### ⬇️ Downloads")
+                
+                # Preparar DataFrame completo para download
+                df_download = pd.DataFrame(projetos_apensados)
+                df_download = df_download.rename(columns={
+                    "pl_zanatta": "PL Zanatta",
+                    "pl_principal": "PL Principal",
+                    "pl_raiz": "PL Raiz",
+                    "autor_principal": "Autor Principal",
+                    "situacao_raiz": "Situação (Raiz)",
+                    "orgao_raiz": "Órgão (Raiz)",
+                    "relator_raiz": "Relator (Raiz)",
+                    "ementa_zanatta": "Ementa (Zanatta)",
+                    "ementa_principal": "Ementa (Principal)",
+                    "data_ultima_mov": "Última Movimentação",
+                    "dias_parado": "Dias Parado",
+                })
+                
+                col_dl1, col_dl2 = st.columns(2)
+                
+                with col_dl1:
+                    bytes_out, mime, ext = to_xlsx_bytes(df_download, "Projetos_Apensados")
+                    st.download_button(
+                        "⬇️ Baixar XLSX Completo",
+                        data=bytes_out,
+                        file_name=f"projetos_apensados_zanatta.{ext}",
+                        mime=mime,
+                        key="download_apensados_xlsx"
+                    )
+                
+                st.markdown("---")
+                
+                # Info
+                st.info(f"""
+                **📊 Estatísticas da detecção:**
+                - Total de projetos apensados encontrados: **{len(projetos_apensados)}**
+                - Mapeamentos no dicionário: **{len(MAPEAMENTO_APENSADOS)}**
+                - Projetos no cadastro manual: **{len(PROPOSICOES_FALTANTES_API.get('220559', []))}**
+                - Ordenação: **Do mais recente para o mais antigo**
+                """)
+        
+        else:
+            st.info("👆 Clique em **Detectar Projetos Apensados** para buscar os dados.")
+        
+        st.markdown("---")
+        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
+
+    st.markdown("---")
+
                         
                         # Situação atual do PL RAIZ
                         st.markdown(f"**📊 Situação atual (PL Raiz):** {situacao_raiz}")
