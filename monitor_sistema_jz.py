@@ -2537,6 +2537,7 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                             orgao_raiz = status_raiz.get("siglaOrgao", "—")
                             ementa_raiz = dados_raiz.get("ementa", "—")
                             relator_raiz = status_raiz.get("nomeRelator") or status_raiz.get("relator") or "—"
+                            print(f"[APENSADOS]    Status RAIZ: situação={situacao_raiz[:40]}, órgão={orgao_raiz}, relator={relator_raiz[:30] if relator_raiz != '—' else '(vazio)'}")
                             
                             # Fallback: se relator vazio, buscar via fetch_relator_atual
                             if relator_raiz == "—" and id_raiz:
@@ -2573,7 +2574,15 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                         print(f"[APENSADOS]    Última mov: {data_ultima_mov} ({dias_parado} dias)")
                                     except Exception as e:
                                         print(f"[APENSADOS]    ⚠️ Erro ao parsear data: {e}")
-                                        data_ultima_mov = data_hora[:10] if data_hora else "—"
+                                        # Fallback: tentar formato DD/MM/YYYY se vier assim
+                                        try:
+                                            dt = datetime.datetime.strptime(data_hora[:10], "%d/%m/%Y")
+                                            data_ultima_mov = data_hora[:10]
+                                            agora = datetime.datetime.now()
+                                            dias_parado = (agora - dt).days
+                                        except Exception:
+                                            data_ultima_mov = data_hora[:10] if len(data_hora) >= 10 else data_hora
+                                            dias_parado = 0
                     except Exception as e:
                         print(f"[APENSADOS]    ⚠️ Erro ao buscar dados do RAIZ: {e}")
                 
@@ -10703,6 +10712,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     reverse=True
                 )
                 
+                # Adicionar row_id estável para seleção
+                for idx, p in enumerate(projetos_apensados):
+                    p["__row_id"] = f"{p.get('id_zanatta', '')}_{idx}"
+
                 # ============================================================
                 # MÉTRICAS (usando dados do PL RAIZ)
                 # ============================================================
@@ -10775,6 +10788,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     
                     dados_tabela.append({
                         "": False,  # Checkbox
+                        "__row_id": p.get("__row_id", ""),  # ID estável
                         "🚦": sinal,
                         "PL Zanatta": p.get("pl_zanatta", ""),
                         "PL Raiz": p.get("pl_raiz", ""),
@@ -10792,25 +10806,26 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 
                 # Editor de dados com checkboxes
                 edited_df = st.data_editor(
-                    df_tabela[["", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."]],
-                    disabled=["🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."],
+                    df_tabela[["", "__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."]],
+                    disabled=["__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado", "Última Mov."],
                     hide_index=True,
                     use_container_width=True,
                     height=400,
                     column_config={
-                        "": st.column_config.CheckboxColumn("Selecionar", default=False, width="small"),
+                        "": st.column_config.CheckboxColumn("", default=False, width="small"),
+                        "__row_id": st.column_config.TextColumn("ID", width="small"),
                         "🚦": st.column_config.TextColumn("", width="small"),
                         "Relator": st.column_config.TextColumn("Relator", width="medium"),
                         "Parado": st.column_config.TextColumn("Parado", width="small"),
                     },
                 )
-                
+
                 # Legenda
                 st.caption("🔴 Menos de 30 dias parado | 🟡 30-90 dias | 🟢 Mais de 90 dias")
-                
-                # Exibir projetos selecionados
-                mask_sel = edited_df[""].to_numpy()
-                selecionados = df_tabela[mask_sel]
+
+                # Seleção correta via __row_id
+                row_ids_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
+                selecionados = df_tabela[df_tabela["__row_id"].isin(row_ids_selecionados)]
                 
                 if len(selecionados) > 0:
                     st.info(f"✅ {len(selecionados)} projeto(s) selecionado(s)")
