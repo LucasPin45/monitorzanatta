@@ -8352,7 +8352,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v32 - Integração com Senado)")
+    st.caption("v36 - Integração com Senado; Monitoramento de Apensados)")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -10989,72 +10989,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
 
     st.markdown("---")
-
-                        
-                        # Situação atual do PL RAIZ
-                        st.markdown(f"**📊 Situação atual (PL Raiz):** {situacao_raiz}")
-                        
-                        # Ementa do PL Raiz
-                        ementa_raiz = ap.get("ementa_raiz", ap.get("ementa_principal", "—"))
-                        st.markdown(f"**📝 Ementa:** {ementa_raiz[:300]}...")
-                        
-                        # Botão para carregar tramitações do PL RAIZ
-                        if st.button(f"🔄 Ver tramitações do PL Raiz", key=f"btn_tram_{key_unica}"):
-                            exibir_detalhes_proposicao(ap.get('id_raiz', ''), key_prefix=f"apensado_{key_unica}")
-                
-                st.markdown("---")
-                
-                # ============================================================
-                # DOWNLOADS
-                # ============================================================
-                st.markdown("### ⬇️ Downloads")
-                
-                # Preparar DataFrame completo para download
-                df_download = pd.DataFrame(projetos_apensados)
-                df_download = df_download.rename(columns={
-                    "pl_zanatta": "PL Zanatta",
-                    "pl_principal": "PL Principal",
-                    "pl_raiz": "PL Raiz",
-                    "autor_principal": "Autor Principal",
-                    "situacao_raiz": "Situação (Raiz)",
-                    "orgao_raiz": "Órgão (Raiz)",
-                    "relator_raiz": "Relator (Raiz)",
-                    "ementa_zanatta": "Ementa (Zanatta)",
-                    "ementa_principal": "Ementa (Principal)",
-                    "data_ultima_mov": "Última Movimentação",
-                    "dias_parado": "Dias Parado",
-                })
-                
-                col_dl1, col_dl2 = st.columns(2)
-                
-                with col_dl1:
-                    bytes_out, mime, ext = to_xlsx_bytes(df_download, "Projetos_Apensados")
-                    st.download_button(
-                        "⬇️ Baixar XLSX Completo",
-                        data=bytes_out,
-                        file_name=f"projetos_apensados_zanatta.{ext}",
-                        mime=mime,
-                        key="download_apensados_xlsx"
-                    )
-                
-                st.markdown("---")
-                
-                # Info
-                st.info(f"""
-                **📊 Estatísticas da detecção:**
-                - Total de projetos apensados encontrados: **{len(projetos_apensados)}**
-                - Mapeamentos no dicionário: **{len(MAPEAMENTO_APENSADOS)}**
-                - Projetos no cadastro manual: **{len(PROPOSICOES_FALTANTES_API.get('220559', []))}**
-                """)
-        
-        else:
-            st.info("👆 Clique em **Detectar Projetos Apensados** para buscar os dados.")
-        
-        st.markdown("---")
-        st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
-
-    st.markdown("---")
-
 
 if __name__ == "__main__":
     main()
