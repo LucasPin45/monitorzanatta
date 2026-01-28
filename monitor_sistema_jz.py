@@ -1808,7 +1808,7 @@ if not st.session_state.autenticado:
     }
     .login-subtitle {
         text-align: center;
-        color: #FFFF00;
+        color: #718096;
         font-size: 1rem;
         margin-bottom: 2rem;
     }
