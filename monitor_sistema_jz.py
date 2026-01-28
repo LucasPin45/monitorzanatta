@@ -1808,7 +1808,7 @@ if not st.session_state.autenticado:
     }
     .login-subtitle {
         text-align: center;
-        color: #718096;
+        color: #FFFF00;
         font-size: 1rem;
         margin-bottom: 2rem;
     }
@@ -2571,11 +2571,13 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                         url_tram = f"{BASE_URL}/proposicoes/{id_raiz}/tramitacoes"
                         resp_tram = requests.get(url_tram, params={"itens": 1, "ordem": "DESC", "ordenarPor": "dataHora"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
                         if resp_tram.status_code == 200:
+                            print(f"[APENSADOS-DEBUG] Status API: {resp_tram.status_code}")
                             trams = resp_tram.json().get("dados", [])
                             if trams:
                                 data_hora = trams[0].get("dataHora", "")
                                 if data_hora:
                                     try:
+                                        # Parse robusto da data
                                         if "T" in data_hora:
                                             dt = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
                                         else:
@@ -2584,20 +2586,20 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                         data_ultima_mov = dt.strftime("%d/%m/%Y")
                                         agora = datetime.datetime.now(timezone.utc)
                                         dias_parado = (agora - dt).days
-                                        print(f"[APENSADOS]    Última mov: {data_ultima_mov} ({dias_parado} dias)")
+                                        print(f"[APENSADOS]    ✅ Última mov: {data_ultima_mov} ({dias_parado} dias parado)")
                                     except Exception as e:
-                                        print(f"[APENSADOS]    ⚠️ Erro ao parsear data: {e}")
-                                        # Fallback: tentar formato DD/MM/YYYY se vier assim
-                                        try:
-                                            dt = datetime.datetime.strptime(data_hora[:10], "%d/%m/%Y")
-                                            data_ultima_mov = data_hora[:10]
-                                            agora = datetime.datetime.now()
-                                            dias_parado = (agora - dt).days
-                                        except Exception:
-                                            data_ultima_mov = data_hora[:10] if len(data_hora) >= 10 else data_hora
-                                            dias_parado = 0
+                                        print(f"[APENSADOS]    ❌ ERRO parse data '{data_hora}': {e}")
+                                        # Fallback: manter data como veio e dias = -1 (será tratado como erro)
+                                        data_ultima_mov = "—"
+                                        dias_parado = -1
+                            else:
+                                print(f"[APENSADOS]    ⚠️ Sem tramitações para {pl_raiz}")
+                                data_ultima_mov = "—"
+                                dias_parado = -1
                     except Exception as e:
-                        print(f"[APENSADOS]    ⚠️ Erro ao buscar dados do RAIZ: {e}")
+                        print(f"[APENSADOS]    ❌ ERRO buscar RAIZ {pl_raiz}: {e}")
+                        data_ultima_mov = "—"
+                        dias_parado = -1
                 
                 # Buscar autor e foto do PL principal
                 autor_principal = "—"
@@ -10765,8 +10767,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 dados_tabela = []
                 for p in projetos_apensados:
                     # Formatar "Parado há X dias" - DADOS DO PL RAIZ
-                    dias = p.get("dias_parado", 0)
-                    if dias == 0:
+                    dias = p.get("dias_parado", -1)
+                    
+                    if dias < 0:
+                        # Erro ao obter data
+                        parado_str = "—"
+                    elif dias == 0:
                         parado_str = "Hoje"
                     elif dias == 1:
                         parado_str = "1 dia"
