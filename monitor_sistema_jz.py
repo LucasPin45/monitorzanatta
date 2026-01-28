@@ -2537,6 +2537,21 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                             orgao_raiz = status_raiz.get("siglaOrgao", "—")
                             ementa_raiz = dados_raiz.get("ementa", "—")
                             relator_raiz = status_raiz.get("nomeRelator") or status_raiz.get("relator") or "—"
+                            
+                            # Fallback: se relator vazio, buscar via fetch_relator_atual
+                            if relator_raiz == "—" and id_raiz:
+                                try:
+                                    rel_dict = fetch_relator_atual(id_raiz)
+                                    if rel_dict and rel_dict.get("nome"):
+                                        nome = rel_dict.get("nome", "")
+                                        partido = rel_dict.get("partido", "")
+                                        uf = rel_dict.get("uf", "")
+                                        if partido and uf:
+                                            relator_raiz = f"{nome} ({partido}/{uf})"
+                                        else:
+                                            relator_raiz = nome
+                                except:
+                                    pass
                         
                         # Última tramitação do RAIZ
                         url_tram = f"{BASE_URL}/proposicoes/{id_raiz}/tramitacoes"
@@ -8332,7 +8347,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v32 - Integração com Senado)")
+    st.caption("v36 - Integração com Senado; Monitoramento de apensados")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -10794,7 +10809,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.caption("🔴 Menos de 30 dias parado | 🟡 30-90 dias | 🟢 Mais de 90 dias")
                 
                 # Exibir projetos selecionados
-                selecionados = df_tabela[edited_df[""]]
+                mask_sel = edited_df[""].to_numpy()
+                selecionados = df_tabela[mask_sel]
                 
                 if len(selecionados) > 0:
                     st.info(f"✅ {len(selecionados)} projeto(s) selecionado(s)")
