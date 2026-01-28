@@ -10677,9 +10677,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     try:
                         if data_str and data_str != "—":
                             return datetime.datetime.strptime(data_str, "%d/%m/%Y")
-                        return datetime.min
+                        return datetime.datetime.min
                     except:
-                        return datetime.min
+                        return datetime.datetime.min
                 
                 # Ordenar do mais recente para o mais antigo
                 projetos_apensados = sorted(
