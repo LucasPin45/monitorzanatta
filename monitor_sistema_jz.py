@@ -2536,7 +2536,7 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                 relator_raiz = "—"
                 ementa_raiz = "—"
                 data_ultima_mov = "—"
-                dias_parado = 0
+                dias_parado = -1  # -1 = erro/sem dados (vai virar "—")
                 
                 if id_raiz:
                     try:
