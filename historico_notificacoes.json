@@ -1,13 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "2584521_2026-01-22T00:00",
-      "proposicao_id": 2584521,
-      "sigla": "RIC 7655/2025",
-      "data_tramitacao": "2026-01-22T00:00",
-      "registrado_em": "2026-01-22T16:34:05.850388-03:00"
-    },
-    {
       "chave": "camara_2584521_2026-01-22T00:00",
       "proposicao_id": 2584521,
       "sigla": "RIC 7655/2025",
@@ -16,5 +9,5 @@
       "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-01-29T16:32:13.645010-03:00"
+  "ultima_limpeza": "2026-01-29T18:30:29.014394-03:00"
 }
