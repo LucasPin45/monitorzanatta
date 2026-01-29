@@ -892,6 +892,19 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     Returns:
         Dicionário enriquecido com dados do Senado (colunas originais preservadas)
     """
+    # DETECTOR: Rastrear de onde vem a chamada
+    import traceback
+    import inspect
+    frame = inspect.currentframe()
+    caller_frame = frame.f_back
+    caller_name = caller_frame.f_code.co_name if caller_frame else "unknown"
+    if caller_name != "processar_lista_com_senado":
+        print(f"[SENADO-DEBUG] ⚠️ enriquecer_proposicao_com_senado chamado de: {caller_name}")
+        # Imprimir stack trace reduzido
+        stack = traceback.extract_stack()
+        for frame_info in stack[-4:-1]:  # Últimas 3 chamadas
+            print(f"[SENADO-DEBUG]    → {frame_info.filename.split('/')[-1]}:{frame_info.lineno} in {frame_info.name}")
+    
     # Copiar dados originais (IMPORTANTE!)
     resultado = proposicao_dict.copy()
     
@@ -2455,6 +2468,8 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     Returns:
         Lista de dicionários com dados dos projetos apensados
     """
+    import time
+    tempo_inicio = time.time()
     # datetime já importado no topo, timezone
     
     print(f"[APENSADOS] Buscando projetos apensados (v35.1 - mapeamento completo)...")
@@ -2682,6 +2697,8 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
             time.sleep(0.1)
         
         print(f"[APENSADOS] ✅ Total: {len(projetos_apensados)}")
+        tempo_total = time.time() - tempo_inicio
+        print(f"[APENSADOS] ⏱️ Tempo total: {tempo_total:.1f}s para {len(projetos_apensados)} projetos")
         return projetos_apensados
     
     except Exception as e:
@@ -10880,7 +10897,17 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.markdown("### 🔍 Detalhes dos Projetos")
                 st.caption("Clique em um projeto para ver detalhes completos")
                 
-                for ap in projetos_apensados:
+                # MODIFICADO: Só mostrar detalhes dos selecionados
+                # Filtrar apenas projetos selecionados (baseado nos checkboxes marcados)
+                ids_selecionados_detalhes = df_tabela.loc[edited_df[""].to_numpy(), "__row_id"].tolist()
+                projetos_selecionados = [p for p in projetos_apensados if p.get("__row_id", "") in ids_selecionados_detalhes]
+
+                if not projetos_selecionados:
+                    st.info("👆 **Selecione projetos acima** marcando os checkboxes para ver detalhes completos e tramitações")
+                else:
+                    st.success(f"📋 Exibindo detalhes de **{len(projetos_selecionados)} projeto(s)** selecionado(s)")
+
+                for ap in projetos_selecionados:
                     situacao_raiz = ap.get("situacao_raiz", "")
                     dias = ap.get("dias_parado", 0)
                     
