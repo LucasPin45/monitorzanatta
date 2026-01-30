@@ -2582,14 +2582,10 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                 except:
                                     pass
                         
-                        # Última tramitação do RAIZ
-                        url_tram = f"{BASE_URL}/proposicoes/{id_raiz}/tramitacoes"
-                        print(f"[APENSADOS-DEBUG] Buscando tramitações de {pl_raiz} (id_raiz={id_raiz})")
-                        resp_tram = requests.get(url_tram, params={"itens": 1, "ordem": "DESC", "ordenarPor": "dataHora"}, headers=HEADERS, timeout=10, verify=_REQUESTS_VERIFY)
-                        print(f"[APENSADOS-DEBUG] Status HTTP: {resp_tram.status_code}")
-                        if resp_tram.status_code == 200:
-                            print(f"[APENSADOS-DEBUG] Status API: {resp_tram.status_code}")
-                            trams = resp_tram.json().get("dados", [])
+                        # Última tramitação do RAIZ - usando fetch_proposicao_completa
+                        try:
+                            dados_raiz = fetch_proposicao_completa(id_raiz)
+                            trams = dados_raiz.get("tramitacoes", [])
                             if trams:
                                 data_hora = trams[0].get("dataHora", "")
                                 if data_hora:
@@ -2606,13 +2602,20 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                         print(f"[APENSADOS]    ✅ Última mov: {data_ultima_mov} ({dias_parado} dias parado)")
                                     except Exception as e:
                                         print(f"[APENSADOS]    ❌ ERRO parse data '{data_hora}': {e}")
-                                        # Fallback: manter data como veio e dias = -1 (será tratado como erro)
                                         data_ultima_mov = "—"
                                         dias_parado = -1
+                                else:
+                                    print(f"[APENSADOS]    ⚠️ Tramitação sem dataHora")
+                                    data_ultima_mov = "—"
+                                    dias_parado = -1
                             else:
                                 print(f"[APENSADOS]    ⚠️ Sem tramitações para {pl_raiz}")
                                 data_ultima_mov = "—"
                                 dias_parado = -1
+                        except Exception as e_tram:
+                            print(f"[APENSADOS]    ❌ ERRO buscar tramitações: {e_tram}")
+                            data_ultima_mov = "—"
+                            dias_parado = -1
                     except Exception as e:
                         print(f"[APENSADOS]    ❌ ERRO buscar RAIZ {pl_raiz}: {e}")
                         data_ultima_mov = "—"
@@ -8495,9 +8498,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         with st.spinner("📊 Carregando métricas do dashboard..."):
             try:
                 # Usar função que já existe no código
-                # TEMPORÁRIO: Desabilitado para testar Aba 9
-                print("[ABA1-DEBUG] ⚠️ Aba 1 desabilitada")
-                df_props = pd.DataFrame()
+                df_props = fetch_lista_proposicoes_autoria(id_deputada)
                 
                 if df_props.empty:
                     props_autoria = []
@@ -9246,9 +9247,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
         # Carrega proposições
         with st.spinner("Carregando proposições de autoria..."):
-            # TEMPORÁRIO: Desabilitado
-            print("[ABA2-DEBUG] ⚠️ Aba 2 desabilitada")
-            df_aut = pd.DataFrame()
+            df_aut = fetch_lista_proposicoes_autoria(id_deputada)
 
         # Variáveis para o chat (definidas antes do if/else para estarem disponíveis depois)
         filtro_busca_atual = ""
@@ -9367,11 +9366,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 # PROCESSAR COM SENADO (APÓS todas as colunas estarem criadas)
                 if incluir_senado_tab5:
                     with st.spinner("🔍 Buscando tramitação no Senado..."):
-                        # TEMPORÁRIO: Desabilitado
-                        print("[ABA5-DEBUG] ⚠️ Processamento Senado desabilitado")
-                        df_tbl = props_filtradas_atual  # Usar dados sem Senado
-                        if False:  # Desabilitar bloco
-                            df_tbl_old = processar_lista_com_senado(
+                        df_tbl = processar_lista_com_senado(
                             df_tbl,
                             debug=debug_senado_5,
                             mostrar_progresso=len(df_tbl) > 3
@@ -9741,9 +9736,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.caption("Análise da carteira de proposições por status de tramitação")
 
         with st.spinner("Carregando proposições de autoria..."):
-            # TEMPORÁRIO: Desabilitado
-            print("[ABA6-DEBUG] ⚠️ Aba 6 desabilitada")
-            df_aut6 = pd.DataFrame()
+            df_aut6 = fetch_lista_proposicoes_autoria(id_deputada)
 
         if df_aut6.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
@@ -9889,11 +9882,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     # Processar com Senado
                     if incluir_senado_tab6:
                         with st.spinner("🔍 Buscando tramitação no Senado..."):
-                            # TEMPORÁRIO: Desabilitado
-                            print("[ABA6-DEBUG] ⚠️ Processamento Senado desabilitado")
-                            df_status_view = pd.DataFrame()
-                            if False:
-                                df_status_view_old = processar_lista_com_senado(
+                            df_status_view = processar_lista_com_senado(
                                 df_status_view,
                                 debug=debug_senado_6,
                                 mostrar_progresso=len(df_status_view) > 3
