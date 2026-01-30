@@ -2590,11 +2590,23 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                 data_hora = trams[0].get("dataHora", "")
                                 if data_hora:
                                     try:
-                                        # Parse robusto da data
+                                        # Parse robusto da data COM timezone
                                         if "T" in data_hora:
-                                            dt = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
+                                            # Se tem Z no final, substitui por +00:00
+                                            if data_hora.endswith("Z"):
+                                                dt = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
+                                            # Se já tem timezone (+XX:XX ou -XX:XX)
+                                            elif "+" in data_hora or data_hora.count("-") > 2:
+                                                dt = datetime.datetime.fromisoformat(data_hora)
+                                            # Se não tem timezone, adicionar UTC
+                                            else:
+                                                dt = datetime.datetime.fromisoformat(data_hora).replace(tzinfo=timezone.utc)
                                         else:
                                             dt = datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                        
+                                        # Garantir que tem timezone
+                                        if dt.tzinfo is None:
+                                            dt = dt.replace(tzinfo=timezone.utc)
                                         
                                         data_ultima_mov = dt.strftime("%d/%m/%Y")
                                         agora = datetime.datetime.now(timezone.utc)
@@ -8495,19 +8507,30 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         # ============================================================
         # BUSCAR MÉTRICAS USANDO FUNÇÃO EXISTENTE
         # ============================================================
-        with st.spinner("📊 Carregando métricas do dashboard..."):
-            try:
-                # Usar função que já existe no código
-                df_props = fetch_lista_proposicoes_autoria(id_deputada)
+        # Botão para carregar dados (evita processamento automático)
+        if st.button("📊 Carregar Dashboard", key="carregar_aba1", use_container_width=True):
+            st.session_state["aba1_carregada"] = True
+        
+        # Inicializar variável
+        props_autoria = []
+        
+        if st.session_state.get("aba1_carregada", False):
+            with st.spinner("📊 Carregando métricas do dashboard..."):
+                try:
+                    # Usar função que já existe no código
+                    df_props = fetch_lista_proposicoes_autoria(id_deputada)
                 
-                if df_props.empty:
+                    if df_props.empty:
+                        props_autoria = []
+                    else:
+                        props_autoria = df_props.to_dict('records')
+                
+                except Exception as e:
+                    st.error(f"⚠️ Erro ao carregar métricas: {e}")
                     props_autoria = []
-                else:
-                    props_autoria = df_props.to_dict('records')
-                
-            except Exception as e:
-                st.error(f"⚠️ Erro ao carregar métricas: {e}")
-                props_autoria = []
+        else:
+            st.info("👆 **Clique no botão acima para carregar o dashboard**")
+            st.stop()
         
         # ============================================================
         # CARDS DE MÉTRICAS (KPIs)
@@ -9245,9 +9268,20 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 st.success("✅ Cache limpo! Recarregando...")
                 st.rerun()  # Forçar recarga da página
 
-        # Carrega proposições
-        with st.spinner("Carregando proposições de autoria..."):
-            df_aut = fetch_lista_proposicoes_autoria(id_deputada)
+        # Botão para carregar dados
+        if st.button("📊 Carregar Proposições", key="carregar_aba2", use_container_width=True):
+            st.session_state["aba2_carregada"] = True
+        
+        # Inicializar variável
+        df_aut = pd.DataFrame()
+        
+        if st.session_state.get("aba2_carregada", False):
+            # Carrega proposições
+            with st.spinner("Carregando proposições de autoria..."):
+                df_aut = fetch_lista_proposicoes_autoria(id_deputada)
+        else:
+            st.info("👆 **Clique no botão acima para carregar os dados da aba**")
+            st.stop()
 
         # Variáveis para o chat (definidas antes do if/else para estarem disponíveis depois)
         filtro_busca_atual = ""
@@ -9735,8 +9769,19 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         st.caption("Análise da carteira de proposições por status de tramitação")
 
-        with st.spinner("Carregando proposições de autoria..."):
-            df_aut6 = fetch_lista_proposicoes_autoria(id_deputada)
+        # Inicializar variável
+        df_aut6 = pd.DataFrame()
+
+        # Botão para carregar dados (lazy loading)
+        if st.button("📊 Carregar Matérias", key="carregar_aba6", use_container_width=True):
+            st.session_state["aba6_carregada"] = True
+        
+        if st.session_state.get("aba6_carregada", False):
+            with st.spinner("Carregando proposições de autoria..."):
+                df_aut6 = fetch_lista_proposicoes_autoria(id_deputada)
+        else:
+            st.info("👆 **Clique no botão acima para carregar os dados da aba**")
+            st.stop()  # Para execução do resto da aba
 
         if df_aut6.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
