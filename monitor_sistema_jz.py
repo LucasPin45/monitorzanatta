@@ -108,6 +108,24 @@ import matplotlib.pyplot as plt
 import matplotlib
 import base64
 
+# ====================================================================
+# GATE DE CONTROLE - SENADO APENAS NA ABA 5
+# ====================================================================
+import streamlit as st
+
+def _set_aba_atual(aba_num):
+    """Define qual aba está ativa"""
+    if "aba_atual_senado" not in st.session_state:
+        st.session_state["aba_atual_senado"] = None
+    st.session_state["aba_atual_senado"] = aba_num
+
+def _pode_chamar_senado():
+    """Retorna True apenas se estamos na Aba 5"""
+    aba_atual = st.session_state.get("aba_atual_senado", None)
+    return aba_atual == 5
+
+
+
 # Certificados SSL: em alguns ambientes (ex.: Streamlit Cloud), a cadeia de CAs do sistema pode não estar disponível.
 # Usamos o bundle do certifi quando possível para evitar SSL: CERTIFICATE_VERIFY_FAILED.
 try:
@@ -1023,6 +1041,22 @@ def processar_lista_com_senado(
     mostrar_progresso: bool = True
 ) -> pd.DataFrame:
     """
+    Processa lista de proposições e enriquece com dados do Senado quando necessário.
+    APENAS ABA 5 PODE CHAMAR ESTA FUNÇÃO.
+    """
+    # ============================================================
+    # GATE: Apenas Aba 5 pode chamar
+    # ============================================================
+    if not _pode_chamar_senado():
+        import inspect
+        caller = inspect.stack()[1]
+        print(f"[SENADO-GATE] ❌ BLOQUEADO - Chamada de {caller.function} (linha {caller.lineno})")
+        print(f"[SENADO-GATE] ℹ️ Senado só permitido na Aba 5. Aba atual: {st.session_state.get('aba_atual_senado', None)}")
+        # Retornar DataFrame sem modificações
+        return df_proposicoes.copy() if not df_proposicoes.empty else df_proposicoes
+    
+    # Docstring da função
+    """
     Processa um DataFrame de proposições, adicionando informações do Senado.
     
     REGRA: Só consulta o Senado para proposições com situação "Apreciação pelo Senado Federal".
@@ -1791,18 +1825,6 @@ st.set_page_config(
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario_logado = None
-
-# ============================================================
-# RESET DE FLAGS DE LAZY LOADING
-# Previne que abas carreguem automaticamente após session persist
-# ============================================================
-if "app_iniciado" not in st.session_state:
-    st.session_state["app_iniciado"] = True
-    # Resetar flags de carregamento das abas
-    st.session_state["aba1_carregada"] = False
-    st.session_state["aba2_carregada"] = False
-    st.session_state["aba6_carregada"] = False
-
 
 if not st.session_state.autenticado:
     # CSS para tela de login profissional
@@ -8505,6 +8527,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 # ============================================================
 
     with tab1:
+        _set_aba_atual(1)
         st.title("📊 Dashboard Executivo")
         
         # ============================================================
@@ -8885,6 +8908,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
     # ============================================================
     with tab2:
+        _set_aba_atual(2)
         st.subheader("Autoria & Relatoria na pauta")
         
         st.info("💡 **Dica:** Selecione o período da semana e clique em **Carregar pauta** para ver as proposições de sua autoria ou relatoria que estão na pauta de votações.")
@@ -9010,6 +9034,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 3 - PALAVRAS-CHAVE
     # ============================================================
     with tab3:
+        _set_aba_atual(3)
         st.subheader("Palavras-chave na pauta")
         
         st.info("💡 **Dica:** Configure palavras-chave de interesse (ex: vacina, aborto, armas) para monitorar proposições temáticas na pauta da semana.")
@@ -9165,6 +9190,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 4 - COMISSÕES ESTRATÉGICAS
     # ============================================================
     with tab4:
+        _set_aba_atual(4)
         st.subheader("Comissões estratégicas")
         
         st.info("💡 **Dica:** Acompanhe eventos nas comissões em que a deputada é membro. Configure as siglas das comissões de interesse (ex: CDC, CCJC, CREDN).")
@@ -9260,6 +9286,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 5 - BUSCAR PROPOSIÇÃO ESPECÍFICA (LIMPA)
     # ============================================================
     with tab5:
+        _set_aba_atual(5)
         st.markdown("### 🔍 Buscar Proposição Específica")
         
         st.info("💡 **Dica:** Use os filtros de ano e tipo para encontrar proposições específicas. Clique em uma proposição na tabela para ver detalhes completos, tramitação e estratégia.")
@@ -9409,14 +9436,86 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 
                 df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
                 
-                # PROCESSAR COM SENADO (APÓS todas as colunas estarem criadas)
-                if incluir_senado_tab5:
-                    with st.spinner("🔍 Buscando tramitação no Senado..."):
-                        df_tbl = processar_lista_com_senado(
-                            df_tbl,
+                # ============================================================
+                # SENADO: APENAS PARA SELECIONADOS VIA BOTÃO
+                # ============================================================
+                st.markdown("---")
+                st.markdown("#### 🏛️ Integração com Senado Federal")
+                
+                # Adicionar coluna de seleção
+                if "selecionado_senado" not in st.session_state:
+                    st.session_state["selecionado_senado"] = []
+                
+                # Mostrar checkbox para cada proposição
+                col_sel, col_btn = st.columns([3, 1])
+                with col_sel:
+                    st.caption("⬇️ Selecione proposições para buscar tramitação no Senado:")
+                
+                # Criar dataframe para exibição com checkbox
+                df_display = df_tbl[[col for col in df_tbl.columns if col != 'LinkTramitacao']].head(20).copy()
+                
+                # Mostrar tabela simples primeiro (SEM Senado)
+                st.markdown("#### 📋 Proposições encontradas")
+                st.caption(f"Mostrando {len(df_display)} de {len(df_tbl)} resultados")
+                
+                # Selection usando data_editor
+                df_selection = df_display.copy()
+                df_selection.insert(0, "✓", False)  # Coluna de checkbox
+                
+                edited_df = st.data_editor(
+                    df_selection,
+                    hide_index=True,
+                    use_container_width=True,
+                    disabled=[col for col in df_selection.columns if col != "✓"],
+                    key="aba5_selection"
+                )
+                
+                # Pegar IDs selecionados
+                ids_selecionados = df_display[edited_df["✓"]]["ID"].tolist()
+                
+                with col_btn:
+                    st.markdown("")  # Espaçamento
+                    st.markdown("")
+                    btn_buscar_senado = st.button(
+                        f"🔍 Buscar Senado ({len(ids_selecionados)})",
+                        type="primary",
+                        disabled=len(ids_selecionados) == 0,
+                        help="Busca tramitação no Senado apenas para as proposições selecionadas"
+                    )
+                
+                # Processar APENAS se botão clicado E tem selecionados
+                if btn_buscar_senado and len(ids_selecionados) > 0:
+                    # Filtrar apenas selecionados
+                    df_selecionados = df_tbl[df_tbl["ID"].isin(ids_selecionados)].copy()
+                    
+                    with st.spinner(f"🔍 Buscando tramitação no Senado para {len(ids_selecionados)} proposições..."):
+                        df_selecionados_enriquecido = processar_lista_com_senado(
+                            df_selecionados,
                             debug=debug_senado_5,
-                            mostrar_progresso=len(df_tbl) > 3
+                            mostrar_progresso=True
                         )
+                    
+                    # Guardar no session state
+                    st.session_state["df_senado_enriquecido"] = df_selecionados_enriquecido
+                    st.success(f"✅ Tramitação no Senado carregada para {len(ids_selecionados)} proposições!")
+                
+                # Se já temos dados do Senado, mostrar
+                if "df_senado_enriquecido" in st.session_state:
+                    df_com_senado = st.session_state["df_senado_enriquecido"]
+                    st.markdown("#### 🏛️ Proposições com dados do Senado")
+                    
+                    # Mostrar dados enriquecidos
+                    colunas_exibir = ["Proposição", "Ementa", "Último andamento"]
+                    if "Relator_Senado" in df_com_senado.columns:
+                        colunas_exibir.append("Relator_Senado")
+                    if "Comissao_Senado" in df_com_senado.columns:
+                        colunas_exibir.append("Comissao_Senado")
+                    
+                    st.dataframe(
+                        df_com_senado[[c for c in colunas_exibir if c in df_com_senado.columns]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
                 # Colunas dinâmicas - incluir dados do Senado quando checkbox marcado
                 if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
                     # Substituir Relator e Órgão pelos dados do Senado quando disponíveis
@@ -9775,6 +9874,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
     # ============================================================
     with tab6:
+        _set_aba_atual(6)
         st.markdown("### 📊 Matérias por situação atual")
         
         st.info("💡 **Dica:** Visualize a carteira completa de proposições por situação de tramitação. Use os filtros para segmentar por ano, tipo, órgão e tema. Clique em uma proposição para ver detalhes.")
@@ -9936,16 +10036,17 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     status_map = build_status_map(ids_list)
                     df_status_view = enrich_with_status(df_base6.head(int(max_status)), status_map)
                     
-                    # Processar com Senado
-                    if incluir_senado_tab6:
-                        with st.spinner("🔍 Buscando tramitação no Senado..."):
-                            df_status_view = processar_lista_com_senado(
-                                df_status_view,
-                                debug=debug_senado_6,
-                                mostrar_progresso=len(df_status_view) > 3
-                            )
-                    
-                    st.session_state["df_status_last"] = df_status_view
+                    # DESABILITADO - Senado apenas na Aba 5
+                    # # Processar com Senado
+                    #                     if incluir_senado_tab6:
+                    #                         with st.spinner("🔍 Buscando tramitação no Senado..."):
+                    #                             df_status_view = processar_lista_com_senado(
+                    #                                 df_status_view,
+                    #                                 debug=debug_senado_6,
+                    #                                 mostrar_progresso=len(df_status_view) > 3
+                    #                             )
+                    #                     
+                    #                     st.session_state["df_status_last"] = df_status_view
 
             if df_status_view.empty:
                 st.info(
@@ -10249,6 +10350,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 7 - RICs (REQUERIMENTOS DE INFORMAÇÃO)
     # ============================================================
     with tab7:
+        _set_aba_atual(7)
         st.markdown("### 📋 RICs - Requerimentos de Informação")
         
         st.info("💡 **Dica:** Acompanhe os prazos de resposta dos RICs (30 dias). Use os filtros de status para identificar RICs vencidos ou próximos do vencimento. Clique em um RIC para ver detalhes e tramitação.")
@@ -10642,6 +10744,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 8 - RECEBER NOTIFICAÇÕES
     # ============================================================
     with tab8:
+        _set_aba_atual(8)
         st.title("📧 Receber Notificações por Email")
 
         st.markdown("""
@@ -10752,6 +10855,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ABA 9 - PROJETOS APENSADOS (v36 - COMPLETA COM SELEÇÃO)
     # ============================================================
     with tab9:
+        _set_aba_atual(9)
         st.title("📎 Projetos Apensados")
         
         st.markdown("""
