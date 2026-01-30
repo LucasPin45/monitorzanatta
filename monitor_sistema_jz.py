@@ -1792,6 +1792,18 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario_logado = None
 
+# ============================================================
+# RESET DE FLAGS DE LAZY LOADING
+# Previne que abas carreguem automaticamente após session persist
+# ============================================================
+if "app_iniciado" not in st.session_state:
+    st.session_state["app_iniciado"] = True
+    # Resetar flags de carregamento das abas
+    st.session_state["aba1_carregada"] = False
+    st.session_state["aba2_carregada"] = False
+    st.session_state["aba6_carregada"] = False
+
+
 if not st.session_state.autenticado:
     # CSS para tela de login profissional
     st.markdown("""
