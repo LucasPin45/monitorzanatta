@@ -1,5 +1,22 @@
-# monitor_sistema_jz.py - v38 CORREÇÕES FINAIS
+# monitor_sistema_jz.py - v39 AJUSTES FINAIS DE UX
 # 
+# ALTERAÇÕES v39 - AJUSTES FINAIS DE UX:
+#
+# 🔧 LOGIN:
+#   - CORRIGIDO: Exige USUÁRIO E SENHA (ambos obrigatórios)
+#   - CORRIGIDO: Cor do texto "Deputada Júlia Zanatta" → AMARELO (#FFD700)
+#   - Contraste melhorado para legibilidade
+#
+# 🔧 ABA 5 (BUSCAR PROPOSIÇÃO):
+#   - REMOVIDO: Botão "📊 Carregar Proposições"
+#   - ADICIONADO: Carregamento automático ao entrar na aba
+#   - CACHE: st.session_state["props_aba5_cache"]
+#
+# 🔧 ABA 9 (APENSADOS):
+#   - CHECKBOX: Seleção ÚNICA (single-select) - apenas um item por vez
+#   - FOTO RELATOR: Exibida no card do PL Raiz (4 colunas)
+#   - EMOJI: Padronizado igual às abas 5 e 7
+#
 # ALTERAÇÕES v38 - CORREÇÕES FINAIS:
 #
 # 🔧 CORREÇÃO 1 - ABA 1 (DASHBOARD):
@@ -1914,9 +1931,10 @@ if not st.session_state.autenticado:
     }
     .login-subtitle {
         text-align: center;
-        color: #718096;
+        color: #FFD700;
         font-size: 1rem;
         margin-bottom: 2rem;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
     }
     .stTextInput input {
         border-radius: 10px;
@@ -1989,7 +2007,10 @@ if not st.session_state.autenticado:
             submit = st.form_submit_button("🚀 Entrar", use_container_width=True)
         
         if submit:
-            if not senha:
+            # v39: OBRIGATÓRIO informar usuário E senha
+            if not usuario_input or not usuario_input.strip():
+                st.error("⚠️ Por favor, informe seu usuário")
+            elif not senha:
                 st.error("⚠️ Por favor, preencha a senha")
             else:
                 usuario_encontrado = None
@@ -2002,14 +2023,14 @@ if not st.session_state.autenticado:
                         autenticado = True
                         break
                 
-                # Verificar lista de senhas
+                # Verificar lista de senhas (usar usuario_input informado)
                 if not autenticado and senha in senhas_lista:
-                    usuario_encontrado = usuario_input if usuario_input else "Usuário (senha da lista)"
+                    usuario_encontrado = usuario_input.strip()
                     autenticado = True
                 
-                # Verificar senha única
+                # Verificar senha única (usar usuario_input informado)
                 if not autenticado and senha_unica and senha == senha_unica:
-                    usuario_encontrado = usuario_input if usuario_input else "Usuário (senha principal)"
+                    usuario_encontrado = usuario_input.strip()
                     autenticado = True
                 
                 if autenticado:
@@ -8548,7 +8569,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v38 - Correções: Auto-load Aba 1; Última Mov. correta; Cache apensados; Emoji padronizado")
+    st.caption("v39 - Login validado; Auto-load Aba 5; Seleção única Aba 9; Foto relator")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -9420,7 +9441,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.caption("Busque proposições de autoria da deputada e veja detalhes completos")
 
         # Botão de limpar cache
-        col_cache, col_info = st.columns([1, 3])
+        col_cache, col_refresh5 = st.columns([1, 1])
         with col_cache:
             if st.button("🧹 Limpar cache", key="limpar_cache_tab5"):
                 fetch_proposicao_completa.clear()
@@ -9430,23 +9451,35 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 build_status_map.clear()
                 st.session_state.pop("df_status_last", None)
                 st.session_state.pop("df_todas_enriquecido_tab5", None)  # Limpar cache do dataset enriquecido também
+                st.session_state.pop("props_aba5_cache", None)  # v39: Limpar cache da aba 5
                 st.success("✅ Cache limpo! Recarregando...")
                 st.rerun()  # Forçar recarga da página
+        
+        with col_refresh5:
+            btn_refresh_aba5 = st.button("🔄 Atualizar", key="btn_refresh_aba5")
 
-        # Botão para carregar dados
-        if st.button("📊 Carregar Proposições", key="carregar_aba2", use_container_width=True):
-            st.session_state["aba2_carregada"] = True
+        # v39: Cache e carregamento automático (sem botão "Carregar")
+        if "props_aba5_cache" not in st.session_state:
+            st.session_state["props_aba5_cache"] = None
+        
+        # Carregar automaticamente se cache vazio OU se botão foi clicado
+        precisa_carregar_aba5 = st.session_state["props_aba5_cache"] is None or btn_refresh_aba5
         
         # Inicializar variável
         df_aut = pd.DataFrame()
         
-        if st.session_state.get("aba2_carregada", False):
-            # Carrega proposições
+        if precisa_carregar_aba5:
+            # Carrega proposições automaticamente
             with st.spinner("Carregando proposições de autoria..."):
                 df_aut = fetch_lista_proposicoes_autoria(id_deputada)
+                st.session_state["props_aba5_cache"] = df_aut
+                if btn_refresh_aba5:
+                    st.success("✅ Dados atualizados!")
         else:
-            st.info("👆 **Clique no botão acima para carregar os dados da aba**")
-            st.stop()
+            # Usar cache existente
+            df_aut = st.session_state["props_aba5_cache"]
+            if df_aut is None:
+                df_aut = pd.DataFrame()
 
         # Variáveis para o chat (definidas antes do if/else para estarem disponíveis depois)
         filtro_busca_atual = ""
@@ -11175,47 +11208,81 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
             df_tabela = pd.DataFrame(dados_tabela)
             
+            # v39: Implementar seleção ÚNICA (single-select)
+            # Inicializar session_state para tracking da seleção
+            if "apensados_selecionado_id" not in st.session_state:
+                st.session_state["apensados_selecionado_id"] = None
+            
+            # Criar cópia do df com checkbox baseado na seleção atual
+            df_display = df_tabela.copy()
+            selecionado_atual = st.session_state.get("apensados_selecionado_id", None)
+            
+            # Marcar apenas o item selecionado atualmente
+            df_display[""] = df_display["__row_id"] == selecionado_atual
+            
             # Editor de dados com checkboxes
             edited_df = st.data_editor(
-                df_tabela[["", "__row_id", "Sinal", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
+                df_display[["", "__row_id", "Sinal", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
                 disabled=["__row_id", "Sinal", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."],
                 hide_index=True,
                 use_container_width=True,
                 height=400,
                 column_config={
-                    "": st.column_config.CheckboxColumn("", default=False, width="small"),
-                    "__row_id": st.column_config.TextColumn("ID", width="small"),
+                    "": st.column_config.CheckboxColumn("Sel.", default=False, width="small"),
+                    "__row_id": None,  # Ocultar coluna ID
                     "Sinal": st.column_config.TextColumn("Sinal", width="small"),
                     "Relator": st.column_config.TextColumn("Relator", width="medium"),
                     "Parado há": st.column_config.TextColumn("Parado há", width="small"),
                 },
+                key="editor_apensados"
             )
 
             # Legenda - v38: Padronizada igual às abas 5 e 7
             st.caption("🔴 ≥30 dias | 🟠 15-29 dias | 🟡 7-14 dias | 🟢 <7 dias")
 
-            # Seleção correta via __row_id
-            row_ids_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
-            selecionados = df_tabela[df_tabela["__row_id"].isin(row_ids_selecionados)]
+            # v39: Detectar nova seleção e manter ÚNICO
+            novos_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
+            
+            # Se o usuário marcou um novo item
+            if novos_selecionados:
+                # Se já tinha um selecionado e outro foi marcado, usar o NOVO
+                if len(novos_selecionados) > 1:
+                    # Encontrar qual é o novo (diferente do anterior)
+                    for row_id in novos_selecionados:
+                        if row_id != selecionado_atual:
+                            st.session_state["apensados_selecionado_id"] = row_id
+                            st.rerun()  # Forçar re-renderização com novo único selecionado
+                else:
+                    # Apenas um selecionado
+                    if novos_selecionados[0] != selecionado_atual:
+                        st.session_state["apensados_selecionado_id"] = novos_selecionados[0]
+            else:
+                # Nenhum selecionado - desmarcar
+                if selecionado_atual is not None:
+                    st.session_state["apensados_selecionado_id"] = None
+            
+            # Buscar item selecionado final
+            row_id_selecionado = st.session_state.get("apensados_selecionado_id", None)
+            selecionados = df_tabela[df_tabela["__row_id"] == row_id_selecionado] if row_id_selecionado else pd.DataFrame()
             
             if len(selecionados) > 0:
-                st.info(f"✅ {len(selecionados)} projeto(s) selecionado(s)")
+                st.info(f"✅ 1 projeto selecionado")
                 
                 # Botões de ação
                 col_a1, col_a2, col_a3 = st.columns(3)
                 with col_a1:
-                    if st.button("📋 Copiar PLs Raiz", key="copiar_raiz_sel"):
+                    if st.button("📋 Copiar PL Raiz", key="copiar_raiz_sel"):
                         pls_sel = "\n".join([f"{row['PL Raiz']}" for _, row in selecionados.iterrows()])
                         st.code(pls_sel, language="text")
                 
                 with col_a2:
-                    if st.button("🔗 Abrir Links", key="abrir_links_sel"):
+                    if st.button("🔗 Abrir Link", key="abrir_links_sel"):
                         for _, row in selecionados.iterrows():
                             link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={row['id_raiz']}"
                             st.markdown(f"[🔗 {row['PL Raiz']}]({link})")
                 
                 with col_a3:
-                    if st.button("⬇️ Baixar Selecionados", key="download_sel"):
+                    if st.button("⬇️ Baixar", key="download_sel"):
                         bytes_sel, mime_sel, ext_sel = to_xlsx_bytes(selecionados, "Selecionados")
                         st.download_button(
                             "📥 Download XLSX",
@@ -11291,8 +11358,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     
                     st.markdown("---")
                     
-                    # Layout principal: 3 colunas
-                    col_foto, col_zanatta, col_raiz = st.columns([1, 2, 2])
+                    # Layout principal: 4 colunas (autor + zanatta + raiz + foto_relator)
+                    col_foto, col_zanatta, col_raiz, col_foto_relator = st.columns([1, 2, 2, 1])
                     
                     with col_foto:
                         foto_url = ap.get("foto_autor", "")
@@ -11317,6 +11384,28 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                         st.markdown(f"⏱️ **Parado há:** {parado_str}")
                         
                         st.markdown(f"[🔗 Ver PL Raiz](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_raiz', '')})")
+                    
+                    with col_foto_relator:
+                        # v39: Buscar e exibir foto do relator do PL Raiz
+                        relator_nome = ap.get('relator_raiz', '—')
+                        if relator_nome and relator_nome != '—':
+                            # Tentar buscar ID do relator para foto
+                            try:
+                                rel_dict = fetch_relator_atual(ap.get('id_raiz', ''))
+                                rel_id = rel_dict.get("id") if rel_dict else None
+                                if rel_id:
+                                    foto_relator_url = f"https://www.camara.leg.br/internet/deputado/bandep/{rel_id}.jpg"
+                                    st.image(foto_relator_url, width=100)
+                                    st.caption(f"**Relator(a)**")
+                                else:
+                                    st.markdown("")  # Placeholder
+                                    st.caption("Relator(a)")
+                            except:
+                                st.markdown("")  # Manter layout se foto não carregar
+                                st.caption("Relator(a)")
+                        else:
+                            st.markdown("*Sem relator*")
+                            st.caption("designado")
                     
                     st.markdown("---")
                     
