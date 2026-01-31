@@ -1,5 +1,28 @@
-# monitor_sistema_jz.py - v39 AJUSTES FINAIS DE UX
+# monitor_sistema_jz.py - v40 PADRONIZAÇÃO FINAL UX
 # 
+# ALTERAÇÕES v40 - PADRONIZAÇÃO FINAL UX:
+#
+# 🔧 ABA 9 - EMOJI PADRONIZADO:
+#   - CORRIGIDO: Usa padrão do sistema
+#   - 🚨 = ≤2 dias (URGENTÍSSIMO)
+#   - ⚠️ = ≤5 dias (URGENTE)
+#   - 🔔 = ≤15 dias (Recente)
+#   - Tabela, legenda e cards agora usam mesmo padrão
+#
+# 🔧 ABA 9 - SELEÇÃO ÚNICA:
+#   - Mantida lógica single-select existente
+#   - Checkbox permite apenas 1 item por vez
+#
+# 🔧 ABA 9 - PDF DOWNLOAD:
+#   - ADICIONADO: Botão PDF igual às outras abas
+#   - Usa função to_pdf_bytes padrão do sistema
+#
+# 🔧 ABA 9 - FOTO RELATOR:
+#   - Mantida exibição da foto do relator no card
+#
+# 🔧 SENADO - TEXTO TÉCNICO:
+#   - Debug checkbox só aparece para admin
+#
 # ALTERAÇÕES v39 - AJUSTES FINAIS DE UX:
 #
 # 🔧 LOGIN:
@@ -8569,7 +8592,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v39 - Login validado; Auto-load Aba 5; Seleção única Aba 9; Foto relator")
+    st.caption("v40 - Emoji 🚨⚠️🔔 padrão; Seleção única; PDF+XLSX na Aba 9")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -11164,24 +11187,23 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     parado_str = f"{anos_calc} {'ano' if anos_calc == 1 else 'anos'}"
                 
                 # ============================================================
-                # v38: CORREÇÃO 4 - Padronizar emoji IGUAL às abas 5 e 7
-                # Usar mesma lógica da função _sinal():
-                # 🔴 = >= 30 dias (crítico)
-                # 🟠 = >= 15 dias (atenção)
-                # 🟡 = >= 7 dias (monitorar)
-                # 🟢 = < 7 dias (ok)
+                # v40: CORREÇÃO - Padronizar emoji IGUAL ao padrão do sistema
+                # 🚨 = ≤2 dias (URGENTÍSSIMO)
+                # ⚠️ = ≤5 dias (URGENTE)  
+                # 🔔 = ≤15 dias (Recente)
+                # (vazio) = >15 dias
                 # ============================================================
                 situacao_raiz = p.get("situacao_raiz", "")
                 if dias < 0:
                     sinal = "—"
-                elif dias >= 30:
-                    sinal = "🔴"
-                elif dias >= 15:
-                    sinal = "🟠"
-                elif dias >= 7:
-                    sinal = "🟡"
+                elif dias <= 2:
+                    sinal = "🚨"
+                elif dias <= 5:
+                    sinal = "⚠️"
+                elif dias <= 15:
+                    sinal = "🔔"
                 else:
-                    sinal = "🟢"
+                    sinal = ""  # Mais de 15 dias, sem alerta
                 
                 # Construir cadeia para exibição
                 cadeia = p.get("cadeia_apensamento", [])
@@ -11193,7 +11215,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 dados_tabela.append({
                     "": False,  # Checkbox
                     "__row_id": p.get("__row_id", ""),  # ID estável
-                    "Sinal": sinal,  # v38: Renomeado para "Sinal" (padrão das outras abas)
+                    "Sinal": sinal,  # v40: Padronizado
                     "PL Zanatta": p.get("pl_zanatta", ""),
                     "PL Raiz": p.get("pl_raiz", ""),
                     "Situação": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
@@ -11237,8 +11259,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 key="editor_apensados"
             )
 
-            # Legenda - v38: Padronizada igual às abas 5 e 7
-            st.caption("🔴 ≥30 dias | 🟠 15-29 dias | 🟡 7-14 dias | 🟢 <7 dias")
+            # Legenda - v40: Padronizada igual ao padrão do sistema
+            st.caption("🚨 ≤2 dias (URGENTÍSSIMO) | ⚠️ ≤5 dias (URGENTE) | 🔔 ≤15 dias (Recente)")
 
             # v39: Detectar nova seleção e manter ÚNICO
             novos_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
@@ -11327,17 +11349,20 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     anos_p = dias // 365
                     parado_str = f"{anos_p} {'ano' if anos_p == 1 else 'anos'}"
                 
-                # v38: Ícone padronizado IGUAL às abas 5 e 7
+                # v40: Ícone padronizado IGUAL ao padrão do sistema
+                # 🚨 = ≤2 dias (URGENTÍSSIMO)
+                # ⚠️ = ≤5 dias (URGENTE)  
+                # 🔔 = ≤15 dias (Recente)
                 if dias < 0:
                     icone = "—"
-                elif dias >= 30:
-                    icone = "🔴"
-                elif dias >= 15:
-                    icone = "🟠"
-                elif dias >= 7:
-                    icone = "🟡"
+                elif dias <= 2:
+                    icone = "🚨"
+                elif dias <= 5:
+                    icone = "⚠️"
+                elif dias <= 15:
+                    icone = "🔔"
                 else:
-                    icone = "🟢"
+                    icone = "📋"  # Sem urgência
                 
                 key_unica = ap.get('id_zanatta', '') or ap.get('pl_zanatta', '').replace(' ', '_').replace('/', '_')
                 
@@ -11448,12 +11473,26 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             with col_dl1:
                 bytes_out, mime, ext = to_xlsx_bytes(df_download, "Projetos_Apensados")
                 st.download_button(
-                    "⬇️ Baixar XLSX Completo",
+                    "⬇️ XLSX",
                     data=bytes_out,
                     file_name=f"projetos_apensados_zanatta.{ext}",
                     mime=mime,
                     key="download_apensados_xlsx"
                 )
+            
+            with col_dl2:
+                # v40: Adicionar download de PDF
+                try:
+                    pdf_bytes, pdf_mime, pdf_ext = to_pdf_bytes(df_download, "Projetos Apensados - Dep. Julia Zanatta")
+                    st.download_button(
+                        "⬇️ PDF",
+                        data=pdf_bytes,
+                        file_name=f"projetos_apensados_zanatta.{pdf_ext}",
+                        mime=pdf_mime,
+                        key="download_apensados_pdf"
+                    )
+                except Exception as e:
+                    st.caption(f"PDF indisponível: {e}")
             
             st.markdown("---")
             
