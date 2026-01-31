@@ -1,5 +1,36 @@
-# monitor_sistema_jz.py - v36 PROJETOS APENSADOS (COMPLETA)
+# monitor_sistema_jz.py - v37 OTIMIZAÇÃO E AUTOMAÇÃO
 # 
+# ALTERAÇÕES v37 - OTIMIZAÇÃO E AUTOMAÇÃO (ABAS 5, 6, 7 e 9):
+#
+# 🔧 ABA 5 - SENADO (OTIMIZADA):
+#   - AUTOMÁTICO: Dados do Senado carregam sem clique em botão
+#   - CACHE INCREMENTAL: st.session_state["senado_cache_por_id"] armazena por ID
+#   - FILTRO INTELIGENTE: Só busca Senado para proposições em "Apreciação pelo Senado Federal"
+#   - EXCLUI RICs: RICs não tramitam no Senado
+#   - VISUAL LIMPO: Tabela focada apenas nas proposições no Senado
+#
+# 🔧 ABA 6 - MATÉRIAS (OTIMIZADA):
+#   - AUTOMÁTICO: Carrega ao entrar na aba (sem botão)
+#   - CACHE: st.session_state["df_aut6_cache"] evita recarga
+#   - BOTÃO ATUALIZAR: Disponível para forçar recarga quando necessário
+#
+# 🔧 ABA 7 - RICs (OTIMIZADA):
+#   - AUTOMÁTICO: Carrega ao entrar na aba (sem botão)
+#   - CACHE: st.session_state["df_rics_completo"] evita recarga
+#   - BOTÃO ATUALIZAR: Disponível para forçar recarga quando necessário
+#
+# 🔧 ABA 9 - APENSADOS (CORREÇÃO CRÍTICA):
+#   - CACHE DA DETECÇÃO: st.session_state["projetos_apensados_cache"]
+#   - @st.cache_data: Função buscar_projetos_apensados_completo com TTL de 30min
+#   - SEPARAÇÃO UI/DETECÇÃO: Checkboxes NÃO disparam recálculo
+#   - AUTOMÁTICO: Carrega ao entrar na aba
+#   - SEM TRAVAMENTO: Interações de UI não executam detecção pesada
+#
+# 🔧 INDEPENDÊNCIA ENTRE ABAS:
+#   - Cada aba tem seu próprio cache em st.session_state
+#   - Não há dependência entre abas para carregar dados
+#   - Senado continua restrito à Aba 5 (gate _pode_chamar_senado mantido)
+#
 # ALTERAÇÕES v36 - PROJETOS APENSADOS (CORREÇÕES FINAIS):
 # - 🔧 CORRIGIDO: PL 5198/2023 → raiz é PL 4953/2016 (não PL 736/2022)
 # - ✅ ORDENAÇÃO: Projetos ordenados do mais recente para o mais antigo
@@ -2493,11 +2524,14 @@ def buscar_id_proposicao(sigla_tipo: str, numero: str, ano: str) -> str:
     return ""
 
 
+@st.cache_data(show_spinner=False, ttl=1800)
 def buscar_projetos_apensados_completo(id_deputado: int) -> list:
     """
     Busca todos os projetos da deputada que estão apensados.
     
     USA MAPEAMENTO COMPLETO: vai direto para o PL RAIZ!
+    
+    CACHED: TTL de 30 minutos para evitar recálculo em cada rerun.
     
     Returns:
         Lista de dicionários com dados dos projetos apensados
@@ -8439,7 +8473,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v36 - Integração com Senado; Monitoramento de apensados")
+    st.caption("v37 - Automação de carregamento; Cache inteligente; Integração Senado otimizada")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -9437,85 +9471,85 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 df_tbl["Alerta"] = df_tbl["Parado (dias)"].apply(get_alerta_emoji)
                 
                 # ============================================================
-                # SENADO: APENAS PARA SELECIONADOS VIA BOTÃO
+                # SENADO: AUTOMÁTICO PARA PROPOSIÇÕES EM APRECIAÇÃO NO SENADO
+                # v37 - Cache incremental, sem botão, exclui RICs
                 # ============================================================
                 st.markdown("---")
-                st.markdown("#### 🏛️ Integração com Senado Federal")
                 
-                # Adicionar coluna de seleção
-                if "selecionado_senado" not in st.session_state:
-                    st.session_state["selecionado_senado"] = []
+                # Inicializar cache incremental no session_state
+                if "senado_cache_por_id" not in st.session_state:
+                    st.session_state["senado_cache_por_id"] = {}
                 
-                # Mostrar checkbox para cada proposição
-                col_sel, col_btn = st.columns([3, 1])
-                with col_sel:
-                    st.caption("⬇️ Selecione proposições para buscar tramitação no Senado:")
+                # Filtrar apenas proposições em "Apreciação pelo Senado Federal" E que NÃO são RICs
+                def esta_no_senado(row):
+                    situacao = str(row.get("Situação atual", "")).lower()
+                    tipo = str(row.get("Tipo", "")).upper()
+                    # Excluir RICs (não tramitam no Senado)
+                    if tipo == "RIC":
+                        return False
+                    return "apreciação pelo senado" in situacao or "senado federal" in situacao
                 
-                # Criar dataframe para exibição com checkbox
-                df_display = df_tbl[[col for col in df_tbl.columns if col != 'LinkTramitacao']].head(20).copy()
+                df_no_senado = df_tbl[df_tbl.apply(esta_no_senado, axis=1)].copy()
                 
-                # Mostrar tabela simples primeiro (SEM Senado)
-                st.markdown("#### 📋 Proposições encontradas")
-                st.caption(f"Mostrando {len(df_display)} de {len(df_tbl)} resultados")
-                
-                # Selection usando data_editor
-                df_selection = df_display.copy()
-                df_selection.insert(0, "✓", False)  # Coluna de checkbox
-                
-                edited_df = st.data_editor(
-                    df_selection,
-                    hide_index=True,
-                    use_container_width=True,
-                    disabled=[col for col in df_selection.columns if col != "✓"],
-                    key="aba5_selection"
-                )
-                
-                # Pegar IDs selecionados
-                ids_selecionados = df_display[edited_df["✓"]]["ID"].tolist()
-                
-                with col_btn:
-                    st.markdown("")  # Espaçamento
-                    st.markdown("")
-                    btn_buscar_senado = st.button(
-                        f"🔍 Buscar Senado ({len(ids_selecionados)})",
-                        type="primary",
-                        disabled=len(ids_selecionados) == 0,
-                        help="Busca tramitação no Senado apenas para as proposições selecionadas"
-                    )
-                
-                # Processar APENAS se botão clicado E tem selecionados
-                if btn_buscar_senado and len(ids_selecionados) > 0:
-                    # Filtrar apenas selecionados
-                    df_selecionados = df_tbl[df_tbl["ID"].isin(ids_selecionados)].copy()
+                if len(df_no_senado) > 0:
+                    st.markdown("#### 🏛️ Proposições em Apreciação pelo Senado Federal")
+                    st.caption(f"📊 {len(df_no_senado)} proposição(ões) em tramitação no Senado")
                     
-                    with st.spinner(f"🔍 Buscando tramitação no Senado para {len(ids_selecionados)} proposições..."):
-                        df_selecionados_enriquecido = processar_lista_com_senado(
-                            df_selecionados,
-                            debug=debug_senado_5,
-                            mostrar_progresso=True
-                        )
+                    # Identificar IDs que ainda não estão no cache
+                    ids_no_senado = df_no_senado["ID"].astype(str).tolist()
+                    ids_ja_cached = set(st.session_state["senado_cache_por_id"].keys())
+                    ids_para_buscar = [id_prop for id_prop in ids_no_senado if id_prop not in ids_ja_cached]
                     
-                    # Guardar no session state
-                    st.session_state["df_senado_enriquecido"] = df_selecionados_enriquecido
-                    st.success(f"✅ Tramitação no Senado carregada para {len(ids_selecionados)} proposições!")
-                
-                # Se já temos dados do Senado, mostrar
-                if "df_senado_enriquecido" in st.session_state:
-                    df_com_senado = st.session_state["df_senado_enriquecido"]
-                    st.markdown("#### 🏛️ Proposições com dados do Senado")
+                    # Buscar dados do Senado apenas para IDs novos (cache incremental)
+                    if ids_para_buscar:
+                        with st.spinner(f"🔍 Buscando dados do Senado para {len(ids_para_buscar)} nova(s) proposição(ões)..."):
+                            df_para_buscar = df_no_senado[df_no_senado["ID"].astype(str).isin(ids_para_buscar)].copy()
+                            df_enriquecido = processar_lista_com_senado(
+                                df_para_buscar,
+                                debug=debug_senado_5,
+                                mostrar_progresso=True
+                            )
+                            # Atualizar cache
+                            for _, row in df_enriquecido.iterrows():
+                                id_prop = str(row.get("ID", ""))
+                                if id_prop:
+                                    st.session_state["senado_cache_por_id"][id_prop] = row.to_dict()
                     
-                    # Mostrar dados enriquecidos
-                    colunas_exibir = ["Proposição", "Ementa", "Último andamento"]
-                    if "Relator_Senado" in df_com_senado.columns:
-                        colunas_exibir.append("Relator_Senado")
-                    if "Comissao_Senado" in df_com_senado.columns:
-                        colunas_exibir.append("Comissao_Senado")
+                    # Aplicar dados do cache ao DataFrame
+                    def aplicar_cache_senado(row):
+                        id_prop = str(row.get("ID", ""))
+                        cache_data = st.session_state["senado_cache_por_id"].get(id_prop, {})
+                        if cache_data:
+                            for key, value in cache_data.items():
+                                if key not in ["ID", "Proposição", "Ementa"]:
+                                    row[key] = value
+                        return row
+                    
+                    df_no_senado = df_no_senado.apply(aplicar_cache_senado, axis=1)
+                    
+                    # Exibir tabela limpa com dados do Senado
+                    colunas_senado = ["Proposição", "Tipo", "Situação atual", "Órgão (sigla)", "Relator(a)", 
+                                      "Último andamento", "Data do status", "Parado (dias)"]
+                    
+                    # Adicionar colunas do Senado se existirem
+                    for col in ["Relator_Senado", "Orgao_Senado_Sigla", "situacao_senado"]:
+                        if col in df_no_senado.columns:
+                            colunas_senado.append(col)
+                    
+                    colunas_exibir = [c for c in colunas_senado if c in df_no_senado.columns]
                     
                     st.dataframe(
-                        df_com_senado[[c for c in colunas_exibir if c in df_com_senado.columns]],
+                        df_no_senado[colunas_exibir],
                         use_container_width=True,
                         hide_index=True
                     )
+                    
+                    st.markdown("---")
+                
+                # Mostrar TODAS as proposições na tabela principal
+                st.markdown("#### 📋 Proposições encontradas")
+                st.caption(f"Mostrando {min(20, len(df_tbl))} de {len(df_tbl)} resultados")
+                
                 # Colunas dinâmicas - incluir dados do Senado quando checkbox marcado
                 if incluir_senado_tab5 and "no_senado" in df_tbl.columns:
                     # Substituir Relator e Órgão pelos dados do Senado quando disponíveis
@@ -9881,19 +9915,30 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         
         st.caption("Análise da carteira de proposições por status de tramitação")
 
-        # Inicializar variável
-        df_aut6 = pd.DataFrame()
-
-        # Botão para carregar dados (lazy loading)
-        if st.button("📊 Carregar Matérias", key="carregar_aba6", use_container_width=True):
-            st.session_state["aba6_carregada"] = True
+        # ============================================================
+        # v37: CARREGAMENTO AUTOMÁTICO (sem botão)
+        # ============================================================
+        # Inicializar cache
+        if "df_aut6_cache" not in st.session_state:
+            st.session_state["df_aut6_cache"] = pd.DataFrame()
         
-        if st.session_state.get("aba6_carregada", False):
+        col_info6, col_refresh6 = st.columns([3, 1])
+        with col_info6:
+            st.caption("💡 **Matérias carregam automaticamente.** Clique em 'Atualizar' para forçar recarga.")
+        with col_refresh6:
+            btn_atualizar_aba6 = st.button("🔄 Atualizar", key="btn_refresh_aba6")
+        
+        # Carregar automaticamente se cache vazio OU se botão foi clicado
+        precisa_carregar6 = st.session_state["df_aut6_cache"].empty or btn_atualizar_aba6
+        
+        if precisa_carregar6:
             with st.spinner("Carregando proposições de autoria..."):
                 df_aut6 = fetch_lista_proposicoes_autoria(id_deputada)
+                st.session_state["df_aut6_cache"] = df_aut6
+                if btn_atualizar_aba6:
+                    st.success(f"✅ {len(df_aut6)} proposições atualizadas!")
         else:
-            st.info("👆 **Clique no botão acima para carregar os dados da aba**")
-            st.stop()  # Para execução do resto da aba
+            df_aut6 = st.session_state["df_aut6_cache"]
 
         if df_aut6.empty:
             st.info("Nenhuma proposição de autoria encontrada.")
@@ -10369,36 +10414,41 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         if "df_rics_completo" not in st.session_state:
             st.session_state["df_rics_completo"] = pd.DataFrame()
         
-        col_load_ric, col_info_ric = st.columns([1, 2])
-        
-        with col_load_ric:
-            if st.button("🔄 Carregar/Atualizar RICs", key="btn_load_rics", type="primary"):
-                with st.spinner("Buscando RICs da Deputada..."):
-                    # Buscar RICs
-                    df_rics_base = fetch_rics_por_autor(id_deputada)
-                    
-                    if df_rics_base.empty:
-                        st.warning("Nenhum RIC encontrado.")
-                        st.session_state["df_rics_completo"] = pd.DataFrame()
-                    else:
-                        st.info(f"Encontrados {len(df_rics_base)} RICs. Carregando detalhes...")
-                        
-                        # Buscar status completo de cada RIC
-                        ids_rics = df_rics_base["id"].astype(str).tolist()
-                        status_map_rics = build_status_map(ids_rics)
-                        
-                        # Enriquecer com status
-                        df_rics_enriquecido = enrich_with_status(df_rics_base, status_map_rics)
-                        
-                        st.session_state["df_rics_completo"] = df_rics_enriquecido
-                        registrar_atualizacao("rics")
-                        st.success(f"✅ {len(df_rics_enriquecido)} RICs carregados com sucesso!")
+        # ============================================================
+        # v37: CARREGAMENTO AUTOMÁTICO DE RICs (sem botão)
+        # ============================================================
+        col_info_ric, col_refresh_ric = st.columns([3, 1])
         
         with col_info_ric:
-            st.caption("""
-            💡 **Dica:** Clique em "Carregar/Atualizar RICs" para buscar todos os Requerimentos de Informação 
-            da Deputada e extrair automaticamente os prazos de resposta das tramitações.
-            """)
+            st.caption("💡 **RICs carregam automaticamente.** Clique em 'Atualizar' para forçar recarga.")
+        
+        with col_refresh_ric:
+            btn_atualizar_rics = st.button("🔄 Atualizar", key="btn_refresh_rics")
+        
+        # Carregar automaticamente se ainda não carregou OU se botão foi clicado
+        precisa_carregar = st.session_state["df_rics_completo"].empty or btn_atualizar_rics
+        
+        if precisa_carregar:
+            with st.spinner("🔍 Carregando RICs da Deputada..."):
+                # Buscar RICs
+                df_rics_base = fetch_rics_por_autor(id_deputada)
+                
+                if df_rics_base.empty:
+                    st.warning("Nenhum RIC encontrado.")
+                    st.session_state["df_rics_completo"] = pd.DataFrame()
+                else:
+                    # Buscar status completo de cada RIC
+                    ids_rics = df_rics_base["id"].astype(str).tolist()
+                    status_map_rics = build_status_map(ids_rics)
+                    
+                    # Enriquecer com status
+                    df_rics_enriquecido = enrich_with_status(df_rics_base, status_map_rics)
+                    
+                    st.session_state["df_rics_completo"] = df_rics_enriquecido
+                    registrar_atualizacao("rics")
+                    
+                    if btn_atualizar_rics:
+                        st.success(f"✅ {len(df_rics_enriquecido)} RICs atualizados!")
         
         # Mostrar última atualização
         mostrar_ultima_atualizacao("rics")
@@ -10871,341 +10921,358 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         ---
         """)
         
-        # Botão para carregar dados
-        col_btn, col_info = st.columns([1, 2])
-        with col_btn:
-            carregar_apensados = st.button("🔄 Detectar Projetos Apensados", type="primary", key="btn_apensados")
-        with col_info:
-            st.caption("🤖 Detecção via API da Câmara (pode demorar alguns segundos)")
+        # ============================================================
+        # v37: CACHE INTELIGENTE - Separar detecção pesada da UI
+        # A detecção roda UMA VEZ e é armazenada em session_state
+        # Checkboxes e interações NÃO disparam recálculo
+        # ============================================================
         
-        if carregar_apensados or st.session_state.get("apensados_carregados"):
-            st.session_state["apensados_carregados"] = True
-            
+        # Inicializar cache de projetos apensados
+        if "projetos_apensados_cache" not in st.session_state:
+            st.session_state["projetos_apensados_cache"] = None
+        
+        col_info, col_refresh = st.columns([3, 1])
+        with col_info:
+            st.caption("💡 **Projetos apensados carregam automaticamente.** Clique em 'Atualizar' para forçar recarga.")
+        with col_refresh:
+            btn_atualizar_apensados = st.button("🔄 Atualizar", key="btn_refresh_apensados")
+        
+        # Carregar automaticamente se cache vazio OU se botão foi clicado
+        precisa_carregar = st.session_state["projetos_apensados_cache"] is None or btn_atualizar_apensados
+        
+        if precisa_carregar:
             with st.spinner("🔍 Detectando projetos apensados e buscando cadeia completa..."):
-                # Usar função de detecção
-                projetos_apensados = buscar_projetos_apensados_automatico(id_deputada)
+                # Usar função de detecção (que agora tem @st.cache_data)
+                projetos_apensados_raw = buscar_projetos_apensados_automatico(id_deputada)
+                
+                if not projetos_apensados_raw:
+                    st.session_state["projetos_apensados_cache"] = []
+                else:
+                    # ============================================================
+                    # ORDENAR POR DATA MAIS RECENTE PRIMEIRO
+                    # ============================================================
+                    def parse_data_br(data_str):
+                        """Converte DD/MM/YYYY para datetime"""
+                        try:
+                            if data_str and data_str != "—":
+                                return datetime.datetime.strptime(data_str, "%d/%m/%Y")
+                            return datetime.datetime.min
+                        except:
+                            return datetime.datetime.min
+                    
+                    # Ordenar do mais recente para o mais antigo
+                    projetos_ordenados = sorted(
+                        projetos_apensados_raw,
+                        key=lambda x: parse_data_br(x.get("data_ultima_mov", "—")),
+                        reverse=True
+                    )
+                    
+                    # Adicionar row_id estável para seleção
+                    for idx, p in enumerate(projetos_ordenados):
+                        p["__row_id"] = f"{p.get('id_zanatta', '')}_{idx}"
+                    
+                    # Salvar no cache
+                    st.session_state["projetos_apensados_cache"] = projetos_ordenados
+                    
+                    if btn_atualizar_apensados:
+                        st.success(f"✅ {len(projetos_ordenados)} projetos apensados atualizados!")
+        
+        # Usar dados do cache (NÃO recalcula em cada rerun)
+        projetos_apensados = st.session_state.get("projetos_apensados_cache", [])
+        
+        if not projetos_apensados:
+            st.warning("Nenhum projeto apensado encontrado ou erro na detecção.")
+            st.info("💡 Isso pode significar que nenhum projeto da deputada está apensado no momento.")
+        else:
+            # ============================================================
+            # MÉTRICAS (usando dados do PL RAIZ) - só renderiza, não recalcula
+            # ============================================================
+            st.markdown("### 📊 Resumo")
+            col1, col2, col3, col4 = st.columns(4)
             
-            if not projetos_apensados:
-                st.warning("Nenhum projeto apensado encontrado ou erro na detecção.")
-                st.info("💡 Isso pode significar que nenhum projeto da deputada está apensado no momento.")
-            else:
-                # ============================================================
-                # ORDENAR POR DATA MAIS RECENTE PRIMEIRO
-                # ============================================================
-                # datetime já importado no topo
+            with col1:
+                st.metric("Total de PLs Apensados", len(projetos_apensados))
+            
+            with col2:
+                aguardando_parecer = len([p for p in projetos_apensados 
+                    if "Aguardando Parecer" in p.get("situacao_raiz", "")])
+                st.metric("Aguardando Parecer", aguardando_parecer)
+            
+            with col3:
+                aguardando_relator = len([p for p in projetos_apensados 
+                    if "Designação de Relator" in p.get("situacao_raiz", "")])
+                st.metric("Aguardando Relator", aguardando_relator)
+            
+            with col4:
+                pronta = len([p for p in projetos_apensados 
+                    if "Pronta para Pauta" in p.get("situacao_raiz", "")])
+                st.metric("Pronta para Pauta", pronta, delta="⚠️ Atenção!" if pronta > 0 else None)
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # TABELA PRINCIPAL (usando dados do PL RAIZ)
+            # ============================================================
+            st.markdown("### 📋 Projetos Apensados Detectados")
+            st.caption("👆 Clique em um projeto para ver detalhes completos")
+            
+            # Preparar dados para tabela
+            dados_tabela = []
+            for p in projetos_apensados:
+                # Formatar "Parado há X dias" - DADOS DO PL RAIZ
+                dias = p.get("dias_parado", -1)
                 
-                def parse_data_br(data_str):
-                    """Converte DD/MM/YYYY para datetime"""
-                    try:
-                        if data_str and data_str != "—":
-                            return datetime.datetime.strptime(data_str, "%d/%m/%Y")
-                        return datetime.datetime.min
-                    except:
-                        return datetime.datetime.min
+                if dias < 0:
+                    # Erro ao obter data
+                    parado_str = "—"
+                elif dias == 0:
+                    parado_str = "Hoje"
+                elif dias == 1:
+                    parado_str = "1 dia"
+                elif dias < 30:
+                    parado_str = f"{dias} dias"
+                elif dias < 365:
+                    meses = dias // 30
+                    parado_str = f"{meses} {'mês' if meses == 1 else 'meses'}"
+                else:
+                    anos_calc = dias // 365
+                    parado_str = f"{anos_calc} {'ano' if anos_calc == 1 else 'anos'}"
                 
-                # Ordenar do mais recente para o mais antigo
-                projetos_apensados = sorted(
-                    projetos_apensados,
-                    key=lambda x: parse_data_br(x.get("data_ultima_mov", "—")),
-                    reverse=True
-                )
+                # Sinalização de alerta - usando situação do PL RAIZ
+                # LÓGICA IGUAL À ABA 5: 
+                # 🔴 = menos de 30 dias
+                # 🟡 = 30-90 dias  
+                # 🟢 = mais de 90 dias
+                situacao_raiz = p.get("situacao_raiz", "")
+                if dias < 30:
+                    sinal = "🔴"
+                elif dias < 90:
+                    sinal = "🟡"
+                else:
+                    sinal = "🟢"
                 
-                # Adicionar row_id estável para seleção
-                for idx, p in enumerate(projetos_apensados):
-                    p["__row_id"] = f"{p.get('id_zanatta', '')}_{idx}"
+                # Construir cadeia para exibição
+                cadeia = p.get("cadeia_apensamento", [])
+                if cadeia and len(cadeia) > 1:
+                    cadeia_str = " → ".join([c.get("pl", "") for c in cadeia])
+                else:
+                    cadeia_str = p.get("pl_principal", "")
+                
+                dados_tabela.append({
+                    "": False,  # Checkbox
+                    "__row_id": p.get("__row_id", ""),  # ID estável
+                    "🚦": sinal,
+                    "PL Zanatta": p.get("pl_zanatta", ""),
+                    "PL Raiz": p.get("pl_raiz", ""),
+                    "Situação": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
+                    "Órgão": p.get("orgao_raiz", ""),
+                    "Relator": p.get("relator_raiz", "—")[:30],
+                    "Parado há": parado_str,
+                    "Última Mov.": p.get("data_ultima_mov", "—"),
+                    "id_raiz": p.get("id_raiz", ""),
+                    "id_zanatta": p.get("id_zanatta", ""),
+                    "cadeia": cadeia_str,
+                })
+            
+            df_tabela = pd.DataFrame(dados_tabela)
+            
+            # Editor de dados com checkboxes
+            edited_df = st.data_editor(
+                df_tabela[["", "__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
+                disabled=["__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."],
+                hide_index=True,
+                use_container_width=True,
+                height=400,
+                column_config={
+                    "": st.column_config.CheckboxColumn("", default=False, width="small"),
+                    "__row_id": st.column_config.TextColumn("ID", width="small"),
+                    "🚦": st.column_config.TextColumn("", width="small"),
+                    "Relator": st.column_config.TextColumn("Relator", width="medium"),
+                    "Parado há": st.column_config.TextColumn("Parado há", width="small"),
+                },
+            )
 
-                # ============================================================
-                # MÉTRICAS (usando dados do PL RAIZ)
-                # ============================================================
-                st.markdown("### 📊 Resumo")
-                col1, col2, col3, col4 = st.columns(4)
+            # Legenda
+            st.caption("🔴 Menos de 30 dias parado | 🟡 30-90 dias | 🟢 Mais de 90 dias")
+
+            # Seleção correta via __row_id
+            row_ids_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
+            selecionados = df_tabela[df_tabela["__row_id"].isin(row_ids_selecionados)]
+            
+            if len(selecionados) > 0:
+                st.info(f"✅ {len(selecionados)} projeto(s) selecionado(s)")
                 
-                with col1:
-                    st.metric("Total de PLs Apensados", len(projetos_apensados))
+                # Botões de ação
+                col_a1, col_a2, col_a3 = st.columns(3)
+                with col_a1:
+                    if st.button("📋 Copiar PLs Raiz", key="copiar_raiz_sel"):
+                        pls_sel = "\n".join([f"{row['PL Raiz']}" for _, row in selecionados.iterrows()])
+                        st.code(pls_sel, language="text")
                 
-                with col2:
-                    aguardando_parecer = len([p for p in projetos_apensados 
-                        if "Aguardando Parecer" in p.get("situacao_raiz", "")])
-                    st.metric("Aguardando Parecer", aguardando_parecer)
+                with col_a2:
+                    if st.button("🔗 Abrir Links", key="abrir_links_sel"):
+                        for _, row in selecionados.iterrows():
+                            link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={row['id_raiz']}"
+                            st.markdown(f"[🔗 {row['PL Raiz']}]({link})")
                 
-                with col3:
-                    aguardando_relator = len([p for p in projetos_apensados 
-                        if "Designação de Relator" in p.get("situacao_raiz", "")])
-                    st.metric("Aguardando Relator", aguardando_relator)
+                with col_a3:
+                    if st.button("⬇️ Baixar Selecionados", key="download_sel"):
+                        bytes_sel, mime_sel, ext_sel = to_xlsx_bytes(selecionados, "Selecionados")
+                        st.download_button(
+                            "📥 Download XLSX",
+                            data=bytes_sel,
+                            file_name=f"apensados_selecionados.{ext_sel}",
+                            mime=mime_sel,
+                        )
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # DETALHES DOS PROJETOS (em expanders clicáveis)
+            # ============================================================
+            st.markdown("### 🔍 Detalhes dos Projetos")
+            st.caption("Clique em um projeto para ver detalhes completos")
+            
+            # MODIFICADO: Só mostrar detalhes dos selecionados
+            # Filtrar apenas projetos selecionados (baseado nos checkboxes marcados)
+            ids_selecionados_detalhes = df_tabela.loc[edited_df[""].to_numpy(), "__row_id"].tolist()
+            projetos_selecionados = [p for p in projetos_apensados if p.get("__row_id", "") in ids_selecionados_detalhes]
+
+            if not projetos_selecionados:
+                st.info("👆 **Selecione projetos acima** marcando os checkboxes para ver detalhes completos e tramitações")
+            else:
+                st.success(f"📋 Exibindo detalhes de **{len(projetos_selecionados)} projeto(s)** selecionado(s)")
+
+            for ap in projetos_selecionados:
+                situacao_raiz = ap.get("situacao_raiz", "")
+                dias = ap.get("dias_parado", 0)
                 
-                with col4:
-                    pronta = len([p for p in projetos_apensados 
-                        if "Pronta para Pauta" in p.get("situacao_raiz", "")])
-                    st.metric("Pronta para Pauta", pronta, delta="⚠️ Atenção!" if pronta > 0 else None)
+                # Formatar dias parado
+                if dias == 0:
+                    parado_str = "Hoje"
+                elif dias == 1:
+                    parado_str = "1 dia"
+                elif dias < 30:
+                    parado_str = f"{dias} dias"
+                elif dias < 365:
+                    meses = dias // 30
+                    parado_str = f"{meses} {'mês' if meses == 1 else 'meses'}"
+                else:
+                    anos_p = dias // 365
+                    parado_str = f"{anos_p} {'ano' if anos_p == 1 else 'anos'}"
                 
-                st.markdown("---")
+                # Ícone baseado na situação do PL RAIZ (mesma lógica da tabela)
+                if dias < 30:
+                    icone = "🔴"
+                elif dias < 90:
+                    icone = "🟡"
+                else:
+                    icone = "🟢"
                 
-                # ============================================================
-                # TABELA PRINCIPAL (usando dados do PL RAIZ)
-                # ============================================================
-                st.markdown("### 📋 Projetos Apensados Detectados")
-                st.caption("👆 Clique em um projeto para ver detalhes completos")
+                key_unica = ap.get('id_zanatta', '') or ap.get('pl_zanatta', '').replace(' ', '_').replace('/', '_')
                 
-                # Preparar dados para tabela
-                dados_tabela = []
-                for p in projetos_apensados:
-                    # Formatar "Parado há X dias" - DADOS DO PL RAIZ
-                    dias = p.get("dias_parado", -1)
+                # Construir cadeia para exibição no título
+                cadeia = ap.get("cadeia_apensamento", [])
+                if cadeia and len(cadeia) > 1:
+                    cadeia_resumo = f" → ... → {ap.get('pl_raiz', '')}"
+                else:
+                    cadeia_resumo = f" → {ap.get('pl_principal', '')}"
+                
+                # EXPANDER clicável (padrão do sistema)
+                with st.expander(f"{icone} {ap['pl_zanatta']}{cadeia_resumo} | ⏱️ {parado_str}", expanded=False):
                     
-                    if dias < 0:
-                        # Erro ao obter data
-                        parado_str = "—"
-                    elif dias == 0:
-                        parado_str = "Hoje"
-                    elif dias == 1:
-                        parado_str = "1 dia"
-                    elif dias < 30:
-                        parado_str = f"{dias} dias"
-                    elif dias < 365:
-                        meses = dias // 30
-                        parado_str = f"{meses} {'mês' if meses == 1 else 'meses'}"
-                    else:
-                        anos_calc = dias // 365
-                        parado_str = f"{anos_calc} {'ano' if anos_calc == 1 else 'anos'}"
-                    
-                    # Sinalização de alerta - usando situação do PL RAIZ
-                    # LÓGICA IGUAL À ABA 5: 
-                    # 🔴 = menos de 30 dias
-                    # 🟡 = 30-90 dias  
-                    # 🟢 = mais de 90 dias
-                    situacao_raiz = p.get("situacao_raiz", "")
-                    if dias < 30:
-                        sinal = "🔴"
-                    elif dias < 90:
-                        sinal = "🟡"
-                    else:
-                        sinal = "🟢"
-                    
-                    # Construir cadeia para exibição
-                    cadeia = p.get("cadeia_apensamento", [])
+                    # Cadeia completa de apensamento
                     if cadeia and len(cadeia) > 1:
                         cadeia_str = " → ".join([c.get("pl", "") for c in cadeia])
-                    else:
-                        cadeia_str = p.get("pl_principal", "")
+                        st.info(f"📎 **Cadeia de apensamento:** {ap['pl_zanatta']} → {cadeia_str}")
                     
-                    dados_tabela.append({
-                        "": False,  # Checkbox
-                        "__row_id": p.get("__row_id", ""),  # ID estável
-                        "🚦": sinal,
-                        "PL Zanatta": p.get("pl_zanatta", ""),
-                        "PL Raiz": p.get("pl_raiz", ""),
-                        "Situação": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
-                        "Órgão": p.get("orgao_raiz", ""),
-                        "Relator": p.get("relator_raiz", "—")[:30],
-                        "Parado há": parado_str,
-                        "Última Mov.": p.get("data_ultima_mov", "—"),
-                        "id_raiz": p.get("id_raiz", ""),
-                        "id_zanatta": p.get("id_zanatta", ""),
-                        "cadeia": cadeia_str,
-                    })
-                
-                df_tabela = pd.DataFrame(dados_tabela)
-                
-                # Editor de dados com checkboxes
-                edited_df = st.data_editor(
-                    df_tabela[["", "__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
-                    disabled=["__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."],
-                    hide_index=True,
-                    use_container_width=True,
-                    height=400,
-                    column_config={
-                        "": st.column_config.CheckboxColumn("", default=False, width="small"),
-                        "__row_id": st.column_config.TextColumn("ID", width="small"),
-                        "🚦": st.column_config.TextColumn("", width="small"),
-                        "Relator": st.column_config.TextColumn("Relator", width="medium"),
-                        "Parado há": st.column_config.TextColumn("Parado há", width="small"),
-                    },
+                    st.markdown("---")
+                    
+                    # Layout principal: 3 colunas
+                    col_foto, col_zanatta, col_raiz = st.columns([1, 2, 2])
+                    
+                    with col_foto:
+                        foto_url = ap.get("foto_autor", "")
+                        if foto_url:
+                            st.image(foto_url, width=100)
+                        st.caption(f"**{ap.get('autor_principal', '—')}**")
+                        st.caption("Autor do PL Principal")
+                    
+                    with col_zanatta:
+                        st.markdown("**📌 Projeto da Deputada**")
+                        st.markdown(f"### {ap['pl_zanatta']}")
+                        st.caption(ap.get('ementa_zanatta', '')[:150] + "..." if len(ap.get('ementa_zanatta', '')) > 150 else ap.get('ementa_zanatta', ''))
+                        st.markdown(f"[🔗 Ver PL](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_zanatta', '')})")
+                    
+                    with col_raiz:
+                        st.markdown("**🎯 PL RAIZ (onde tramita)**")
+                        st.markdown(f"### {ap.get('pl_raiz', ap.get('pl_principal', ''))}")
+                        
+                        st.markdown(f"🏛️ **Órgão:** {ap.get('orgao_raiz', '—')}")
+                        st.markdown(f"👨‍⚖️ **Relator:** {ap.get('relator_raiz', '—')}")
+                        st.markdown(f"📅 **Última mov.:** {ap.get('data_ultima_mov', '—')}")
+                        st.markdown(f"⏱️ **Parado há:** {parado_str}")
+                        
+                        st.markdown(f"[🔗 Ver PL Raiz](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_raiz', '')})")
+                    
+                    st.markdown("---")
+                    
+                    # Situação atual do PL RAIZ
+                    st.markdown(f"**📊 Situação atual (PL Raiz):** {situacao_raiz}")
+                    
+                    # Ementa do PL Raiz
+                    ementa_raiz = ap.get("ementa_raiz", ap.get("ementa_principal", "—"))
+                    st.markdown(f"**📝 Ementa:** {ementa_raiz[:300]}...")
+                    
+                    # Botão para carregar tramitações do PL RAIZ
+                    if st.button(f"🔄 Ver tramitações do PL Raiz", key=f"btn_tram_{key_unica}"):
+                        exibir_detalhes_proposicao(ap.get('id_raiz', ''), key_prefix=f"apensado_{key_unica}")
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # DOWNLOADS
+            # ============================================================
+            st.markdown("### ⬇️ Downloads")
+            
+            # Preparar DataFrame completo para download
+            df_download = pd.DataFrame(projetos_apensados)
+            df_download = df_download.rename(columns={
+                "pl_zanatta": "PL Zanatta",
+                "pl_principal": "PL Principal",
+                "pl_raiz": "PL Raiz",
+                "autor_principal": "Autor Principal",
+                "situacao_raiz": "Situação (Raiz)",
+                "orgao_raiz": "Órgão (Raiz)",
+                "relator_raiz": "Relator (Raiz)",
+                "ementa_zanatta": "Ementa (Zanatta)",
+                "ementa_principal": "Ementa (Principal)",
+                "data_ultima_mov": "Última Movimentação",
+                "dias_parado": "Dias Parado",
+            })
+            
+            col_dl1, col_dl2 = st.columns(2)
+            
+            with col_dl1:
+                bytes_out, mime, ext = to_xlsx_bytes(df_download, "Projetos_Apensados")
+                st.download_button(
+                    "⬇️ Baixar XLSX Completo",
+                    data=bytes_out,
+                    file_name=f"projetos_apensados_zanatta.{ext}",
+                    mime=mime,
+                    key="download_apensados_xlsx"
                 )
-
-                # Legenda
-                st.caption("🔴 Menos de 30 dias parado | 🟡 30-90 dias | 🟢 Mais de 90 dias")
-
-                # Seleção correta via __row_id
-                row_ids_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
-                selecionados = df_tabela[df_tabela["__row_id"].isin(row_ids_selecionados)]
-                
-                if len(selecionados) > 0:
-                    st.info(f"✅ {len(selecionados)} projeto(s) selecionado(s)")
-                    
-                    # Botões de ação
-                    col_a1, col_a2, col_a3 = st.columns(3)
-                    with col_a1:
-                        if st.button("📋 Copiar PLs Raiz", key="copiar_raiz_sel"):
-                            pls_sel = "\n".join([f"{row['PL Raiz']}" for _, row in selecionados.iterrows()])
-                            st.code(pls_sel, language="text")
-                    
-                    with col_a2:
-                        if st.button("🔗 Abrir Links", key="abrir_links_sel"):
-                            for _, row in selecionados.iterrows():
-                                link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={row['id_raiz']}"
-                                st.markdown(f"[🔗 {row['PL Raiz']}]({link})")
-                    
-                    with col_a3:
-                        if st.button("⬇️ Baixar Selecionados", key="download_sel"):
-                            bytes_sel, mime_sel, ext_sel = to_xlsx_bytes(selecionados, "Selecionados")
-                            st.download_button(
-                                "📥 Download XLSX",
-                                data=bytes_sel,
-                                file_name=f"apensados_selecionados.{ext_sel}",
-                                mime=mime_sel,
-                            )
-                
-                st.markdown("---")
-                
-                # ============================================================
-                # DETALHES DOS PROJETOS (em expanders clicáveis)
-                # ============================================================
-                st.markdown("### 🔍 Detalhes dos Projetos")
-                st.caption("Clique em um projeto para ver detalhes completos")
-                
-                # MODIFICADO: Só mostrar detalhes dos selecionados
-                # Filtrar apenas projetos selecionados (baseado nos checkboxes marcados)
-                ids_selecionados_detalhes = df_tabela.loc[edited_df[""].to_numpy(), "__row_id"].tolist()
-                projetos_selecionados = [p for p in projetos_apensados if p.get("__row_id", "") in ids_selecionados_detalhes]
-
-                if not projetos_selecionados:
-                    st.info("👆 **Selecione projetos acima** marcando os checkboxes para ver detalhes completos e tramitações")
-                else:
-                    st.success(f"📋 Exibindo detalhes de **{len(projetos_selecionados)} projeto(s)** selecionado(s)")
-
-                for ap in projetos_selecionados:
-                    situacao_raiz = ap.get("situacao_raiz", "")
-                    dias = ap.get("dias_parado", 0)
-                    
-                    # Formatar dias parado
-                    if dias == 0:
-                        parado_str = "Hoje"
-                    elif dias == 1:
-                        parado_str = "1 dia"
-                    elif dias < 30:
-                        parado_str = f"{dias} dias"
-                    elif dias < 365:
-                        meses = dias // 30
-                        parado_str = f"{meses} {'mês' if meses == 1 else 'meses'}"
-                    else:
-                        anos_p = dias // 365
-                        parado_str = f"{anos_p} {'ano' if anos_p == 1 else 'anos'}"
-                    
-                    # Ícone baseado na situação do PL RAIZ (mesma lógica da tabela)
-                    if dias < 30:
-                        icone = "🔴"
-                    elif dias < 90:
-                        icone = "🟡"
-                    else:
-                        icone = "🟢"
-                    
-                    key_unica = ap.get('id_zanatta', '') or ap.get('pl_zanatta', '').replace(' ', '_').replace('/', '_')
-                    
-                    # Construir cadeia para exibição no título
-                    cadeia = ap.get("cadeia_apensamento", [])
-                    if cadeia and len(cadeia) > 1:
-                        cadeia_resumo = f" → ... → {ap.get('pl_raiz', '')}"
-                    else:
-                        cadeia_resumo = f" → {ap.get('pl_principal', '')}"
-                    
-                    # EXPANDER clicável (padrão do sistema)
-                    with st.expander(f"{icone} {ap['pl_zanatta']}{cadeia_resumo} | ⏱️ {parado_str}", expanded=False):
-                        
-                        # Cadeia completa de apensamento
-                        if cadeia and len(cadeia) > 1:
-                            cadeia_str = " → ".join([c.get("pl", "") for c in cadeia])
-                            st.info(f"📎 **Cadeia de apensamento:** {ap['pl_zanatta']} → {cadeia_str}")
-                        
-                        st.markdown("---")
-                        
-                        # Layout principal: 3 colunas
-                        col_foto, col_zanatta, col_raiz = st.columns([1, 2, 2])
-                        
-                        with col_foto:
-                            foto_url = ap.get("foto_autor", "")
-                            if foto_url:
-                                st.image(foto_url, width=100)
-                            st.caption(f"**{ap.get('autor_principal', '—')}**")
-                            st.caption("Autor do PL Principal")
-                        
-                        with col_zanatta:
-                            st.markdown("**📌 Projeto da Deputada**")
-                            st.markdown(f"### {ap['pl_zanatta']}")
-                            st.caption(ap.get('ementa_zanatta', '')[:150] + "..." if len(ap.get('ementa_zanatta', '')) > 150 else ap.get('ementa_zanatta', ''))
-                            st.markdown(f"[🔗 Ver PL](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_zanatta', '')})")
-                        
-                        with col_raiz:
-                            st.markdown("**🎯 PL RAIZ (onde tramita)**")
-                            st.markdown(f"### {ap.get('pl_raiz', ap.get('pl_principal', ''))}")
-                            
-                            st.markdown(f"🏛️ **Órgão:** {ap.get('orgao_raiz', '—')}")
-                            st.markdown(f"👨‍⚖️ **Relator:** {ap.get('relator_raiz', '—')}")
-                            st.markdown(f"📅 **Última mov.:** {ap.get('data_ultima_mov', '—')}")
-                            st.markdown(f"⏱️ **Parado há:** {parado_str}")
-                            
-                            st.markdown(f"[🔗 Ver PL Raiz](https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={ap.get('id_raiz', '')})")
-                        
-                        st.markdown("---")
-                        
-                        # Situação atual do PL RAIZ
-                        st.markdown(f"**📊 Situação atual (PL Raiz):** {situacao_raiz}")
-                        
-                        # Ementa do PL Raiz
-                        ementa_raiz = ap.get("ementa_raiz", ap.get("ementa_principal", "—"))
-                        st.markdown(f"**📝 Ementa:** {ementa_raiz[:300]}...")
-                        
-                        # Botão para carregar tramitações do PL RAIZ
-                        if st.button(f"🔄 Ver tramitações do PL Raiz", key=f"btn_tram_{key_unica}"):
-                            exibir_detalhes_proposicao(ap.get('id_raiz', ''), key_prefix=f"apensado_{key_unica}")
-                
-                st.markdown("---")
-                
-                # ============================================================
-                # DOWNLOADS
-                # ============================================================
-                st.markdown("### ⬇️ Downloads")
-                
-                # Preparar DataFrame completo para download
-                df_download = pd.DataFrame(projetos_apensados)
-                df_download = df_download.rename(columns={
-                    "pl_zanatta": "PL Zanatta",
-                    "pl_principal": "PL Principal",
-                    "pl_raiz": "PL Raiz",
-                    "autor_principal": "Autor Principal",
-                    "situacao_raiz": "Situação (Raiz)",
-                    "orgao_raiz": "Órgão (Raiz)",
-                    "relator_raiz": "Relator (Raiz)",
-                    "ementa_zanatta": "Ementa (Zanatta)",
-                    "ementa_principal": "Ementa (Principal)",
-                    "data_ultima_mov": "Última Movimentação",
-                    "dias_parado": "Dias Parado",
-                })
-                
-                col_dl1, col_dl2 = st.columns(2)
-                
-                with col_dl1:
-                    bytes_out, mime, ext = to_xlsx_bytes(df_download, "Projetos_Apensados")
-                    st.download_button(
-                        "⬇️ Baixar XLSX Completo",
-                        data=bytes_out,
-                        file_name=f"projetos_apensados_zanatta.{ext}",
-                        mime=mime,
-                        key="download_apensados_xlsx"
-                    )
-                
-                st.markdown("---")
-                
-                # Info
-                st.info(f"""
-                **📊 Estatísticas da detecção:**
-                - Total de projetos apensados encontrados: **{len(projetos_apensados)}**
-                - Mapeamentos no dicionário: **{len(MAPEAMENTO_APENSADOS)}**
-                - Projetos no cadastro manual: **{len(PROPOSICOES_FALTANTES_API.get('220559', []))}**
-                - Ordenação: **Do mais recente para o mais antigo**
-                """)
-        
-        else:
-            st.info("👆 Clique em **Detectar Projetos Apensados** para buscar os dados.")
+            
+            st.markdown("---")
+            
+            # Info
+            st.info(f"""
+            **📊 Estatísticas da detecção:**
+            - Total de projetos apensados encontrados: **{len(projetos_apensados)}**
+            - Mapeamentos no dicionário: **{len(MAPEAMENTO_APENSADOS)}**
+            - Projetos no cadastro manual: **{len(PROPOSICOES_FALTANTES_API.get('220559', []))}**
+            - Ordenação: **Do mais recente para o mais antigo**
+            """)
         
         st.markdown("---")
         st.caption("Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta | Dados: API Câmara dos Deputados")
