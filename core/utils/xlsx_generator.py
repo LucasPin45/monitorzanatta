@@ -9,7 +9,6 @@ from typing import Tuple
 import pandas as pd
 
 
-
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> Tuple[bytes, str, str]:
     """
     Exporta DataFrame para XLSX.
