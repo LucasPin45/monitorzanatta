@@ -1,5 +1,8 @@
-# monitor_sistema_jz.py - v40 PADRONIZAÇÃO FINAL UX
+# monitor_sistema_jz.py - v41 PADRONIZAÇÃO FINAL UX
 # 
+# ALTERAÇÕES v41 - Dividir para Conquistar:
+# Dividir as abas em um sistema só para não ter um monstro de mais de 10000 linhas
+#
 # ALTERAÇÕES v40 - PADRONIZAÇÃO FINAL UX:
 #
 # 🔧 ABA 9 - EMOJI PADRONIZADO:
@@ -186,6 +189,21 @@
 # Monitora proposições da Julia Zanatta que estão em
 # "Apreciação pelo Senado Federal"
 # ============================================================
+from core.utils import (
+    sanitize_text_pdf,
+    normalize_text,
+    normalize_ministerio,
+    canonical_situacao,
+    party_norm,
+    fmt_dt_br,
+    days_since,
+    calcular_prazo_ric,
+    format_relator_text,
+    camara_link_tramitacao,
+    camara_link_deputado,
+    to_pdf_bytes,
+    to_xlsx_bytes,
+)
 
 import re
 from typing import Optional, Dict, List, Tuple
@@ -8592,7 +8610,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v40 - Emoji 🚨⚠️🔔 padrão; Seleção única; PDF+XLSX na Aba 9")
+    st.caption("v41⚠️ - SISTEMA EM INTEGRAÇÃO E MANUTENÇÃO - PODE FICAR INSTÁVEL")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
