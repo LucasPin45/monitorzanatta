@@ -1,5 +1,33 @@
-# monitor_sistema_jz.py - v37 OTIMIZAÇÃO E AUTOMAÇÃO
+# monitor_sistema_jz.py - v38 CORREÇÕES FINAIS
 # 
+# ALTERAÇÕES v38 - CORREÇÕES FINAIS:
+#
+# 🔧 CORREÇÃO 1 - ABA 1 (DASHBOARD):
+#   - REMOVIDO: Botão "📊 Carregar Dashboard" e st.stop()
+#   - ADICIONADO: Carregamento automático ao entrar na aba
+#   - CACHE: st.session_state["props_autoria_aba1_cache"]
+#   - BOTÃO ATUALIZAR: Disponível apenas para forçar recarga manual
+#
+# 🔧 CORREÇÃO 2 - ABA 9 (ÚLTIMA MOV. E PARADO HÁ):
+#   - CORRIGIDO: Não usa mais trams[0] cegamente
+#   - ORDENAÇÃO: Tramitações ordenadas por dataHora DESC (mais recente primeiro)
+#   - FILTRO: Remove eventos de "Apresentação" (não são tramitações reais)
+#   - FALLBACK: Se só tiver "Apresentação", usa como último recurso
+#   - PL 10556/2018: Agora mostra 26/11/2025, não 10/07/2018
+#
+# 🔧 CORREÇÃO 3 - ABA 9 (TRAVAMENTO CHECKBOX):
+#   - GARANTIDO: Detecção pesada roda 1 vez e fica em cache
+#   - GARANTIDO: Rerun de UI (checkbox, filtro) NÃO dispara nova detecção
+#   - CACHE: st.session_state["projetos_apensados_cache"]
+#
+# 🔧 CORREÇÃO 4 - ABA 9 (PADRONIZAÇÃO EMOJI):
+#   - PADRONIZADO: Usa mesma lógica da função _sinal() das abas 5 e 7
+#   - 🔴 = ≥30 dias (crítico)
+#   - 🟠 = 15-29 dias (atenção)
+#   - 🟡 = 7-14 dias (monitorar)
+#   - 🟢 = <7 dias (ok)
+#   - COLUNA: Renomeada de "🚦" para "Sinal"
+#
 # ALTERAÇÕES v37 - OTIMIZAÇÃO E AUTOMAÇÃO (ABAS 5, 6, 7 e 9):
 #
 # 🔧 ABA 5 - SENADO (OTIMIZADA):
@@ -2651,41 +2679,88 @@ def buscar_projetos_apensados_completo(id_deputado: int) -> list:
                                     pass
                         
                         # Última tramitação do RAIZ - usando fetch_proposicao_completa
+                        # v38: CORRIGIDO - Ordenar por data e filtrar "Apresentação"
                         try:
                             dados_raiz = fetch_proposicao_completa(id_raiz)
                             trams = dados_raiz.get("tramitacoes", [])
                             if trams:
-                                data_hora = trams[0].get("dataHora", "")
-                                if data_hora:
+                                # ============================================================
+                                # v38: CORREÇÃO CRÍTICA - Encontrar a tramitação MAIS RECENTE
+                                # 1. Filtrar fora eventos de "Apresentação" (são apenas protocolo)
+                                # 2. Ordenar por dataHora DESC (mais recente primeiro)
+                                # 3. Pegar a primeira após filtro/ordenação
+                                # ============================================================
+                                
+                                def parse_data_tramitacao(data_hora):
+                                    """Parse robusto de data ISO com timezone"""
+                                    if not data_hora:
+                                        return None
                                     try:
-                                        # Parse robusto da data COM timezone
                                         if "T" in data_hora:
-                                            # Se tem Z no final, substitui por +00:00
                                             if data_hora.endswith("Z"):
-                                                dt = datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
-                                            # Se já tem timezone (+XX:XX ou -XX:XX)
+                                                return datetime.datetime.fromisoformat(data_hora.replace("Z", "+00:00"))
                                             elif "+" in data_hora or data_hora.count("-") > 2:
-                                                dt = datetime.datetime.fromisoformat(data_hora)
-                                            # Se não tem timezone, adicionar UTC
+                                                return datetime.datetime.fromisoformat(data_hora)
                                             else:
-                                                dt = datetime.datetime.fromisoformat(data_hora).replace(tzinfo=timezone.utc)
+                                                return datetime.datetime.fromisoformat(data_hora).replace(tzinfo=timezone.utc)
                                         else:
-                                            dt = datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                                        
-                                        # Garantir que tem timezone
-                                        if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=timezone.utc)
-                                        
-                                        data_ultima_mov = dt.strftime("%d/%m/%Y")
-                                        agora = datetime.datetime.now(timezone.utc)
-                                        dias_parado = (agora - dt).days
-                                        print(f"[APENSADOS]    ✅ Última mov: {data_ultima_mov} ({dias_parado} dias parado)")
-                                    except Exception as e:
-                                        print(f"[APENSADOS]    ❌ ERRO parse data '{data_hora}': {e}")
-                                        data_ultima_mov = "—"
-                                        dias_parado = -1
+                                            return datetime.datetime.strptime(data_hora[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                    except:
+                                        return None
+                                
+                                def is_apresentacao(descricao):
+                                    """Verifica se é evento de apresentação/protocolo inicial"""
+                                    if not descricao:
+                                        return False
+                                    desc_lower = descricao.lower()
+                                    termos_apresentacao = [
+                                        "apresentação", "apresentacao",
+                                        "protocolado", "protocolada",
+                                        "recebimento e leitura",
+                                        "leitura e publicação"
+                                    ]
+                                    return any(termo in desc_lower for termo in termos_apresentacao)
+                                
+                                # Adicionar data parseada a cada tramitação
+                                trams_com_data = []
+                                for t in trams:
+                                    dt_parsed = parse_data_tramitacao(t.get("dataHora", ""))
+                                    if dt_parsed:
+                                        trams_com_data.append({
+                                            "dt": dt_parsed,
+                                            "dataHora": t.get("dataHora", ""),
+                                            "descricao": t.get("descricaoTramitacao", "") or t.get("despacho", "") or ""
+                                        })
+                                
+                                # Ordenar por data DESC (mais recente primeiro)
+                                trams_com_data.sort(key=lambda x: x["dt"], reverse=True)
+                                
+                                # Filtrar eventos de "Apresentação" - pegar apenas tramitações reais
+                                trams_filtradas = [t for t in trams_com_data if not is_apresentacao(t["descricao"])]
+                                
+                                # Se sobrou alguma após filtrar, usar a mais recente
+                                # Se não sobrou nenhuma, usar a mais recente de todas (fallback)
+                                if trams_filtradas:
+                                    tramitacao_final = trams_filtradas[0]
+                                    print(f"[APENSADOS]    📅 Usando tramitação real: {tramitacao_final['descricao'][:50]}...")
+                                elif trams_com_data:
+                                    tramitacao_final = trams_com_data[0]
+                                    print(f"[APENSADOS]    ⚠️ Fallback para Apresentação: {tramitacao_final['descricao'][:50]}...")
                                 else:
-                                    print(f"[APENSADOS]    ⚠️ Tramitação sem dataHora")
+                                    tramitacao_final = None
+                                
+                                if tramitacao_final:
+                                    dt = tramitacao_final["dt"]
+                                    # Garantir que tem timezone
+                                    if dt.tzinfo is None:
+                                        dt = dt.replace(tzinfo=timezone.utc)
+                                    
+                                    data_ultima_mov = dt.strftime("%d/%m/%Y")
+                                    agora = datetime.datetime.now(timezone.utc)
+                                    dias_parado = (agora - dt).days
+                                    print(f"[APENSADOS]    ✅ Última mov: {data_ultima_mov} ({dias_parado} dias parado)")
+                                else:
+                                    print(f"[APENSADOS]    ⚠️ Sem tramitações válidas")
                                     data_ultima_mov = "—"
                                     dias_parado = -1
                             else:
@@ -8473,7 +8548,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v37 - Automação de carregamento; Cache inteligente; Integração Senado otimizada")
+    st.caption("v38 - Correções: Auto-load Aba 1; Última Mov. correta; Cache apensados; Emoji padronizado")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -8574,32 +8649,49 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         st.markdown("---")
         
         # ============================================================
-        # BUSCAR MÉTRICAS USANDO FUNÇÃO EXISTENTE
+        # v38: CARREGAMENTO AUTOMÁTICO (sem botão "Carregar Dashboard")
+        # A função fetch_lista_proposicoes_autoria já tem @st.cache_data
         # ============================================================
-        # Botão para carregar dados (evita processamento automático)
-        if st.button("📊 Carregar Dashboard", key="carregar_aba1", use_container_width=True):
-            st.session_state["aba1_carregada"] = True
         
-        # Inicializar variável
+        # Inicializar cache no session_state
+        if "props_autoria_aba1_cache" not in st.session_state:
+            st.session_state["props_autoria_aba1_cache"] = None
+        
+        col_info1, col_refresh1 = st.columns([3, 1])
+        with col_info1:
+            st.caption("💡 **Dashboard carrega automaticamente.** Clique em 'Atualizar' para forçar recarga.")
+        with col_refresh1:
+            btn_atualizar_aba1 = st.button("🔄 Atualizar", key="btn_refresh_aba1")
+        
+        # Carregar automaticamente se cache vazio OU se botão foi clicado
+        precisa_carregar_aba1 = st.session_state["props_autoria_aba1_cache"] is None or btn_atualizar_aba1
+        
         props_autoria = []
         
-        if st.session_state.get("aba1_carregada", False):
+        if precisa_carregar_aba1:
             with st.spinner("📊 Carregando métricas do dashboard..."):
                 try:
-                    # Usar função que já existe no código
+                    # Usar função que já existe no código (tem @st.cache_data)
                     df_props = fetch_lista_proposicoes_autoria(id_deputada)
                 
                     if df_props.empty:
                         props_autoria = []
                     else:
                         props_autoria = df_props.to_dict('records')
+                    
+                    # Salvar no cache do session_state
+                    st.session_state["props_autoria_aba1_cache"] = props_autoria
+                    
+                    if btn_atualizar_aba1:
+                        st.success(f"✅ Dashboard atualizado! {len(props_autoria)} proposições carregadas.")
                 
                 except Exception as e:
                     st.error(f"⚠️ Erro ao carregar métricas: {e}")
                     props_autoria = []
+                    st.session_state["props_autoria_aba1_cache"] = []
         else:
-            st.info("👆 **Clique no botão acima para carregar o dashboard**")
-            st.stop()
+            # Usar cache existente
+            props_autoria = st.session_state["props_autoria_aba1_cache"] or []
         
         # ============================================================
         # CARDS DE MÉTRICAS (KPIs)
@@ -11038,15 +11130,22 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     anos_calc = dias // 365
                     parado_str = f"{anos_calc} {'ano' if anos_calc == 1 else 'anos'}"
                 
-                # Sinalização de alerta - usando situação do PL RAIZ
-                # LÓGICA IGUAL À ABA 5: 
-                # 🔴 = menos de 30 dias
-                # 🟡 = 30-90 dias  
-                # 🟢 = mais de 90 dias
+                # ============================================================
+                # v38: CORREÇÃO 4 - Padronizar emoji IGUAL às abas 5 e 7
+                # Usar mesma lógica da função _sinal():
+                # 🔴 = >= 30 dias (crítico)
+                # 🟠 = >= 15 dias (atenção)
+                # 🟡 = >= 7 dias (monitorar)
+                # 🟢 = < 7 dias (ok)
+                # ============================================================
                 situacao_raiz = p.get("situacao_raiz", "")
-                if dias < 30:
+                if dias < 0:
+                    sinal = "—"
+                elif dias >= 30:
                     sinal = "🔴"
-                elif dias < 90:
+                elif dias >= 15:
+                    sinal = "🟠"
+                elif dias >= 7:
                     sinal = "🟡"
                 else:
                     sinal = "🟢"
@@ -11061,7 +11160,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 dados_tabela.append({
                     "": False,  # Checkbox
                     "__row_id": p.get("__row_id", ""),  # ID estável
-                    "🚦": sinal,
+                    "Sinal": sinal,  # v38: Renomeado para "Sinal" (padrão das outras abas)
                     "PL Zanatta": p.get("pl_zanatta", ""),
                     "PL Raiz": p.get("pl_raiz", ""),
                     "Situação": situacao_raiz[:50] + ("..." if len(situacao_raiz) > 50 else ""),
@@ -11078,22 +11177,22 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
             # Editor de dados com checkboxes
             edited_df = st.data_editor(
-                df_tabela[["", "__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
-                disabled=["__row_id", "🚦", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."],
+                df_tabela[["", "__row_id", "Sinal", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."]],
+                disabled=["__row_id", "Sinal", "PL Zanatta", "PL Raiz", "Situação", "Órgão", "Relator", "Parado há", "Última Mov."],
                 hide_index=True,
                 use_container_width=True,
                 height=400,
                 column_config={
                     "": st.column_config.CheckboxColumn("", default=False, width="small"),
                     "__row_id": st.column_config.TextColumn("ID", width="small"),
-                    "🚦": st.column_config.TextColumn("", width="small"),
+                    "Sinal": st.column_config.TextColumn("Sinal", width="small"),
                     "Relator": st.column_config.TextColumn("Relator", width="medium"),
                     "Parado há": st.column_config.TextColumn("Parado há", width="small"),
                 },
             )
 
-            # Legenda
-            st.caption("🔴 Menos de 30 dias parado | 🟡 30-90 dias | 🟢 Mais de 90 dias")
+            # Legenda - v38: Padronizada igual às abas 5 e 7
+            st.caption("🔴 ≥30 dias | 🟠 15-29 dias | 🟡 7-14 dias | 🟢 <7 dias")
 
             # Seleção correta via __row_id
             row_ids_selecionados = edited_df[edited_df[""] == True]["__row_id"].tolist()
@@ -11161,10 +11260,14 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     anos_p = dias // 365
                     parado_str = f"{anos_p} {'ano' if anos_p == 1 else 'anos'}"
                 
-                # Ícone baseado na situação do PL RAIZ (mesma lógica da tabela)
-                if dias < 30:
+                # v38: Ícone padronizado IGUAL às abas 5 e 7
+                if dias < 0:
+                    icone = "—"
+                elif dias >= 30:
                     icone = "🔴"
-                elif dias < 90:
+                elif dias >= 15:
+                    icone = "🟠"
+                elif dias >= 7:
                     icone = "🟡"
                 else:
                     icone = "🟢"
