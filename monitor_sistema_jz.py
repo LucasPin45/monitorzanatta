@@ -9282,7 +9282,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         with col_kw_t3:
             palavras_str_t3 = st.text_area(
                 "🔑 Palavras-chave (uma por linha)", 
-                value=st.session_state.get("palavras_t3", "\n".join(PALAVRAS_CHAVE_PADRAO)),
+                value=(st.session_state.get("palavras_t3") or "\n".join(PALAVRAS_CHAVE_PADRAO)),
                 height=100,
                 key="palavras_input_t3"
             )
