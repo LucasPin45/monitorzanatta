@@ -190,20 +190,46 @@
 # "Apreciação pelo Senado Federal"
 # ============================================================
 from core.utils import (
+    # text_utils
     sanitize_text_pdf,
     normalize_text,
+    party_norm,
     normalize_ministerio,
     canonical_situacao,
-    party_norm,
+
+    # date_utils
+    TZ_BRASILIA,
+    get_brasilia_now,
+    parse_dt,
     fmt_dt_br,
     days_since,
+    proximo_dia_util,
+    ajustar_para_dia_util,
     calcular_prazo_ric,
+    contar_dias_uteis,
+    parse_prazo_resposta_ric,
+
+    # formatters
+    format_sigla_num_ano,
     format_relator_text,
+    is_comissao_estrategica,
+    _verificar_relator_adversario,
+    _obter_situacao_com_fallback,
+    _categorizar_situacao_para_ordenacao,
+
+    # links
     camara_link_tramitacao,
     camara_link_deputado,
-    to_pdf_bytes,
+    extract_id_from_uri,
+
+    # xlsx/pdf
     to_xlsx_bytes,
-    get_brasilia_now,
+    to_pdf_bytes,
+    to_pdf_linha_do_tempo,
+    to_pdf_autoria_relatoria,
+    to_pdf_comissoes_estrategicas,
+    to_pdf_palavras_chave,
+    to_pdf_rics_por_status,
 )
 
 import re
