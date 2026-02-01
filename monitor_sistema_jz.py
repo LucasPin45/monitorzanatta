@@ -9472,7 +9472,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         mostrar_ultima_atualizacao("comissoes")
         
         df = st.session_state.get("df_scan_tab4", pd.DataFrame())
-dt_range_saved = st.session_state.get("dt_range_tab4_saved")
+        dt_range_saved = st.session_state.get("dt_range_tab4_saved")
 
         if not dt_range_saved or not isinstance(dt_range_saved, (tuple, list)) or len(dt_range_saved) != 2:
             dt_inicio, dt_fim = dt_inicio_t4, dt_fim_t4
