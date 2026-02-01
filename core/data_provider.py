@@ -6,6 +6,9 @@ from typing import Any, Dict, Optional
 
 import streamlit as st
 
+from core.services.camara_service import CamaraService
+from core.services.senado_service import SenadoService
+
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _cached_get_perfil_deputada() -> Dict[str, Any]:
@@ -19,11 +22,6 @@ def _cached_get_perfil_deputada() -> Dict[str, Any]:
     }
 
 
-# Se ainda não tiver service pronto, deixa esses imports comentados por enquanto.
-# from core.services.camara_service import CamaraService
-# from core.services.senado_service import SenadoService
-
-
 @dataclass(frozen=True)
 class ProviderConfig:
     ttl_seconds: int = 900  # 15 min (ajusta depois)
@@ -35,18 +33,22 @@ class DataProvider:
     - UI chama DataProvider
     - DataProvider chama Services
     - Cache Streamlit fica aqui (centralizado)
+
+    IMPORTANTÍSSIMO:
+    - Não usar @st.cache_* em métodos de instância (self) para evitar UnhashableParamError
+    - Use funções globais cacheadas quando precisar
     """
 
     def __init__(self, cfg: Optional[ProviderConfig] = None):
         self.cfg = cfg or ProviderConfig()
-        # self.camara = CamaraService()
-        # self.senado = SenadoService()
+        self.camara = CamaraService()
+        self.senado = SenadoService()
 
     # ---------- Helpers ----------
     def _ttl(self) -> int:
         return int(self.cfg.ttl_seconds)
 
-    # ---------- Métodos ----------
+    # ---------- Métodos (safe / estáveis) ----------
     def get_perfil_deputada(self) -> Dict[str, Any]:
         return _cached_get_perfil_deputada()
 
@@ -68,23 +70,16 @@ class DataProvider:
 
         return tipos_count
 
+    # ---------- Placeholders (ainda não conectados na UI) ----------
+    # Na próxima etapa, vamos substituir os retornos vazios por chamadas:
+    # self.camara.<metodo>(...)
+    # mantendo o mesmo contrato de retorno que a UI espera.
+
     def get_proposicoes_autoria(self, *_args, **_kwargs) -> Any:
-        """
-        Placeholder: aqui vai chamar self.camara.fetch_proposicoes_autoria(...)
-        Retornar DataFrame ou lista (mas padronize depois).
-        """
-        # return self.camara.fetch_proposicoes_autoria(...)
         return []
 
     def get_tramitacoes(self, *_args, **_kwargs) -> Any:
-        # return self.camara.fetch_tramitacoes(...)
         return []
 
     def get_senado_sob_demanda(self, *_args, **_kwargs) -> Any:
-        """
-        IMPORTANTE: Senado não deve ser cacheado/rodado automaticamente se
-        você quiser controle por interação.
-        Você pode colocar cache também, mas só se a aba chamar explicitamente.
-        """
-        # return self.senado.fetch_andamento(...)
         return []
