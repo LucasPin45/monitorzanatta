@@ -35,7 +35,7 @@ class DataProvider:
 
     # ---------- EXEMPLOS (você vai plugar nos Services) ----------
     @st.cache_data(ttl=900, show_spinner=False)
-    def get_perfil_deputada(self) -> Dict[str, Any]:
+    def get_perfil_deputada(_self) -> Dict[str, Any]:
         """
         Exemplo: dados fixos/estáveis (nome, partido, uf, ids etc).
         Pode virar fetch real via Câmara depois.
@@ -56,11 +56,11 @@ class DataProvider:
         return []
 
     @st.cache_data(ttl=900, show_spinner=False)
-    def get_tramitacoes(self, *_args, **_kwargs) -> Any:
+    def get_tramitacoes(_self, *_args, **_kwargs) -> Any:
         # return self.camara.fetch_tramitacoes(...)
         return []
 
-    def get_senado_sob_demanda(self, *_args, **_kwargs) -> Any:
+    def get_senado_sob_demanda(_self, *_args, **_kwargs) -> Any:
         """
         IMPORTANTE: Senado não deve ser cacheado/rodado automaticamente se
         você quiser controle por interação.
