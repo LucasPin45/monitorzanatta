@@ -9371,57 +9371,57 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             })
                 
                 # Criar DataFrame e remover duplicatas
-                    df_props = pd.DataFrame(lista_proposicoes)
-                
+                df_props = pd.DataFrame(lista_proposicoes)
+
                 if df_props.empty:
-    st.info("Sem matérias com palavras-chave encontradas.")
-else:
-    df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
-    df_props = df_props.sort_values(["Data", "Comissão", "Matéria"])
+                    st.info("Sem matérias com palavras-chave encontradas.")
+                else:
+                    df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
+                    df_props = df_props.sort_values(["Data", "Comissão", "Matéria"])
 
-    # Mostrar quantidade
-    st.success(
-        f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em "
-        f"**{df_props['Comissão'].nunique()} comissões**!"
-    )
+                    # Mostrar quantidade
+                    st.success(
+                        f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em "
+                        f"**{df_props['Comissão'].nunique()} comissões**!"
+                    )
 
-    # Converter Data para datetime
-    df_props["Data_dt"] = pd.to_datetime(
-        df_props["Data"],
-        dayfirst=True,
-        errors="coerce"
-    )
+                    # Converter Data para datetime
+                    df_props["Data_dt"] = pd.to_datetime(
+                        df_props["Data"],
+                        dayfirst=True,
+                        errors="coerce"
+                    )
 
-    df_props_valid = df_props[df_props["Data_dt"].notna()].copy()
-    df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
+                    df_props_valid = df_props[df_props["Data_dt"].notna()].copy()
+                    df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
 
-    por_dia = (
-        df_props_valid
-        .groupby("Dia")
-        .size()
-        .reset_index(name="Qtd")
-        .sort_values("Dia")
-    )
+                    por_dia = (
+                        df_props_valid
+                        .groupby("Dia")
+                        .size()
+                        .reset_index(name="Qtd")
+                        .sort_values("Dia")
+                    )
 
-    st.caption("📊 Matérias com palavras-chave por dia")
-    st.dataframe(por_dia, use_container_width=True, hide_index=True)
+                    st.caption("📊 Matérias com palavras-chave por dia")
+                    st.dataframe(por_dia, use_container_width=True, hide_index=True)
 
-    # Exibir tabela principal
-    st.dataframe(
-        df_props,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
-            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-        }
-    
+                    # Exibir tabela principal
+                    st.dataframe(
+                        df_props,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
+                            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+                        }
+                    )
 
                     col_x2, col_p2 = st.columns(2)
                     with col_x2:
                         data_bytes, mime, ext = to_xlsx_bytes(df_props, "PalavrasChave_Pauta")
                         st.download_button(
-                            f"⬇️ XLSX",
+                            "⬇️ XLSX",
                             data=data_bytes,
                             file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{ext}",
                             mime=mime,
@@ -9431,7 +9431,7 @@ else:
                         # Usar df_kw para PDF (tem todas as colunas necessárias)
                         pdf_bytes, pdf_mime, pdf_ext = to_pdf_palavras_chave(df_kw)
                         st.download_button(
-                            f"⬇️ PDF",
+                            "⬇️ PDF",
                             data=pdf_bytes,
                             file_name=f"palavras_chave_pauta_{dt_inicio}_{dt_fim}.{pdf_ext}",
                             mime=pdf_mime,
