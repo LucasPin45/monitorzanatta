@@ -50,6 +50,24 @@ class DataProvider:
     def get_perfil_deputada(self) -> Dict[str, Any]:
         return _cached_get_perfil_deputada()
 
+    def contar_tipos(self, props_autoria: Any) -> Dict[str, int]:
+        """
+        Conta proposições por siglaTipo (ex.: PL, PLP, RIC, PRL...).
+        Espera props_autoria como lista de dicts.
+        """
+        tipos_count: Dict[str, int] = {}
+        if not props_autoria:
+            return tipos_count
+
+        for p in props_autoria:
+            if not isinstance(p, dict):
+                continue
+            tipo = p.get("siglaTipo", "Outro")
+            if tipo:
+                tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+
+        return tipos_count
+
     def get_proposicoes_autoria(self, *_args, **_kwargs) -> Any:
         """
         Placeholder: aqui vai chamar self.camara.fetch_proposicoes_autoria(...)
