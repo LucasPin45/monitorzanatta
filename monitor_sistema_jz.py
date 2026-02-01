@@ -9371,13 +9371,36 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                             })
                 
                 # Criar DataFrame e remover duplicatas
-                df_props = pd.DataFrame(lista_proposicoes)
+                    df_props = pd.DataFrame(lista_proposicoes)
                 
                 if df_props.empty:
                     st.info("Sem matérias com palavras-chave encontradas.")
                 else:
                     df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
                     df_props = df_props.sort_values(["Data", "Comissão", "Matéria"])
+                    
+                    # ---------------------------
+                # FIX: Data como datetime + contagem por dia
+                # ---------------------------
+                    df_props["Data_dt"] = pd.to_datetime(df_props["Data"], dayfirst=True, errors="coerce")
+
+                    # se alguma Data vier no formato ISO (YYYY-MM-DD) ela também entra; dayfirst não atrapalha
+                    # remove linhas sem data válida
+                    df_props_valid = df_props[df_props["Data_dt"].notna()].copy()
+
+                    # cria coluna "Dia" (date) para agrupar
+                   df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
+
+            por_dia = (
+                  df_props_valid.groupby("Dia")
+                  .size()
+                  .reset_index(name="Qtd")
+                  .sort_values("Dia")
+)
+
+            st.caption("📅 Matérias com palavras-chave por dia")
+            st.dataframe(por_dia, use_container_width=True, hide_index=True)
+
                     
                     # Mostrar quantidade
                     st.success(f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em **{df_props['Comissão'].nunique()} comissões**!")
