@@ -232,10 +232,14 @@ from core.utils import (
     to_pdf_rics_por_status,
 )
 
+from core.state import init_state
+
 import re
 from typing import Optional, Dict, List, Tuple
 # IMPORTANTE: o Streamlit precisa estar importado ANTES do primeiro @st.cache_data
 import streamlit as st
+init_state(st)
+
 import pandas as pd
 import datetime
 from datetime import timezone
