@@ -10,11 +10,12 @@ from core.services.camara_service import CamaraService
 from core.services.senado_service import SenadoService
 
 
+# =====================================================
+# Cache functions (NUNCA recebem self)
+# =====================================================
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _cached_get_perfil_deputada() -> Dict[str, Any]:
-    """
-    Função cacheada GLOBAL (sem self) para evitar UnhashableParamError.
-    """
     return {
         "nome": "Júlia Zanatta",
         "partido": "PL",
@@ -22,21 +23,46 @@ def _cached_get_perfil_deputada() -> Dict[str, Any]:
     }
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_get_proposicoes_autoria(
+    nome: str,
+    partido: str,
+    uf: str,
+) -> Any:
+    """
+    Cache GLOBAL de proposições de autoria.
+    NÃO recebe self.
+    """
+    svc = CamaraService()
+
+    # ⚠️ AJUSTE AQUI SE O NOME DO MÉTODO FOR DIFERENTE
+    return svc.listar_proposicoes_autoria(
+        nome=nome,
+        partido=partido,
+        uf=uf,
+    )
+
+
+# =====================================================
+# Provider config
+# =====================================================
+
 @dataclass(frozen=True)
 class ProviderConfig:
-    ttl_seconds: int = 900  # 15 min (ajusta depois)
+    ttl_seconds: int = 900  # 15 minutos
 
+
+# =====================================================
+# DataProvider (fachada central do app)
+# =====================================================
 
 class DataProvider:
     """
     Camada central de dados do app.
-    - UI chama DataProvider
-    - DataProvider chama Services
-    - Cache Streamlit fica aqui (centralizado)
 
-    IMPORTANTÍSSIMO:
-    - Não usar @st.cache_* em métodos de instância (self) para evitar UnhashableParamError
-    - Use funções globais cacheadas quando precisar
+    UI  --->  DataProvider  --->  Services
+                     |
+                  Cache
     """
 
     def __init__(self, cfg: Optional[ProviderConfig] = None):
@@ -44,42 +70,47 @@ class DataProvider:
         self.camara = CamaraService()
         self.senado = SenadoService()
 
-    # ---------- Helpers ----------
-    def _ttl(self) -> int:
-        return int(self.cfg.ttl_seconds)
+    # -------------------------------------------------
+    # Perfil
+    # -------------------------------------------------
 
-    # ---------- Métodos (safe / estáveis) ----------
     def get_perfil_deputada(self) -> Dict[str, Any]:
         return _cached_get_perfil_deputada()
 
-    def contar_tipos(self, props_autoria: Any) -> Dict[str, int]:
-        """
-        Conta proposições por siglaTipo (ex.: PL, PLP, RIC, PRL...).
-        Espera props_autoria como lista de dicts.
-        """
-        tipos_count: Dict[str, int] = {}
-        if not props_autoria:
-            return tipos_count
+    # -------------------------------------------------
+    # Proposições de autoria
+    # -------------------------------------------------
 
-        for p in props_autoria:
-            if not isinstance(p, dict):
-                continue
-            tipo = p.get("siglaTipo", "Outro")
-            if tipo:
-                tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+    def get_proposicoes_autoria(self) -> Any:
+        perfil = self.get_perfil_deputada()
+        return _cached_get_proposicoes_autoria(
+            nome=perfil.get("nome", ""),
+            partido=perfil.get("partido", ""),
+            uf=perfil.get("uf", ""),
+        )
 
-        return tipos_count
+    # -------------------------------------------------
+    # Tramitacoes (placeholder)
+    # -------------------------------------------------
 
-    # ---------- Placeholders (ainda não conectados na UI) ----------
-    # Na próxima etapa, vamos substituir os retornos vazios por chamadas:
-    # self.camara.<metodo>(...)
-    # mantendo o mesmo contrato de retorno que a UI espera.
-
-    def get_proposicoes_autoria(self, *_args, **_kwargs) -> Any:
+    @st.cache_data(ttl=900, show_spinner=False)
+    def get_tramitacoes(_self, *_args, **_kwargs) -> Any:
         return []
 
-    def get_tramitacoes(self, *_args, **_kwargs) -> Any:
-        return []
+    # -------------------------------------------------
+    # Senado sob demanda (SEM cache automático)
+    # -------------------------------------------------
 
     def get_senado_sob_demanda(self, *_args, **_kwargs) -> Any:
         return []
+
+    # -------------------------------------------------
+    # Utilitário: contar tipos
+    # -------------------------------------------------
+
+    def contar_tipos(self, proposicoes: list[dict]) -> dict[str, int]:
+        tipos_count: dict[str, int] = {}
+        for p in proposicoes:
+            tipo = p.get("siglaTipo") or p.get("tipo") or "Outro"
+            tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+        return tipos_count
