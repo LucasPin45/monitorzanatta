@@ -8751,6 +8751,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         perfil = provider.get_perfil_deputada()
         
         st.title("📊 Dashboard Executivo")
+       
+
         
         # ============================================================
         # HEADER SIMPLES (sem foto)
