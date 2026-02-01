@@ -232,6 +232,9 @@ from core.utils import (
     to_pdf_rics_por_status,
 )
 
+from core.services.camara_service import CamaraService
+from core.services.senado_service import SenadoService
+
 from core.state import init_state
 
 import re
