@@ -9313,8 +9313,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         mostrar_ultima_atualizacao("palavras_chave")
         
         df = st.session_state.get("df_scan_tab3", pd.DataFrame())
-        dt_range_saved = st.session_state.get("dt_range_tab3_saved", (dt_inicio_t3, dt_fim_t3))
-        dt_inicio, dt_fim = dt_range_saved
+        dt_range_saved = st.session_state.get("dt_range_tab3_saved")
+
+        if not dt_range_saved or not isinstance(dt_range_saved, (tuple, list)) or len(dt_range_saved) != 2:
+            dt_inicio, dt_fim = dt_inicio_t3, dt_fim_t3
+        else:
+            dt_inicio, dt_fim = dt_range_saved
         
         if df.empty:
             st.info("👆 Selecione o período, configure as palavras-chave e clique em **Carregar pauta**.")
@@ -9468,8 +9472,12 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         mostrar_ultima_atualizacao("comissoes")
         
         df = st.session_state.get("df_scan_tab4", pd.DataFrame())
-        dt_range_saved = st.session_state.get("dt_range_tab4_saved", (dt_inicio_t4, dt_fim_t4))
-        dt_inicio, dt_fim = dt_range_saved
+dt_range_saved = st.session_state.get("dt_range_tab4_saved")
+
+        if not dt_range_saved or not isinstance(dt_range_saved, (tuple, list)) or len(dt_range_saved) != 2:
+            dt_inicio, dt_fim = dt_inicio_t4, dt_fim_t4
+        else:
+            dt_inicio, dt_fim = dt_range_saved
         
         if df.empty:
             st.info("👆 Selecione o período, configure as comissões e clique em **Carregar pauta**.")
