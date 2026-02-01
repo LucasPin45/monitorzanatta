@@ -2104,7 +2104,7 @@ if not st.session_state.autenticado:
 TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 
-def get_brasilia_now():
+def _legacy_get_brasilia_now():
     """Retorna datetime atual no fuso de Brasília."""
     return datetime.datetime.now(TZ_BRASILIA)
 
@@ -3240,7 +3240,7 @@ MINISTERIOS_CANONICOS = {
 }
 
 
-def normalize_ministerio(texto: str) -> str:
+def _legacy_normalize_ministerio(texto: str) -> str:
     """
     Normaliza o nome do ministério para uma nomenclatura canônica única.
     
@@ -3304,7 +3304,7 @@ def normalize_ministerio(texto: str) -> str:
     return melhor_match if melhor_match else "Não identificado"
 
 
-def canonical_situacao(situacao: str) -> str:
+def _legacy_canonical_situacao(situacao: str) -> str:
     """
     Normaliza o texto da situação de uma proposição.
     Retorna o texto limpo e padronizado.
@@ -3410,7 +3410,7 @@ TEMAS_CATEGORIAS = {
 # UTILITÁRIOS
 # ============================================================
 
-def normalize_text(text: str) -> str:
+def _legacy_normalize_text(text: str) -> str:
     if not isinstance(text, str):
         return ""
     nfkd = unicodedata.normalize("NFD", text)
@@ -3418,7 +3418,7 @@ def normalize_text(text: str) -> str:
     return no_accents.lower().strip()
 
 
-def format_sigla_num_ano(sigla, numero, ano) -> str:
+def _legacy_format_sigla_num_ano(sigla, numero, ano) -> str:
     sigla = (sigla or "").strip()
     numero = (str(numero) or "").strip()
     ano = (str(ano) or "").strip()
@@ -3427,7 +3427,7 @@ def format_sigla_num_ano(sigla, numero, ano) -> str:
     return ""
 
 
-def extract_id_from_uri(uri: str):
+def _legacy_extract_id_from_uri(uri: str):
     if not uri:
         return None
     try:
@@ -3437,17 +3437,17 @@ def extract_id_from_uri(uri: str):
         return None
 
 
-def is_comissao_estrategica(sigla_orgao, lista_siglas):
+def _legacy_is_comissao_estrategica(sigla_orgao, lista_siglas):
     if not sigla_orgao:
         return False
     return sigla_orgao.upper() in [s.upper() for s in lista_siglas]
 
 
-def parse_dt(iso_str: str):
+def _legacy_parse_dt(iso_str: str):
     return pd.to_datetime(iso_str, errors="coerce", utc=False)
 
 
-def days_since(dt: pd.Timestamp):
+def _legacy_days_since(dt: pd.Timestamp):
     if dt is None or pd.isna(dt):
         return None
     d = pd.Timestamp(dt).tz_localize(None) if getattr(dt, "tzinfo", None) else pd.Timestamp(dt)
@@ -3455,19 +3455,19 @@ def days_since(dt: pd.Timestamp):
     return int((today - d.normalize()).days)
 
 
-def fmt_dt_br(dt: pd.Timestamp):
+def _legacy_fmt_dt_br(dt: pd.Timestamp):
     if dt is None or pd.isna(dt):
         return "—"
     d = pd.Timestamp(dt).tz_localize(None) if getattr(dt, "tzinfo", None) else pd.Timestamp(dt)
     return d.strftime("%d/%m/%Y %H:%M")
 
 
-def camara_link_tramitacao(id_proposicao: str) -> str:
+def _legacy_camara_link_tramitacao(id_proposicao: str) -> str:
     pid = str(id_proposicao).strip()
     return f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}"
 
 
-def camara_link_deputado(id_deputado: str) -> str:
+def _legacy_camara_link_deputado(id_deputado: str) -> str:
     """Gera link para a página do deputado na Câmara."""
     if not id_deputado or str(id_deputado).strip() in ('', 'nan', 'None'):
         return ""
@@ -3650,7 +3650,7 @@ def verificar_e_notificar_tramitacoes(
     
     return {"notificacoes_enviadas": notificacoes, "erros": erros}
 
-def proximo_dia_util(dt: datetime.date) -> datetime.date:
+def _legacy_proximo_dia_util(dt: datetime.date) -> datetime.date:
     """
     Retorna o próximo dia útil após a data informada.
     Pula sábados (5) e domingos (6).
@@ -3663,7 +3663,7 @@ def proximo_dia_util(dt: datetime.date) -> datetime.date:
     return proximo
 
 
-def ajustar_para_dia_util(dt: datetime.date) -> datetime.date:
+def _legacy_ajustar_para_dia_util(dt: datetime.date) -> datetime.date:
     """
     Se a data cair em fim de semana, retorna o próximo dia útil.
     Caso contrário, retorna a própria data.
@@ -3675,7 +3675,7 @@ def ajustar_para_dia_util(dt: datetime.date) -> datetime.date:
     return dt
 
 
-def calcular_prazo_ric(data_remessa: datetime.date) -> tuple:
+def _legacy_calcular_prazo_ric(data_remessa: datetime.date) -> tuple:
     """
     Calcula o prazo de 30 dias para resposta de RIC conforme regra constitucional.
     
@@ -3706,7 +3706,7 @@ def calcular_prazo_ric(data_remessa: datetime.date) -> tuple:
     return inicio_contagem, prazo_fim
 
 
-def contar_dias_uteis(data_inicio: datetime.date, data_fim: datetime.date) -> int:
+def _legacy_contar_dias_uteis(data_inicio: datetime.date, data_fim: datetime.date) -> int:
     """Conta dias úteis entre duas datas (excluindo fins de semana)."""
     if data_inicio is None or data_fim is None:
         return 0
@@ -3721,7 +3721,7 @@ def contar_dias_uteis(data_inicio: datetime.date, data_fim: datetime.date) -> in
     return dias
 
 
-def parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dict:
+def _legacy_parse_prazo_resposta_ric(tramitacoes: list, situacao_atual: str = "") -> dict:
     """
     Extrai informações de prazo de resposta de RIC a partir das tramitações.
     
@@ -4090,7 +4090,7 @@ def extrair_assunto_ric(ementa: str) -> str:
     return ""
 
 
-def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, str, str]:
+def _legacy_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, str, str]:
     """Sempre tenta exportar como XLSX, fallback para CSV apenas se necessário."""
     for engine in ["xlsxwriter", "openpyxl"]:
         try:
@@ -4111,7 +4111,7 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> tuple[bytes, s
     return (csv_bytes, "text/csv", "csv")
 
 
-def sanitize_text_pdf(text: str) -> str:
+def _legacy_sanitize_text_pdf(text: str) -> str:
     """Remove caracteres problemáticos para PDF."""
     if not text:
         return ""
@@ -4194,7 +4194,7 @@ def _padronizar_colunas_pdf(df: pd.DataFrame) -> pd.DataFrame:
     return df_out
 
 
-def _verificar_relator_adversario(relator_str: str) -> tuple:
+def _legacy_verificar_relator_adversario(relator_str: str) -> tuple:
     """
     Verifica se o relator é de partido adversário.
     Retorna: (texto_relator_formatado, is_adversario)
@@ -4214,7 +4214,7 @@ def _verificar_relator_adversario(relator_str: str) -> tuple:
     return relator, False
 
 
-def _obter_situacao_com_fallback(row: pd.Series) -> str:
+def _legacy_obter_situacao_com_fallback(row: pd.Series) -> str:
     """
     Obtém a situação da proposição com fallback para andamento/tramitação.
     """
@@ -4235,7 +4235,7 @@ def _obter_situacao_com_fallback(row: pd.Series) -> str:
     return situacao if situacao else "Situacao nao informada"
 
 
-def _categorizar_situacao_para_ordenacao(situacao: str) -> tuple:
+def _legacy_categorizar_situacao_para_ordenacao(situacao: str) -> tuple:
     """
     Categoriza a situação para ordenação personalizada dos blocos no PDF.
     Retorna: (ordem_prioridade, categoria_agrupada, situacao_original)
@@ -4519,7 +4519,7 @@ def _renderizar_card_proposicao(pdf, row, idx, col_proposicao, col_ementa, col_s
     pdf.ln(5)
 
 
-def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
+def _legacy_to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
     """
     Exporta DataFrame para PDF em formato de relatório profissional.
     VERSÃO 21 - PDFs otimizados para decisão política em gabinete.
@@ -4745,7 +4745,7 @@ def to_pdf_bytes(df: pd.DataFrame, subtitulo: str = "Relatório") -> tuple:
         raise Exception(f"Erro ao gerar PDF: {str(e)} | Traceback: {traceback.format_exc()}")
 
 
-def to_pdf_linha_do_tempo(df: pd.DataFrame, proposicao_info: dict) -> tuple:
+def _legacy_to_pdf_linha_do_tempo(df: pd.DataFrame, proposicao_info: dict) -> tuple:
     """
     Exporta DataFrame de linha do tempo para PDF com cabeçalho destacando a proposição.
     
@@ -4967,7 +4967,7 @@ def to_pdf_linha_do_tempo(df: pd.DataFrame, proposicao_info: dict) -> tuple:
         raise Exception(f"Erro ao gerar PDF da Linha do Tempo: {str(e)} | Traceback: {traceback.format_exc()}")
 
 
-def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
+def _legacy_to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
     """PDF específico para Autoria e Relatoria na Pauta - formato de gabinete com dados completos."""
     try:
         from fpdf import FPDF
@@ -5339,7 +5339,7 @@ def to_pdf_autoria_relatoria(df: pd.DataFrame) -> tuple[bytes, str, str]:
         raise Exception(f"Erro ao gerar PDF de autoria/relatoria: {str(e)}")
 
 
-def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
+def _legacy_to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
     """PDF específico para Comissões Estratégicas - formato de gabinete."""
     try:
         from fpdf import FPDF
@@ -5499,7 +5499,7 @@ def to_pdf_comissoes_estrategicas(df: pd.DataFrame) -> tuple[bytes, str, str]:
         raise Exception(f"Erro ao gerar PDF de comissões estratégicas: {str(e)}")
 
 
-def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
+def _legacy_to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
     """
     Gera PDF de palavras-chave na pauta, organizado por Comissão.
     Foco nas PROPOSIÇÕES (matérias), não nos eventos.
@@ -5734,7 +5734,7 @@ def to_pdf_palavras_chave(df: pd.DataFrame) -> tuple[bytes, str, str]:
         return (bytes(pdf_bytes), "application/pdf", "pdf")
 
 
-def to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos de Informação") -> tuple[bytes, str, str]:
+def _legacy_to_pdf_rics_por_status(df: pd.DataFrame, titulo: str = "RICs - Requerimentos de Informação") -> tuple[bytes, str, str]:
     """
     Gera PDF de RICs organizado por blocos de status.
     
@@ -6489,7 +6489,7 @@ def merge_status_options(dynamic_opts: list[str]) -> list[str]:
     return merged
 
 
-def party_norm(sigla: str) -> str:
+def _legacy_party_norm(sigla: str) -> str:
     s = (sigla or "").strip().upper()
     if s in {"PC DO B", "PCDOB", "PCDOB ", "PCD0B"}:
         return "PCDOB"
@@ -6858,7 +6858,7 @@ def get_proposicao_principal_id(id_proposicao: str):
     return None
 
 
-def format_relator_text(relator_info: dict) -> tuple[str, str]:
+def _legacy_format_sigla_num_ano(relator_info: dict) -> tuple[str, str]:
     """Formata relator para 'Nome (PART/UF)'. Retorna (texto, id)."""
     if not relator_info or not isinstance(relator_info, dict) or not relator_info.get("nome"):
         return ("", "")
