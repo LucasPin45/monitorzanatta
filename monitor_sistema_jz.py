@@ -9389,7 +9389,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     df_props_valid = df_props[df_props["Data_dt"].notna()].copy()
 
                     # cria coluna "Dia" (date) para agrupar
-                   df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
+                    df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
 
             por_dia = (
                   df_props_valid.groupby("Dia")
