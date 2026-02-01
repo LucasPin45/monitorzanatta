@@ -235,6 +235,9 @@ from core.utils import (
 from core.services.camara_service import CamaraService
 from core.services.senado_service import SenadoService
 
+from modules.tabs.tab1_dashboard import render_tab1
+
+
 from core.state import init_state
 
 import re
@@ -8750,7 +8753,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         provider = get_provider()
         perfil = provider.get_perfil_deputada()
         
-        st.title("📊 Dashboard Executivo")
+        render_tab1(provider)
+        
+        #Comentado temporariamente
+        #st.title("📊 Dashboard Executivo")
        
 
         
