@@ -203,6 +203,7 @@ from core.utils import (
     camara_link_deputado,
     to_pdf_bytes,
     to_xlsx_bytes,
+    get_brasilia_now,
 )
 
 import re
