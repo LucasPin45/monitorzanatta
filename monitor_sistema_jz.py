@@ -9286,7 +9286,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 height=100,
                 key="palavras_input_t3"
             )
-            palavras_chave_t3 = [p.strip() for p in palavras_str_t3.splitlines() if p.strip()]
+            palavras_chave_t3 = [p.strip() for p in (palavras_str_t3 or "").splitlines() if p.strip()]
             st.session_state["palavras_t3"] = palavras_str_t3
         
         run_scan_tab3 = st.button("▶️ Carregar pauta com palavras-chave", type="primary", key="run_scan_tab3")
@@ -9441,7 +9441,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 value=st.session_state.get("comissoes_t4", ", ".join(COMISSOES_ESTRATEGICAS_PADRAO)),
                 key="comissoes_input_t4"
             )
-            comissoes_t4 = [c.strip().upper() for c in comissoes_str_t4.split(",") if c.strip()]
+            comissoes_t4 = [c.strip().upper() for c in (comissoes_str_t4 or "").split(",") if c.strip()]
             st.session_state["comissoes_t4"] = comissoes_str_t4
         
         run_scan_tab4 = st.button("▶️ Carregar pauta das comissões", type="primary", key="run_scan_tab4")
