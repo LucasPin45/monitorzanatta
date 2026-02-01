@@ -8811,11 +8811,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         col1, col2, col3, col4, col5 = st.columns(5)
         
         # Contar por tipo primeiro para usar em todos os cards
-        tipos_count = {}
-        for p in props_autoria:
-            tipo = p.get('siglaTipo', 'Outro')
-            if tipo:  # Ignora tipos vazios
-                tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+        tipos_count = provider.contar_tipos(props_autoria)
+
         
         with col1:
             st.metric(
