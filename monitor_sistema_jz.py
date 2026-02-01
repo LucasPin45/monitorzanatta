@@ -9374,47 +9374,48 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     df_props = pd.DataFrame(lista_proposicoes)
                 
                 if df_props.empty:
-                    st.info("Sem matérias com palavras-chave encontradas.")
-                else:
-                    df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
-                    df_props = df_props.sort_values(["Data", "Comissão", "Matéria"])
-                    
-                    # ---------------------------
-                # FIX: Data como datetime + contagem por dia
-                # ---------------------------
-                    df_props["Data_dt"] = pd.to_datetime(df_props["Data"], dayfirst=True, errors="coerce")
+    st.info("Sem matérias com palavras-chave encontradas.")
+else:
+    df_props = df_props.drop_duplicates(subset=["Matéria", "Comissão"])
+    df_props = df_props.sort_values(["Data", "Comissão", "Matéria"])
 
-                    # se alguma Data vier no formato ISO (YYYY-MM-DD) ela também entra; dayfirst não atrapalha
-                    # remove linhas sem data válida
-                    df_props_valid = df_props[df_props["Data_dt"].notna()].copy()
+    # Mostrar quantidade
+    st.success(
+        f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em "
+        f"**{df_props['Comissão'].nunique()} comissões**!"
+    )
 
-                    # cria coluna "Dia" (date) para agrupar
-                    df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
+    # Converter Data para datetime
+    df_props["Data_dt"] = pd.to_datetime(
+        df_props["Data"],
+        dayfirst=True,
+        errors="coerce"
+    )
 
-            por_dia = (
-                  df_props_valid.groupby("Dia")
-                  .size()
-                  .reset_index(name="Qtd")
-                  .sort_values("Dia")
-)
+    df_props_valid = df_props[df_props["Data_dt"].notna()].copy()
+    df_props_valid["Dia"] = df_props_valid["Data_dt"].dt.date
 
-            st.caption("📅 Matérias com palavras-chave por dia")
-            st.dataframe(por_dia, use_container_width=True, hide_index=True)
+    por_dia = (
+        df_props_valid
+        .groupby("Dia")
+        .size()
+        .reset_index(name="Qtd")
+        .sort_values("Dia")
+    )
 
-                    
-                    # Mostrar quantidade
-                    st.success(f"🔍 **{len(df_props)} matérias** com palavras-chave encontradas em **{df_props['Comissão'].nunique()} comissões**!")
-                    
-                    # Exibir tabela focada nas proposições
-                    st.dataframe(
-                        df_props,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
-                            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
-                        }
-                    )
+    st.caption("📊 Matérias com palavras-chave por dia")
+    st.dataframe(por_dia, use_container_width=True, hide_index=True)
+
+    # Exibir tabela principal
+    st.dataframe(
+        df_props,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Link": st.column_config.LinkColumn("Link", display_text="abrir"),
+            "Ementa": st.column_config.TextColumn("Ementa", width="large"),
+        }
+    
 
                     col_x2, col_p2 = st.columns(2)
                     with col_x2:
