@@ -8743,6 +8743,10 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
     with tab1:
         _set_aba_atual(1)
+        
+        provider = get_provider()
+        perfil = provider.get_perfil_deputada()
+        
         st.title("📊 Dashboard Executivo")
         
         # ============================================================
