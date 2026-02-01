@@ -237,8 +237,21 @@ from core.state import init_state
 import re
 from typing import Optional, Dict, List, Tuple
 # IMPORTANTE: o Streamlit precisa estar importado ANTES do primeiro @st.cache_data
+
 import streamlit as st
+
+from core.data_provider import DataProvider
+
+
+@st.cache_resource(show_spinner=False)
+def get_provider() -> DataProvider:
+    """Uma instância do DataProvider por sessão."""
+    return DataProvider()
+
+
 init_state(st)
+
+
 
 import pandas as pd
 import datetime
