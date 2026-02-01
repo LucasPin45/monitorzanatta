@@ -47,7 +47,7 @@ class DataProvider:
         }
 
     @st.cache_data(ttl=900, show_spinner=False)
-    def get_proposicoes_autoria(self, *_args, **_kwargs) -> Any:
+    def get_proposicoes_autoria(_self, *_args, **_kwargs) -> Any:
         """
         Placeholder: aqui vai chamar self.camara.fetch_proposicoes_autoria(...)
         Retornar DataFrame ou lista (mas padronize depois).
