@@ -436,6 +436,248 @@ def buscar_palavras_no_item(item, palavras_normalizadas, prop_info=None):
 
 
 # ============================================================
+# FUNÇÕES - API SENADO
+# ============================================================
+
+def verificar_se_foi_para_senado(situacao_atual: str, despacho: str = "") -> bool:
+    """
+    Verifica se a proposição está em apreciação pelo Senado Federal.
+    """
+    texto_completo = f"{situacao_atual} {despacho}".lower()
+    
+    indicadores = [
+        "apreciação pelo senado federal",
+        "apreciacao pelo senado federal",
+        "apreciação pelo senado",
+        "apreciacao pelo senado",
+        "aguardando apreciação pelo senado",
+        "aguardando apreciacao pelo senado",
+        "para apreciação do senado",
+        "para apreciacao do senado",
+        "remetida ao senado federal",
+        "remetido ao senado federal",
+        "remessa ao senado federal",
+        "enviada ao senado federal",
+        "enviado ao senado federal",
+        "encaminhada ao senado federal",
+        "encaminhado ao senado federal",
+        "tramitando no senado",
+        "em tramitação no senado",
+        "tramitação no senado",
+        "à mesa do senado",
+        "ao senado federal",
+        "ofício de remessa ao senado",
+        "sgm-p",
+    ]
+    
+    return any(indicador in texto_completo for indicador in indicadores)
+
+
+def buscar_situacao_camara(proposicao_id):
+    """Busca a situação atual da proposição na Câmara."""
+    url = f"{BASE_URL}/proposicoes/{proposicao_id}"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        dados = data.get("dados", {})
+        status = dados.get("statusProposicao", {})
+        return {
+            "situacao": status.get("descricaoSituacao", ""),
+            "despacho": status.get("despacho", ""),
+            "orgao": status.get("siglaOrgao", "")
+        }
+    except Exception:
+        return {"situacao": "", "despacho": "", "orgao": ""}
+
+
+def buscar_dados_senado(tipo: str, numero: str, ano: str):
+    """
+    Busca dados básicos de uma proposição no Senado.
+    Retorna dict com código da matéria, id do processo, situação, url.
+    """
+    tipo_norm = (tipo or "").strip().upper()
+    numero_norm = (numero or "").strip()
+    ano_norm = (ano or "").strip()
+    
+    if not (tipo_norm and numero_norm and ano_norm):
+        return None
+    
+    url = f"{SENADO_BASE_URL}/processo?sigla={tipo_norm}&numero={numero_norm}&ano={ano_norm}&v=1"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS_SENADO, timeout=20)
+        
+        if resp.status_code == 404:
+            return None
+        
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        
+        if not data:
+            return None
+        
+        itens = data if isinstance(data, list) else [data]
+        
+        identificacao_alvo = f"{tipo_norm} {numero_norm}/{ano_norm}"
+        escolhido = None
+        for it in itens:
+            ident = (it.get("identificacao") or "").strip()
+            if ident.upper() == identificacao_alvo.upper():
+                escolhido = it
+                break
+        if escolhido is None:
+            escolhido = itens[0]
+        
+        codigo_materia = str(escolhido.get("codigoMateria") or "").strip()
+        id_processo = str(escolhido.get("id") or "").strip()
+        
+        if not codigo_materia:
+            return None
+        
+        url_deep = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_materia}"
+        
+        return {
+            "codigo_materia": codigo_materia,
+            "id_processo": id_processo,
+            "url_senado": url_deep,
+        }
+    
+    except Exception as e:
+        print(f"   ⚠️ Erro ao consultar Senado: {e}")
+        return None
+
+
+def buscar_movimentacoes_senado(id_processo: str, limite: int = 10):
+    """
+    Busca movimentações de uma proposição no Senado.
+    Retorna lista de movimentações ordenadas por data (mais recente primeiro).
+    """
+    if not id_processo:
+        return []
+    
+    url = f"{SENADO_BASE_URL}/processo/{id_processo}/movimentacoes?v=1"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS_SENADO, timeout=20)
+        
+        if resp.status_code != 200:
+            return []
+        
+        data = resp.json()
+        
+        if not data:
+            return []
+        
+        movimentacoes = data if isinstance(data, list) else [data]
+        
+        # Ordenar por data (mais recente primeiro)
+        def parse_data(mov):
+            data_str = mov.get("data") or mov.get("dataMovimento") or ""
+            try:
+                return datetime.fromisoformat(data_str.replace("Z", ""))
+            except:
+                return datetime.min
+        
+        movimentacoes_ordenadas = sorted(movimentacoes, key=parse_data, reverse=True)
+        
+        return movimentacoes_ordenadas[:limite]
+    
+    except Exception as e:
+        print(f"   ⚠️ Erro ao buscar movimentações Senado: {e}")
+        return []
+
+
+def tramitacao_senado_recente(movimentacao: dict, horas: int = 48) -> bool:
+    """Verifica se uma movimentação do Senado é recente."""
+    if not movimentacao:
+        return False
+    
+    data_str = movimentacao.get("data") or movimentacao.get("dataMovimento") or ""
+    
+    if not data_str:
+        return False
+    
+    try:
+        # Tentar diferentes formatos
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+            try:
+                data_mov = datetime.strptime(data_str[:19], fmt)
+                break
+            except:
+                continue
+        else:
+            data_mov = datetime.strptime(data_str[:10], "%Y-%m-%d")
+        
+        agora = datetime.now()
+        diferenca = agora - data_mov
+        return diferenca.total_seconds() <= (horas * 3600)
+    
+    except Exception:
+        return False
+
+
+def buscar_proposicoes_no_senado(ids_autoria):
+    """
+    Busca proposições da deputada que estão no Senado e têm movimentações recentes.
+    Retorna lista de dicts com dados da proposição e movimentação.
+    """
+    proposicoes_senado = []
+    
+    for prop_id in ids_autoria:
+        try:
+            # Buscar informações da proposição
+            prop_info = fetch_proposicao_info(prop_id)
+            if not prop_info:
+                continue
+            
+            # Verificar se está no Senado
+            situacao_camara = buscar_situacao_camara(prop_id)
+            if not verificar_se_foi_para_senado(
+                situacao_camara.get("situacao", ""), 
+                situacao_camara.get("despacho", "")
+            ):
+                continue
+            
+            # Buscar dados do Senado
+            dados_senado = buscar_dados_senado(
+                prop_info.get("siglaTipo", ""),
+                str(prop_info.get("numero", "")),
+                str(prop_info.get("ano", ""))
+            )
+            
+            if not dados_senado or not dados_senado.get("id_processo"):
+                continue
+            
+            # Buscar movimentações do Senado
+            movimentacoes = buscar_movimentacoes_senado(dados_senado["id_processo"], limite=5)
+            
+            # Verificar se há movimentações recentes
+            for mov in movimentacoes:
+                if tramitacao_senado_recente(mov, horas=48):
+                    proposicoes_senado.append({
+                        "prop_id": prop_id,
+                        "tipo": prop_info.get("siglaTipo", ""),
+                        "numero": prop_info.get("numero", ""),
+                        "ano": prop_info.get("ano", ""),
+                        "movimentacao": mov,
+                        "dados_senado": dados_senado,
+                        "prop_info": prop_info
+                    })
+                    break  # Só adiciona a movimentação mais recente
+            
+            time.sleep(0.15)
+        
+        except Exception as e:
+            print(f"   ⚠️ Erro ao processar proposição {prop_id}: {e}")
+            continue
+    
+    return proposicoes_senado
+
+
+# ============================================================
 # FORMATAÇÃO DE MENSAGENS
 # ============================================================
 
@@ -444,233 +686,233 @@ def formatar_mensagem_bom_dia():
 
 Sou o <b>Monitor de Pautas</b>, sistema que busca matérias de interesse nas pautas das comissões.
 
-📋 <b>O que monitoro:</b>
-• Matérias de <b>autoria</b> da Dep. Júlia Zanatta
-• Matérias onde ela é <b>relatora</b>
-• Matérias com <b>palavras-chave</b> de interesse
+🔍 <b>O que monitoro:</b>
+• 📝 Projetos de <b>autoria</b> da deputada
+• 📋 Projetos com <b>relatoria</b> da deputada
+• 🔑 Matérias com <b>palavras-chave</b>
+• 🔵 Tramitações no <b>Senado</b>
 
-Vamos acompanhar as pautas dos próximos 7 dias! 🔍"""
+Ao longo do dia, enviarei notificações a cada novidade encontrada.
 
-
-def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
-    orgao = evento.get("orgaos", [{}])[0].get("sigla", "")
-    data_evento = evento.get("dataHoraInicio", "")[:10]
-    if data_evento:
-        try:
-            dt = datetime.fromisoformat(data_evento)
-            data_formatada = dt.strftime("%d/%m/%Y")
-        except:
-            data_formatada = data_evento
-    else:
-        data_formatada = "Data não informada"
-    
-    if prop_info:
-        sigla = prop_info.get("siglaTipo", "")
-        numero = prop_info.get("numero", "")
-        ano = prop_info.get("ano", "")
-        ementa = escapar_html(prop_info.get("ementa", ""))
-        prop_id = prop_info.get("id", "")
-    else:
-        sigla, numero, ano = "", "", ""
-        ementa = escapar_html(item.get("titulo", ""))
-        prop_id = None
-    
-    if len(ementa) > 250:
-        ementa = ementa[:247] + "..."
-    
-    por_categoria = {}
-    for palavra, categoria in palavras_encontradas:
-        if categoria not in por_categoria:
-            por_categoria[categoria] = []
-        por_categoria[categoria].append(palavra)
-    
-    palavras_texto = []
-    for cat, palavras in por_categoria.items():
-        palavras_texto.append(f"<b>{cat}:</b> {', '.join(palavras)}")
-    palavras_str = "\n".join(palavras_texto)
-    
-    link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}" if prop_id else ""
-    link_texto = f'\n🔗 <a href="{link}">Ver tramitação</a>' if link else ""
-    
-    data_hora = obter_data_hora_brasilia()
-    
-    return f"""📢 <b>Monitor Parlamentar Informa:</b>
-
-🔑 <b>Palavra-chave na Pauta!</b>
-
-📄 <b>{sigla} {numero}/{ano}</b>
-{ementa}
-
-🏛️ <b>Comissão:</b> {orgao}
-📅 <b>Data:</b> {data_formatada}
-
-🏷️ <b>Palavras encontradas:</b>
-{palavras_str}{link_texto}
-
-⏰ <i>{data_hora}</i>"""
-
-
-def formatar_mensagem_sem_novidades_completa():
-    data_hora = obter_data_hora_brasilia()
-    return f"""📢 <b>Monitor Parlamentar Informa:</b>
-
-Não foram encontradas matérias de interesse nas pautas.
-
-⏰ <i>{data_hora}</i>"""
-
-
-def formatar_mensagem_sem_novidades_curta():
-    data_hora = obter_data_hora_brasilia()
-    return f"""📢 Sem novidades nas pautas.
-
-⏰ <i>{data_hora}</i>"""
+Boa semana! 🚀"""
 
 
 def formatar_mensagem_recesso():
-    data_hora = obter_data_hora_brasilia()
     data_retorno = get_data_retorno_sessao()
-    return f"""📢 <b>Monitor Parlamentar Informa:</b>
+    return f"""🏖️ <b>Congresso em Recesso</b>
 
-🏖️ <b>Recesso Parlamentar</b>
+O Congresso Nacional está em recesso parlamentar.
 
-O Congresso está em recesso. Não há reuniões de comissões.
+📅 <b>Retorno previsto:</b> {data_retorno}
 
-📅 <b>Previsão de retorno:</b> {data_retorno}
+Durante o recesso, não há atividades de plenário e comissões, portanto não há pautas para monitorar.
 
-⏰ <i>{data_hora}</i>"""
-
-
-def formatar_mensagem_autoria(evento, prop_info):
-    orgao = evento.get("orgaos", [{}])[0].get("sigla", "")
-    data_evento = evento.get("dataHoraInicio", "")[:10]
-    if data_evento:
-        try:
-            dt = datetime.fromisoformat(data_evento)
-            data_formatada = dt.strftime("%d/%m/%Y")
-        except:
-            data_formatada = data_evento
-    else:
-        data_formatada = "Data não informada"
-    
-    sigla = prop_info.get("siglaTipo", "")
-    numero = prop_info.get("numero", "")
-    ano = prop_info.get("ano", "")
-    ementa = escapar_html(prop_info.get("ementa", ""))
-    prop_id = prop_info.get("id", "")
-    
-    if len(ementa) > 250:
-        ementa = ementa[:247] + "..."
-    
-    link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}" if prop_id else ""
-    link_texto = f'\n🔗 <a href="{link}">Ver tramitação</a>' if link else ""
-    
-    data_hora = obter_data_hora_brasilia()
-    
-    return f"""📢 <b>Monitor Parlamentar Informa:</b>
-
-📝 <b>Matéria de AUTORIA na Pauta!</b>
-
-📄 <b>{sigla} {numero}/{ano}</b>
-{ementa}
-
-🏛️ <b>Comissão:</b> {orgao}
-📅 <b>Data:</b> {data_formatada}
-
-👤 <b>Autoria:</b> Dep. Júlia Zanatta (PL-SC){link_texto}
-
-⏰ <i>{data_hora}</i>"""
+O monitoramento será retomado automaticamente quando as sessões voltarem. 🇧🇷"""
 
 
-def formatar_mensagem_relatoria(evento, prop_info):
-    orgao = evento.get("orgaos", [{}])[0].get("sigla", "")
-    data_evento = evento.get("dataHoraInicio", "")[:10]
-    if data_evento:
-        try:
-            dt = datetime.fromisoformat(data_evento)
-            data_formatada = dt.strftime("%d/%m/%Y")
-        except:
-            data_formatada = data_evento
-    else:
-        data_formatada = "Data não informada"
-    
-    sigla = prop_info.get("siglaTipo", "")
-    numero = prop_info.get("numero", "")
-    ano = prop_info.get("ano", "")
-    ementa = escapar_html(prop_info.get("ementa", ""))
-    prop_id = prop_info.get("id", "")
-    
-    if len(ementa) > 250:
-        ementa = ementa[:247] + "..."
-    
-    link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={prop_id}" if prop_id else ""
-    link_texto = f'\n🔗 <a href="{link}">Ver tramitação</a>' if link else ""
-    
-    data_hora = obter_data_hora_brasilia()
-    
-    return f"""📢 <b>Monitor Parlamentar Informa:</b>
+def formatar_mensagem_sem_novidades_completa():
+    return """✅ <b>Tudo tranquilo por aqui!</b>
 
-📋 <b>RELATORIA na Pauta!</b>
+Fiz uma varredura nas pautas das próximas sessões e não encontrei:
+• Novos projetos de autoria
+• Novos projetos com relatoria
+• Novas matérias com palavras-chave
+• Novas movimentações no Senado
 
-📄 <b>{sigla} {numero}/{ano}</b>
-{ementa}
+Continuo monitorando e aviso assim que aparecer algo! 👀"""
 
-🏛️ <b>Comissão:</b> {orgao}
-📅 <b>Data:</b> {data_formatada}
 
-👩‍⚖️ <b>Relatora:</b> Dep. Júlia Zanatta (PL-SC){link_texto}
-
-⏰ <i>{data_hora}</i>"""
+def formatar_mensagem_sem_novidades_curta():
+    return "✅ Sem novidades no momento."
 
 
 def formatar_mensagem_resumo_dia(resumo):
     tramitacoes = resumo.get("tramitacoes", [])
     por_categoria = resumo.get("por_categoria", {})
-    total = len(tramitacoes)
-    data_hora = obter_data_hora_brasilia()
     
-    if total == 0:
-        return f"""📢 <b>Monitor Parlamentar Informa:</b>
+    if not tramitacoes:
+        return """🌙 <b>Resumo do Dia</b>
 
-🌙 <b>Resumo do Dia</b>
+Hoje não foram identificadas novas matérias nas pautas monitoradas.
 
-Não foram encontradas matérias de interesse nas pautas hoje.
-
-⏰ <i>{data_hora}</i>"""
+Continue acompanhando pelo painel: """ + LINK_PAINEL
     
-    detalhes = []
-    for cat, itens in por_categoria.items():
-        detalhes.append(f"<b>{cat}:</b> {len(itens)}")
-    detalhes_str = "\n".join(detalhes)
+    texto = "🌙 <b>Resumo do Dia</b>\n\n"
+    texto += f"📊 <b>{len(tramitacoes)} matéria(s) identificada(s) hoje:</b>\n\n"
     
-    return f"""📢 <b>Monitor Parlamentar Informa:</b>
+    for categoria, itens in sorted(por_categoria.items()):
+        texto += f"<b>{categoria}</b>\n"
+        for sigla in sorted(itens):
+            texto += f"  • {sigla}\n"
+        texto += "\n"
+    
+    texto += f"\n📊 Acompanhe em tempo real: {LINK_PAINEL}"
+    return texto
 
-🌙 <b>Resumo do Dia</b>
 
-📊 <b>Total:</b> {total} matéria(s)
+def formatar_mensagem_novidade(evento, item, prop_info, palavras_encontradas):
+    evento_data = evento.get("dataHoraInicio", "")[:10]
+    evento_data_br = ""
+    if evento_data:
+        try:
+            dt = datetime.strptime(evento_data, "%Y-%m-%d")
+            evento_data_br = dt.strftime("%d/%m/%Y")
+        except:
+            evento_data_br = evento_data
+    
+    orgao = evento.get("orgaos", [{}])[0].get("sigla", "Comissão")
+    descricao_evento = evento.get("descricao", "Sessão")
+    
+    if prop_info:
+        sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
+        ementa = prop_info.get("ementa", "")[:300]
+        url_prop = prop_info.get("uri", "")
+        autor = prop_info.get("uriAutores", "")
+    else:
+        sigla = item.get("titulo", "Item")[:50]
+        ementa = item.get("descricao", "")[:300]
+        url_prop = ""
+        autor = ""
+    
+    categorias = list(set([cat for _, cat in palavras_encontradas]))
+    palavras_lista = ", ".join([palavra for palavra, _ in palavras_encontradas[:5]])
+    
+    texto = f"""🔑 <b>PALAVRA-CHAVE NA PAUTA</b>
 
-{detalhes_str}
+📄 <b>{escapar_html(sigla)}</b>
 
-⏰ <i>{data_hora}</i>"""
+📋 <b>Categorias:</b> {escapar_html(', '.join(categorias))}
+🔎 <b>Termos:</b> {escapar_html(palavras_lista)}
+
+📅 <b>Sessão:</b> {escapar_html(evento_data_br)}
+🏛️ <b>Órgão:</b> {escapar_html(orgao)}
+📌 <b>Evento:</b> {escapar_html(descricao_evento)}
+
+📝 <b>Ementa:</b> {escapar_html(ementa)}"""
+    
+    if url_prop:
+        texto += f"\n\n🔗 <a href='{url_prop}'>Ver proposição</a>"
+    
+    return texto
 
 
-# ============================================================
-# CONVERSÃO TELEGRAM HTML → EMAIL HTML
-# ============================================================
+def formatar_mensagem_autoria(evento, prop_info):
+    evento_data = evento.get("dataHoraInicio", "")[:10]
+    evento_data_br = ""
+    if evento_data:
+        try:
+            dt = datetime.strptime(evento_data, "%Y-%m-%d")
+            evento_data_br = dt.strftime("%d/%m/%Y")
+        except:
+            evento_data_br = evento_data
+    
+    orgao = evento.get("orgaos", [{}])[0].get("sigla", "Comissão")
+    descricao_evento = evento.get("descricao", "Sessão")
+    
+    sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
+    ementa = prop_info.get("ementa", "")[:300]
+    url_prop = prop_info.get("uri", "")
+    
+    texto = f"""📝 <b>AUTORIA NA PAUTA</b>
+
+📄 <b>{escapar_html(sigla)}</b>
+
+📅 <b>Sessão:</b> {escapar_html(evento_data_br)}
+🏛️ <b>Órgão:</b> {escapar_html(orgao)}
+📌 <b>Evento:</b> {escapar_html(descricao_evento)}
+
+📝 <b>Ementa:</b> {escapar_html(ementa)}"""
+    
+    if url_prop:
+        texto += f"\n\n🔗 <a href='{url_prop}'>Ver proposição</a>"
+    
+    return texto
+
+
+def formatar_mensagem_relatoria(evento, prop_info):
+    evento_data = evento.get("dataHoraInicio", "")[:10]
+    evento_data_br = ""
+    if evento_data:
+        try:
+            dt = datetime.strptime(evento_data, "%Y-%m-%d")
+            evento_data_br = dt.strftime("%d/%m/%Y")
+        except:
+            evento_data_br = evento_data
+    
+    orgao = evento.get("orgaos", [{}])[0].get("sigla", "Comissão")
+    descricao_evento = evento.get("descricao", "Sessão")
+    
+    sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
+    ementa = prop_info.get("ementa", "")[:300]
+    url_prop = prop_info.get("uri", "")
+    
+    texto = f"""📋 <b>RELATORIA NA PAUTA</b>
+
+📄 <b>{escapar_html(sigla)}</b>
+
+📅 <b>Sessão:</b> {escapar_html(evento_data_br)}
+🏛️ <b>Órgão:</b> {escapar_html(orgao)}
+📌 <b>Evento:</b> {escapar_html(descricao_evento)}
+
+📝 <b>Ementa:</b> {escapar_html(ementa)}"""
+    
+    if url_prop:
+        texto += f"\n\n🔗 <a href='{url_prop}'>Ver proposição</a>"
+    
+    return texto
+
+
+def formatar_mensagem_senado(prop_data):
+    """Formata mensagem para movimentação no Senado."""
+    prop_info = prop_data.get("prop_info", {})
+    movimentacao = prop_data.get("movimentacao", {})
+    dados_senado = prop_data.get("dados_senado", {})
+    
+    sigla = f"{prop_info.get('siglaTipo', '')} {prop_info.get('numero', '')}/{prop_info.get('ano', '')}"
+    ementa = prop_info.get("ementa", "")[:300]
+    
+    data_mov = movimentacao.get("data") or movimentacao.get("dataMovimento") or ""
+    data_mov_br = ""
+    if data_mov:
+        try:
+            dt = datetime.fromisoformat(data_mov.replace("Z", ""))
+            data_mov_br = dt.strftime("%d/%m/%Y")
+        except:
+            data_mov_br = data_mov[:10]
+    
+    descricao_mov = movimentacao.get("descricao") or movimentacao.get("texto") or "Movimentação"
+    url_senado = dados_senado.get("url_senado", "")
+    
+    texto = f"""🔵 <b>ZANATTA NO SENADO</b>
+
+📄 <b>{escapar_html(sigla)}</b>
+
+📅 <b>Data:</b> {escapar_html(data_mov_br)}
+📝 <b>Movimentação:</b> {escapar_html(descricao_mov[:200])}
+
+💡 <b>Ementa:</b> {escapar_html(ementa)}"""
+    
+    if url_senado:
+        texto += f"\n\n🔗 <a href='{url_senado}'>Ver no Senado</a>"
+    
+    return texto
+
 
 def telegram_para_email_html(mensagem_telegram, assunto):
     corpo = mensagem_telegram.replace("\n", "<br>")
     
     return f"""<!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{assunto}</title>
 </head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4;">
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
     <table role="presentation" style="width: 100%; border-collapse: collapse;">
         <tr>
             <td align="center" style="padding: 20px 0;">
-                <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px;">
                     <tr>
                         <td style="background: linear-gradient(135deg, #2d5016 0%, #4a7c23 100%); padding: 25px 30px; border-radius: 8px 8px 0 0;">
                             <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">
