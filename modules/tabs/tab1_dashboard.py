@@ -44,10 +44,10 @@ def render_tab1(provider) -> None:
     # Como o monólito ainda controla isso, vamos obter do session_state (já existe no app).
     # Se o seu projeto usa outro nome de chave, ajuste aqui.
     id_deputada = (
-    st.session_state.get("ID_DEPUTADA")
-    or st.session_state.get("id_deputada")
-    or DEPUTADA_ID_PADRAO
-)
+        st.session_state.get("ID_DEPUTADA")
+        or st.session_state.get("id_deputada")
+        or DEPUTADA_ID_PADRAO
+    )
 
 
     col_info1, col_refresh1 = st.columns([3, 1])
