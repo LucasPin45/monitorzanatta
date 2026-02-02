@@ -6,6 +6,7 @@
 # da deputada apensados e notifica via Telegram.
 #
 # Horário: 08:00 às 20:00 (Brasília) - A cada 3 horas
+# OTIMIZADO: Horários ajustados para evitar conflitos
 # ============================================================
 
 name: Monitor Projetos Apensados
@@ -13,15 +14,16 @@ name: Monitor Projetos Apensados
 on:
   # Execução agendada (cron em UTC - Brasília é UTC-3)
   schedule:
-    # 11:00 UTC = 08:00 BRT
-    - cron: '0 11 * * 1-5'
-    # 14:00 UTC = 11:00 BRT
-    - cron: '0 14 * * 1-5'
-    # 17:00 UTC = 14:00 BRT
-    - cron: '0 17 * * 1-5'
-    # 20:00 UTC = 17:00 BRT
-    - cron: '0 20 * * 1-5'
-    # 23:00 UTC = 20:00 BRT
+    # HORÁRIOS OTIMIZADOS (diferentes dos outros workflows)
+    # 08:30 BRT = 11:30 UTC
+    - cron: '30 11 * * 1-5'
+    # 11:30 BRT = 14:30 UTC
+    - cron: '30 14 * * 1-5'
+    # 14:30 BRT = 17:30 UTC
+    - cron: '30 17 * * 1-5'
+    # 17:30 BRT = 20:30 UTC
+    - cron: '30 20 * * 1-5'
+    # 20:00 BRT = 23:00 UTC
     - cron: '0 23 * * 1-5'
   
   # Execução manual (para testes)
@@ -30,6 +32,7 @@ on:
 jobs:
   monitorar:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
       - name: 📥 Checkout do repositório
@@ -39,6 +42,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: 📦 Instalar dependências
         run: |
@@ -47,9 +51,9 @@ jobs:
       
       - name: 📂 Baixar estado anterior (se existir)
         continue-on-error: true
-        run: |
-          # Tentar baixar arquivos de estado do artifact anterior
-          echo "Tentando recuperar estado anterior..."
+        uses: actions/download-artifact@v4
+        with:
+          name: estado-apensados
       
       - name: 🔍 Executar monitor de apensados
         env:
