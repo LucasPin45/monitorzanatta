@@ -247,50 +247,36 @@ class CamaraService:
             return []
         
         tramitacoes = data.get("dados", [])
-        
-        # Se vazio, tentar com paginação
-        if not tramitacoes:
-            params = {
-                "itens": itens,
-                "ordem": ordem,
-                "ordenarPor": ordenar_por,
-            }
-            
-            all_items = safe_get_all_pages(url, params=params, session=self._session)
-            return all_items
-        
         return tramitacoes
     
-    def get_ultima_tramitacao(self, id_proposicao: str) -> Optional[Dict[str, Any]]:
+    def get_ultimas_tramitacoes(
+        self,
+        id_proposicao: str,
+        limite: int = 10
+    ) -> List[Dict[str, Any]]:
         """
-        Busca a última tramitação de uma proposição.
+        Busca últimas tramitações de uma proposição.
         
         Args:
             id_proposicao: ID da proposição
+            limite: Máximo de tramitações
             
         Returns:
-            Dict da tramitação ou None
+            Lista de tramitações (mais recentes primeiro)
         """
-        if not id_proposicao:
-            return None
+        tramitacoes = self.get_tramitacoes(id_proposicao)
         
-        url = f"{BASE_URL}/proposicoes/{id_proposicao}/tramitacoes"
-        params = {
-            "itens": 1,
-            "ordem": "DESC",
-            "ordenarPor": "dataHora"
-        }
+        # Ordenar por data (mais recente primeiro)
+        tramitacoes_sorted = sorted(
+            tramitacoes,
+            key=lambda x: x.get("dataHora") or "",
+            reverse=True
+        )
         
-        data = safe_get(url, params=params, session=self._session)
-        
-        if data is None or (isinstance(data, dict) and "__error__" in data):
-            return None
-        
-        dados = data.get("dados", [])
-        return dados[0] if dados else None
+        return tramitacoes_sorted[:limite]
     
     # ============================================================
-    # RELATORES
+    # RELATOR
     # ============================================================
     
     def get_relatores(self, id_proposicao: str) -> List[Dict[str, Any]]:
@@ -318,110 +304,32 @@ class CamaraService:
         """
         Busca relator atual de uma proposição.
         
-        Tenta extrair das tramitações primeiro, depois da API de relatores.
+        Tenta primeiro a API de relatores, depois extrai das tramitações.
         
         Args:
             id_proposicao: ID da proposição
             
         Returns:
-            Dict com nome, partido, uf, id_deputado ou {}
+            Dict com nome, partido, uf ou {}
         """
         if not id_proposicao:
             return {}
         
-        # Buscar dados completos
+        # 1. Tentar API de relatores
+        relatores = self.get_relatores(id_proposicao)
+        if relatores:
+            relator = extrair_relator_de_relatores(relatores)
+            if relator and relator.get("nome"):
+                return relator
+        
+        # 2. Fallback: extrair das tramitações
         prop = self.get_proposicao(id_proposicao)
         orgao_atual = prop.get("status_siglaOrgao", "") if prop else ""
         
-        # Buscar tramitações
         tramitacoes = self.get_tramitacoes(id_proposicao)
-        
-        # Tentar extrair das tramitações
         relator = extrair_relator_de_tramitacoes(tramitacoes, orgao_atual)
         
-        if relator:
-            # Se não tem ID, tentar buscar
-            if not relator.get("id_deputado"):
-                dep = self.buscar_deputado_por_nome(relator.get("nome", ""))
-                if dep:
-                    relator["id_deputado"] = str(dep.get("id", ""))
-            return relator
-        
-        # Fallback: buscar na API de relatores
-        relatores = self.get_relatores(id_proposicao)
-        relator = extrair_relator_de_relatores(relatores)
-        
-        if relator and not relator.get("id_deputado"):
-            dep = self.buscar_deputado_por_nome(relator.get("nome", ""))
-            if dep:
-                relator["id_deputado"] = str(dep.get("id", ""))
-        
-        return relator
-    
-    # ============================================================
-    # RELACIONADAS / APENSADOS
-    # ============================================================
-    
-    def get_relacionadas(self, id_proposicao: str) -> List[Dict[str, Any]]:
-        """
-        Busca proposições relacionadas (apensadas).
-        
-        Args:
-            id_proposicao: ID da proposição
-            
-        Returns:
-            Lista de relacionadas
-        """
-        if not id_proposicao:
-            return []
-        
-        url = f"{BASE_URL}/proposicoes/{id_proposicao}/relacionadas"
-        data = safe_get(url, session=self._session)
-        
-        if data is None or (isinstance(data, dict) and "__error__" in data):
-            return []
-        
-        return data.get("dados", []) or []
-    
-    def get_proposicao_principal_id(self, id_proposicao: str) -> Optional[str]:
-        """
-        Descobre a proposição principal à qual esta está apensada.
-        
-        Args:
-            id_proposicao: ID da proposição
-            
-        Returns:
-            ID da principal ou None
-        """
-        dados = self.get_relacionadas(str(id_proposicao))
-        if not dados:
-            return None
-        
-        # Preferir campos explícitos de principal
-        for item in dados:
-            prop_princ = item.get("proposicaoPrincipal") or item.get("proposicao_principal")
-            if isinstance(prop_princ, dict):
-                uri = (prop_princ.get("uri") or 
-                       prop_princ.get("uriProposicao") or 
-                       prop_princ.get("uriProposicaoPrincipal"))
-                if uri:
-                    pid = extract_id_from_uri(uri)
-                    if pid:
-                        return pid
-            
-            for chave_uri in ("uriProposicaoPrincipal", "uriProposicao_principal", "uriPrincipal"):
-                if item.get(chave_uri):
-                    pid = extract_id_from_uri(item.get(chave_uri))
-                    if pid:
-                        return pid
-        
-        # Fallback
-        for item in dados:
-            pid = get_proposicao_id_from_item(item)
-            if pid:
-                return pid
-        
-        return None
+        return relator or {}
     
     # ============================================================
     # AUTORES
@@ -446,36 +354,33 @@ class CamaraService:
         if data is None or (isinstance(data, dict) and "__error__" in data):
             return []
         
-        return data.get("dados", []) or []
+        return data.get("dados", [])
     
-    # ============================================================
-    # DEPUTADOS
-    # ============================================================
-    
-    def buscar_deputado_por_nome(self, nome: str, itens: int = 5) -> Optional[Dict[str, Any]]:
+    def is_autor(self, id_proposicao: str, id_deputado: int) -> bool:
         """
-        Busca deputado por nome.
+        Verifica se deputado é autor de uma proposição.
         
         Args:
-            nome: Nome do deputado
-            itens: Limite de resultados
+            id_proposicao: ID da proposição
+            id_deputado: ID do deputado
             
         Returns:
-            Dict do deputado ou None
+            True se é autor
         """
-        if not nome:
-            return None
+        autores = self.get_autores(id_proposicao)
+        id_str = str(id_deputado)
         
-        url = f"{BASE_URL}/deputados"
-        params = {"nome": nome, "itens": itens}
+        for autor in autores:
+            uri = autor.get("uri") or ""
+            autor_id = extract_id_from_uri(uri)
+            if autor_id == id_str:
+                return True
+            
+            # Tentar campo id direto
+            if str(autor.get("id", "")) == id_str:
+                return True
         
-        data = safe_get(url, params=params, session=self._session)
-        
-        if data is None or (isinstance(data, dict) and "__error__" in data):
-            return None
-        
-        deps = parse_deputados(data)
-        return deps[0] if deps else None
+        return False
     
     # ============================================================
     # LISTAS DE PROPOSIÇÕES
@@ -516,6 +421,29 @@ class CamaraService:
                         items.append(prop_faltante)
         
         return [parse_proposicao_item(d) for d in items]
+    
+    # ============================================================
+    # WRAPPER: get_proposicoes_autoria (nome padronizado)
+    # ============================================================
+    
+    def get_proposicoes_autoria(
+        self,
+        id_deputado: int,
+        incluir_faltantes: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Wrapper para listar_proposicoes_autoria (nome padronizado).
+        
+        Interface unificada usada pelo DataProvider.
+        
+        Args:
+            id_deputado: ID do deputado
+            incluir_faltantes: Se True, adiciona proposições do workaround
+            
+        Returns:
+            Lista de proposições (dicts com id, siglaTipo, numero, ano, ementa)
+        """
+        return self.listar_proposicoes_autoria(id_deputado, incluir_faltantes)
     
     def listar_rics_autoria(self, id_deputado: int) -> List[Dict[str, Any]]:
         """
