@@ -9143,7 +9143,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 #| **PEC** | Proposta de Emenda | Altera a Constituição |
 #| **RIC** | Requerimento de Informação | Prazo: 30 dias |
 #| **PDL** | Projeto de Decreto Legislativo | Competência do Congresso |
-            """)
+#            """)
         
         #st.markdown("---")
         #st.caption("📊 Dados: API Câmara dos Deputados | Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta")
