@@ -1,4 +1,13 @@
 {
-  "notificadas": [],
-  "ultima_limpeza": "2026-02-02T08:37:12.011406-03:00"
+  "notificadas": [
+    {
+      "chave": "camara_2600064_2026-02-02T10:33",
+      "proposicao_id": 2600064,
+      "sigla": "RIC 46/2026",
+      "data_tramitacao": "2026-02-02T10:33",
+      "registrado_em": "2026-02-02T11:18:03.645943-03:00",
+      "origem": "camara"
+    }
+  ],
+  "ultima_limpeza": "2026-02-02T11:03:25.573750-03:00"
 }
