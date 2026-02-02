@@ -58,16 +58,29 @@ class DataProvider:
     # ---------------------------------------------------------------------
 
     @st.cache_data(ttl=900, show_spinner=False)
-    def _cached_get_proposicoes_autoria(_self, id_deputada: int) -> Any:
+    def _cached_get_proposicoes_autoria(_self, id_deputada: int) -> List[Dict[str, Any]]:
         """
-        Chama o service da Câmara e retorna lista/df (conforme seu service).
+        Chama o service da Câmara e retorna lista de dicts.
         IMPORTANTE: recebe id_deputada como parâmetro para o cache funcionar.
+        
+        Retorna lista de dicts com campos:
+        - id
+        - siglaTipo
+        - numero
+        - ano
+        - ementa
         """
         return _self.camara.get_proposicoes_autoria(id_deputada)
 
-    def get_proposicoes_autoria(self, id_deputada: int) -> Any:
+    def get_proposicoes_autoria(self, id_deputada: int) -> List[Dict[str, Any]]:
         """
         Interface usada pela UI (Aba 1, etc).
+        
+        Args:
+            id_deputada: ID do deputado na API da Câmara
+            
+        Returns:
+            Lista de dicts com proposições de autoria
         """
         return self._cached_get_proposicoes_autoria(id_deputada)
 
@@ -99,13 +112,51 @@ class DataProvider:
     # ---------------------------------------------------------------------
 
     @st.cache_data(ttl=900, show_spinner=False)
-    def _cached_get_tramitacoes(_self, *_args, **_kwargs) -> Any:
-        # Quando você plugar o service real, troque aqui:
-        # return _self.camara.get_tramitacoes(...)
-        return []
+    def _cached_get_tramitacoes(_self, id_proposicao: str) -> List[Dict[str, Any]]:
+        """
+        Busca tramitações de uma proposição.
+        """
+        return _self.camara.get_tramitacoes(id_proposicao)
 
-    def get_tramitacoes(self, *_args, **_kwargs) -> Any:
-        return self._cached_get_tramitacoes(*_args, **_kwargs)
+    def get_tramitacoes(self, id_proposicao: str) -> List[Dict[str, Any]]:
+        """
+        Interface para buscar tramitações.
+        """
+        return self._cached_get_tramitacoes(id_proposicao)
+
+    # ---------------------------------------------------------------------
+    # PROPOSIÇÃO COMPLETA
+    # ---------------------------------------------------------------------
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _cached_get_proposicao_completa(_self, id_proposicao: str) -> Dict[str, Any]:
+        """
+        Busca dados completos de uma proposição.
+        """
+        return _self.camara.get_proposicao_completa(id_proposicao)
+
+    def get_proposicao_completa(self, id_proposicao: str) -> Dict[str, Any]:
+        """
+        Interface para buscar proposição completa (dados + tramitações + relator).
+        """
+        return self._cached_get_proposicao_completa(id_proposicao)
+
+    # ---------------------------------------------------------------------
+    # RICs
+    # ---------------------------------------------------------------------
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _cached_get_rics_autoria(_self, id_deputada: int) -> List[Dict[str, Any]]:
+        """
+        Busca RICs de autoria de um deputado.
+        """
+        return _self.camara.listar_rics_autoria(id_deputada)
+
+    def get_rics_autoria(self, id_deputada: int) -> List[Dict[str, Any]]:
+        """
+        Interface para buscar RICs de autoria.
+        """
+        return self._cached_get_rics_autoria(id_deputada)
 
     # ---------------------------------------------------------------------
     # SENADO sob demanda (não cacheado por padrão)
