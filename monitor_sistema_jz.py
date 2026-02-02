@@ -8838,7 +8838,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                 #label="📄 RICs",
                 #value=rics,
                 #help="Requerimentos de Informação"
-            )
+#            )
         
         #with col3:
             #pls = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)
@@ -8952,7 +8952,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
                     #ax.grid(axis='x', alpha=0.3)
                     
                     # Adicionar valores nas barras
-                    for i, v in enumerate(df_anos['Quantidade']):
+                    #for i, v in enumerate(df_anos['Quantidade']):
          #               ax.text(v + 0.5, i, str(v), va='center')
           #          
            #         st.pyplot(fig)
@@ -9117,7 +9117,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
             
 #            with col2:
 #                #st.markdown("""
-**5️⃣ Buscar Proposição Específica**
+#**5️⃣ Buscar Proposição Específica**
 #- Busca livre por qualquer proposição
 #- Filtros por ano e tipo
 #- Detalhes completos com linha do tempo
