@@ -3,21 +3,22 @@ name: Notificar Tramitações
 on:
   schedule:
     # ============================================================
-    # HORÁRIOS (Brasília → UTC)
+    # HORÁRIOS OTIMIZADOS (Brasília → UTC)
+    # Ajustados para evitar concorrência com outros workflows
     # ============================================================
-    # 
+    
     # BOM DIA: 07:55 BRT = 10:55 UTC
     - cron: '55 10 * * 1-5'
     
-    # VARREDURAS: de 2 em 2h
-    # 08:00 BRT = 11:00 UTC
-    # 10:00 BRT = 13:00 UTC
-    # 12:00 BRT = 15:00 UTC
-    # 14:00 BRT = 17:00 UTC
-    # 16:00 BRT = 19:00 UTC
-    # 18:00 BRT = 21:00 UTC
-    # 20:00 BRT = 23:00 UTC
-    - cron: '0 11,13,15,17,19,21,23 * * 1-5'
+    # VARREDURAS: de 2 em 2h (horários ímpares para evitar conflito)
+    # 08:10 BRT = 11:10 UTC
+    # 10:10 BRT = 13:10 UTC
+    # 12:10 BRT = 15:10 UTC
+    # 14:10 BRT = 17:10 UTC
+    # 16:10 BRT = 19:10 UTC
+    # 18:10 BRT = 21:10 UTC
+    # 20:10 BRT = 23:10 UTC
+    - cron: '10 11,13,15,17,19,21,23 * * 1-5'
     
     # RESUMO DO DIA: 20:30 BRT = 23:30 UTC
     - cron: '30 23 * * 1-5'
@@ -44,6 +45,7 @@ jobs:
   # ============================================================
   bom_dia:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.schedule == '55 10 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'bom_dia')
     
     steps:
@@ -54,6 +56,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Instalar dependências
         run: pip install requests
@@ -69,7 +72,7 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
-          # Controle de canais (deixe vazio ou "false" para desabilitar)
+          # Controle de canais
           NOTIFICAR_TELEGRAM: ${{ secrets.NOTIFICAR_TELEGRAM }}
           NOTIFICAR_EMAIL: ${{ secrets.NOTIFICAR_EMAIL }}
           # Modo
@@ -77,6 +80,8 @@ jobs:
         run: python notificar_tramitacoes.py
       
       - name: Salvar estado no repositório
+        if: always()
+        continue-on-error: true
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -89,7 +94,8 @@ jobs:
   # ============================================================
   varredura:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 11,13,15,17,19,21,23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'varredura')
+    timeout-minutes: 15
+    if: github.event.schedule == '10 11,13,15,17,19,21,23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'varredura')
     
     steps:
       - name: Checkout do código
@@ -99,6 +105,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Instalar dependências
         run: pip install requests
@@ -122,6 +129,8 @@ jobs:
         run: python notificar_tramitacoes.py
       
       - name: Salvar estado no repositório
+        if: always()
+        continue-on-error: true
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -134,6 +143,7 @@ jobs:
   # ============================================================
   resumo:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.schedule == '30 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'resumo')
     
     steps:
@@ -144,6 +154,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Instalar dependências
         run: pip install requests
@@ -167,6 +178,8 @@ jobs:
         run: python notificar_tramitacoes.py
       
       - name: Salvar estado no repositório
+        if: always()
+        continue-on-error: true
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
