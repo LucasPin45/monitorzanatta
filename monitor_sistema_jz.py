@@ -8763,11 +8763,11 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         # ============================================================
         # HEADER SIMPLES (sem foto)
         # ============================================================
-        st.markdown(f"### {nome_deputada}")
-        st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
-        st.markdown(f"🕐 **Última atualização:** {get_brasilia_now().strftime('%d/%m/%Y às %H:%M:%S')}")
+        #st.markdown(f"### {nome_deputada}")
+        #st.markdown(f"**Partido:** {partido_deputada} | **UF:** {uf_deputada}")
+        #st.markdown(f"🕐 **Última atualização:** {get_brasilia_now().strftime('%d/%m/%Y às %H:%M:%S')}")
         
-        st.markdown("---")
+        #st.markdown("---")
         
         # ============================================================
         # v38: CARREGAMENTO AUTOMÁTICO (sem botão "Carregar Dashboard")
@@ -8775,378 +8775,378 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         # ============================================================
         
         # Inicializar cache no session_state
-        if "props_autoria_aba1_cache" not in st.session_state:
-            st.session_state["props_autoria_aba1_cache"] = None
+        #if "props_autoria_aba1_cache" not in st.session_state:
+            #st.session_state["props_autoria_aba1_cache"] = None
         
-        col_info1, col_refresh1 = st.columns([3, 1])
-        with col_info1:
-            st.caption("💡 **Dashboard carrega automaticamente.** Clique em 'Atualizar' para forçar recarga.")
-        with col_refresh1:
-            btn_atualizar_aba1 = st.button("🔄 Atualizar", key="btn_refresh_aba1")
+        #col_info1, col_refresh1 = st.columns([3, 1])
+        #with col_info1:
+            #st.caption("💡 **Dashboard carrega automaticamente.** Clique em 'Atualizar' para forçar recarga.")
+        #with col_refresh1:
+            #btn_atualizar_aba1 = st.button("🔄 Atualizar", key="btn_refresh_aba1")
         
         # Carregar automaticamente se cache vazio OU se botão foi clicado
-        precisa_carregar_aba1 = st.session_state["props_autoria_aba1_cache"] is None or btn_atualizar_aba1
+        #precisa_carregar_aba1 = st.session_state["props_autoria_aba1_cache"] is None or btn_atualizar_aba1
         
-        props_autoria = []
+        #props_autoria = []
         
-        if precisa_carregar_aba1:
-            with st.spinner("📊 Carregando métricas do dashboard..."):
-                try:
+        #if precisa_carregar_aba1:
+            #with st.spinner("📊 Carregando métricas do dashboard..."):
+                #try:
                     # Usar função que já existe no código (tem @st.cache_data)
-                    df_props = fetch_lista_proposicoes_autoria(id_deputada)
+                    #df_props = fetch_lista_proposicoes_autoria(id_deputada)
                 
-                    if df_props.empty:
-                        props_autoria = []
-                    else:
-                        props_autoria = df_props.to_dict('records')
+                    #if df_props.empty:
+                        #props_autoria = []
+                    #else:
+                        #props_autoria = df_props.to_dict('records')
                     
                     # Salvar no cache do session_state
-                    st.session_state["props_autoria_aba1_cache"] = props_autoria
+                    #st.session_state["props_autoria_aba1_cache"] = props_autoria
                     
-                    if btn_atualizar_aba1:
-                        st.success(f"✅ Dashboard atualizado! {len(props_autoria)} proposições carregadas.")
+                    #if btn_atualizar_aba1:
+                        #st.success(f"✅ Dashboard atualizado! {len(props_autoria)} proposições carregadas.")
                 
-                except Exception as e:
-                    st.error(f"⚠️ Erro ao carregar métricas: {e}")
-                    props_autoria = []
-                    st.session_state["props_autoria_aba1_cache"] = []
-        else:
+                #except Exception as e:
+                    #st.error(f"⚠️ Erro ao carregar métricas: {e}")
+                    #props_autoria = []
+                    #st.session_state["props_autoria_aba1_cache"] = []
+        #else:
             # Usar cache existente
-            props_autoria = st.session_state["props_autoria_aba1_cache"] or []
+            #props_autoria = st.session_state["props_autoria_aba1_cache"] or []
         
         # ============================================================
         # CARDS DE MÉTRICAS (KPIs)
         # ============================================================
-        st.markdown("### 📈 Visão Geral")
+        #st.markdown("### 📈 Visão Geral")
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        #col1, col2, col3, col4, col5 = st.columns(5)
         
         # Contar por tipo primeiro para usar em todos os cards
-        tipos_count = provider.contar_tipos(props_autoria)
+        #tipos_count = provider.contar_tipos(props_autoria)
 
         
-        with col1:
-            st.metric(
-                label="📝 Proposições de Autoria",
-                value=len(props_autoria),
-                help="Total de proposições de autoria (todas)"
+        #with col1:
+            #st.metric(
+                #label="📝 Proposições de Autoria",
+                #value=len(props_autoria),
+                #help="Total de proposições de autoria (todas)"
+            #)
+        
+        #with col2:
+            #rics = tipos_count.get('RIC', 0)
+            #st.metric(
+                #label="📄 RICs",
+                #value=rics,
+                #help="Requerimentos de Informação"
             )
         
-        with col2:
-            rics = tipos_count.get('RIC', 0)
-            st.metric(
-                label="📄 RICs",
-                value=rics,
-                help="Requerimentos de Informação"
-            )
+        #with col3:
+            #pls = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)
+            #st.metric(
+                #label="📋 Projetos de Lei",
+                #value=pls,
+                #help="PL + PLP"
+            #)
         
-        with col3:
-            pls = tipos_count.get('PL', 0) + tipos_count.get('PLP', 0)
-            st.metric(
-                label="📋 Projetos de Lei",
-                value=pls,
-                help="PL + PLP"
-            )
+        #with col4:
+            #pareceres = tipos_count.get('PRL', 0)
+            #st.metric(
+                #label="📑 Pareceres",
+                #value=pareceres,
+                #help="Pareceres de Relatoria (PRL)"
+            #)
         
-        with col4:
-            pareceres = tipos_count.get('PRL', 0)
-            st.metric(
-                label="📑 Pareceres",
-                value=pareceres,
-                help="Pareceres de Relatoria (PRL)"
-            )
-        
-        with col5:
+        #with col5:
             # Calcular outros e listar tipos incluídos (excluindo RIC, PL, PLP e PRL)
-            tipos_outros = {k: v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP', 'PRL']}
-            outros = sum(tipos_outros.values())
+            #tipos_outros = {k: v for k, v in tipos_count.items() if k not in ['RIC', 'PL', 'PLP', 'PRL']}
+            #outros = sum(tipos_outros.values())
             
             # Criar descrição dos tipos incluídos
-            if tipos_outros:
+            #if tipos_outros:
                 # Ordenar por quantidade (top 5)
-                tipos_sorted = sorted(tipos_outros.items(), key=lambda x: x[1], reverse=True)[:5]
-                tipos_desc = ", ".join([f"{k}({v})" for k, v in tipos_sorted])
-                if len(tipos_outros) > 5:
-                    tipos_desc += f" e mais {len(tipos_outros) - 5} tipos"
-                help_text = f"Inclui: {tipos_desc}"
-            else:
-                help_text = "Outros tipos de proposição"
+                #tipos_sorted = sorted(tipos_outros.items(), key=lambda x: x[1], reverse=True)[:5]
+                #tipos_desc = ", ".join([f"{k}({v})" for k, v in tipos_sorted])
+                #if len(tipos_outros) > 5:
+                    #tipos_desc += f" e mais {len(tipos_outros) - 5} tipos"
+                #help_text = f"Inclui: {tipos_desc}"
+            #else:
+                #help_text = "Outros tipos de proposição"
             
-            st.metric(
-                label="📁 Outros",
-                value=outros,
-                help=help_text
-            )
+            #st.metric(
+                #label="📁 Outros",
+                #value=outros,
+                #help=help_text
+            #)
         
         # Expander com detalhamento de todos os tipos
-        with st.expander("📋 Ver todos os tipos de proposição", expanded=False):
-            if tipos_count:
+        #with st.expander("📋 Ver todos os tipos de proposição", expanded=False):
+            #if tipos_count:
                 # Criar dataframe para exibir
-                df_tipos_detalhe = pd.DataFrame(
-                    sorted(tipos_count.items(), key=lambda x: x[1], reverse=True),
-                    columns=['Tipo', 'Quantidade']
-                )
+                #df_tipos_detalhe = pd.DataFrame(
+                    #sorted(tipos_count.items(), key=lambda x: x[1], reverse=True),
+                    #columns=['Tipo', 'Quantidade']
+                #)
                 
-                col_t1, col_t2 = st.columns([2, 1])
-                with col_t1:
-                    st.dataframe(df_tipos_detalhe, use_container_width=True, hide_index=True)
-                with col_t2:
-                    st.markdown("**Legenda:**")
-                    st.caption("• **RIC** - Req. de Informação")
-                    st.caption("• **PL** - Projeto de Lei")
-                    st.caption("• **PLP** - Projeto de Lei Complementar")
-                    st.caption("• **PRL** - Parecer de Relatoria")
-                    st.caption("• **PEC** - Proposta de Emenda")
-                    st.caption("• **REQ** - Requerimento")
-                    st.caption("• **PDL** - Projeto de Decreto Legislativo")
-                    st.caption("• **RPD** - Req. regimentais de procedimentos internos (Retirada de Pauta, Adiamento, etc.)")
-            else:
-                st.info("Nenhum tipo encontrado.")
+                #col_t1, col_t2 = st.columns([2, 1])
+                #with col_t1:
+                    #st.dataframe(df_tipos_detalhe, use_container_width=True, hide_index=True)
+                #with col_t2:
+                    #st.markdown("**Legenda:**")
+                    #st.caption("• **RIC** - Req. de Informação")
+                    #st.caption("• **PL** - Projeto de Lei")
+                    #st.caption("• **PLP** - Projeto de Lei Complementar")
+                    #st.caption("• **PRL** - Parecer de Relatoria")
+                    #st.caption("• **PEC** - Proposta de Emenda")
+                    #st.caption("• **REQ** - Requerimento")
+                    #st.caption("• **PDL** - Projeto de Decreto Legislativo")
+                    #st.caption("• **RPD** - Req. regimentais de procedimentos internos (Retirada de Pauta, Adiamento, etc.)")
+            #else:
+                #st.info("Nenhum tipo encontrado.")
         
-        st.markdown("---")
+        #st.markdown("---")
         
         # ============================================================
         # GRÁFICOS RESUMIDOS
         # ============================================================
-        st.markdown("### 📊 Análise Rápida")
+        #st.markdown("### 📊 Análise Rápida")
         
-        col_graf1, col_graf2 = st.columns(2)
+        #col_graf1, col_graf2 = st.columns(2)
         
-        with col_graf1:
+        #with col_graf1:
             # Gráfico por tipo de proposição
-            if props_autoria and tipos_count:
-                df_tipos = pd.DataFrame(list(tipos_count.items()), columns=['Tipo', 'Quantidade'])
-                df_tipos = df_tipos.sort_values('Quantidade', ascending=False)
+            #if props_autoria and tipos_count:
+                #df_tipos = pd.DataFrame(list(tipos_count.items()), columns=['Tipo', 'Quantidade'])
+                #df_tipos = df_tipos.sort_values('Quantidade', ascending=False)
                 
-                fig, ax = plt.subplots(figsize=(8, 5))
-                ax.barh(df_tipos['Tipo'], df_tipos['Quantidade'], color='steelblue')
-                ax.set_xlabel('Quantidade')
-                ax.set_title('Proposições por Tipo')
-                ax.grid(axis='x', alpha=0.3)
+                #fig, ax = plt.subplots(figsize=(8, 5))
+                #ax.barh(df_tipos['Tipo'], df_tipos['Quantidade'], color='steelblue')
+                #ax.set_xlabel('Quantidade')
+                #ax.set_title('Proposições por Tipo')
+                #ax.grid(axis='x', alpha=0.3)
                 
                 # Adicionar valores nas barras
-                for i, v in enumerate(df_tipos['Quantidade']):
-                    ax.text(v + 0.5, i, str(v), va='center')
+                #for i, v in enumerate(df_tipos['Quantidade']):
+                    #ax.text(v + 0.5, i, str(v), va='center')
                 
-                st.pyplot(fig)
-                plt.close()
+                #st.pyplot(fig)
+                #plt.close()
         
-        with col_graf2:
+        #with col_graf2:
             # Gráfico por ano (filtra anos válidos)
-            if props_autoria:
-                anos_count = {}
-                for p in props_autoria:
-                    ano = p.get('ano', '')
+            #if props_autoria:
+             #   anos_count = {}
+              #  for p in props_autoria:
+               #     ano = p.get('ano', '')
                     # Filtra apenas anos válidos (4 dígitos numéricos)
-                    if ano and str(ano).isdigit() and len(str(ano)) == 4:
-                        anos_count[str(ano)] = anos_count.get(str(ano), 0) + 1
-                
-                if anos_count:
-                    df_anos = pd.DataFrame(list(anos_count.items()), columns=['Ano', 'Quantidade'])
-                    df_anos = df_anos.sort_values('Ano', ascending=False)
+                #    if ano and str(ano).isdigit() and len(str(ano)) == 4:
+                 #       anos_count[str(ano)] = anos_count.get(str(ano), 0) + 1
+                #
+                #if anos_count:
+                 #   df_anos = pd.DataFrame(list(anos_count.items()), columns=['Ano', 'Quantidade'])
+                  #  df_anos = df_anos.sort_values('Ano', ascending=False)
                     
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    ax.barh(df_anos['Ano'], df_anos['Quantidade'], color='coral')
-                    ax.set_xlabel('Quantidade')
-                    ax.set_title('Proposições por Ano')
-                    ax.grid(axis='x', alpha=0.3)
+                   # fig, ax = plt.subplots(figsize=(8, 5))
+                    #ax.barh(df_anos['Ano'], df_anos['Quantidade'], color='coral')
+                    #ax.set_xlabel('Quantidade')
+                    #ax.set_title('Proposições por Ano')
+                    #ax.grid(axis='x', alpha=0.3)
                     
                     # Adicionar valores nas barras
                     for i, v in enumerate(df_anos['Quantidade']):
-                        ax.text(v + 0.5, i, str(v), va='center')
-                    
-                    st.pyplot(fig)
-                    plt.close()
-                else:
-                    st.info("Nenhum ano válido encontrado.")
+         #               ax.text(v + 0.5, i, str(v), va='center')
+          #          
+           #         st.pyplot(fig)
+            #        plt.close()
+             #   else:
+              #      st.info("Nenhum ano válido encontrado.")
         
-        st.markdown("---")
+        #st.markdown("---")
         
         # ============================================================
         # AÇÕES RÁPIDAS
         # ============================================================
-        st.markdown("### ⚡ Ações Rápidas")
+        #st.markdown("### ⚡ Ações Rápidas")
         
-        col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+        #col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
         
-        with col_btn1:
-            if st.button("📅 Ver Pauta", use_container_width=True, key="btn_pauta_home"):
-                st.session_state["aba_destino"] = "pauta"
-                st.info("👉 Vá para a aba **2️⃣ Autoria & Relatoria na pauta**")
+        #with col_btn1:
+         #   if st.button("📅 Ver Pauta", use_container_width=True, key="btn_pauta_home"):
+          #      st.session_state["aba_destino"] = "pauta"
+           #     st.info("👉 Vá para a aba **2️⃣ Autoria & Relatoria na pauta**")
         
-        with col_btn2:
-            if st.button("🔍 Buscar Proposição", use_container_width=True, key="btn_buscar_home"):
-                st.session_state["aba_destino"] = "buscar"
-                st.info("👉 Vá para a aba **5️⃣ Buscar Proposição Específica**")
+      #  with col_btn2:
+       #     if st.button("🔍 Buscar Proposição", use_container_width=True, key="btn_buscar_home"):
+        #        st.session_state["aba_destino"] = "buscar"
+         #       st.info("👉 Vá para a aba **5️⃣ Buscar Proposição Específica**")
         
-        with col_btn3:
-            if st.button("📊 Ver Matérias", use_container_width=True, key="btn_materias_home"):
-                st.session_state["aba_destino"] = "materias"
-                st.info("👉 Vá para a aba **6️⃣ Matérias por situação atual**")
+     #   with col_btn3:
+      #      if st.button("📊 Ver Matérias", use_container_width=True, key="btn_materias_home"):
+       #         st.session_state["aba_destino"] = "materias"
+        #        st.info("👉 Vá para a aba **6️⃣ Matérias por situação atual**")
         
-        with col_btn4:
-            if st.button("📝 Ver RICs", use_container_width=True, key="btn_rics_home"):
-                st.session_state["aba_destino"] = "rics"
-                st.info("👉 Vá para a aba **7️⃣ RICs (Requerimentos)**")
+      #  with col_btn4:
+       #     if st.button("📝 Ver RICs", use_container_width=True, key="btn_rics_home"):
+        #        st.session_state["aba_destino"] = "rics"
+         #       st.info("👉 Vá para a aba **7️⃣ RICs (Requerimentos)**")
         
         # Mostrar indicação se algum destino foi selecionado
-        if st.session_state.get("aba_destino"):
-            destinos = {
-                "pauta": "2️⃣ Autoria & Relatoria na pauta",
-                "buscar": "5️⃣ Buscar Proposição Específica",
-                "materias": "6️⃣ Matérias por situação atual",
-                "rics": "7️⃣ RICs (Requerimentos)"
-            }
-            destino = destinos.get(st.session_state["aba_destino"], "")
-            if destino:
-                st.success(f"👆 Clique na aba **{destino}** acima para acessar")
-                # Limpa após mostrar
-                st.session_state["aba_destino"] = None
-        
-        st.markdown("---")
-        
+    #    if st.session_state.get("aba_destino"):
+     #       destinos = {
+      #          "pauta": "2️⃣ Autoria & Relatoria na pauta",
+       #         "buscar": "5️⃣ Buscar Proposição Específica",
+        #        "materias": "6️⃣ Matérias por situação atual",
+         #       "rics": "7️⃣ RICs (Requerimentos)"
+          #  }
+           # destino = destinos.get(st.session_state["aba_destino"], "")
+            #if destino:
+             #   st.success(f"👆 Clique na aba **{destino}** acima para acessar")
+              #  # Limpa após mostrar
+               # st.session_state["aba_destino"] = None
+        #
+   #     st.markdown("---")
+    #    
         # ============================================================
         # CARD DO TELEGRAM (convite para grupo)
         # ============================================================
-        st.markdown("### 📱 Receba Atualizações no Telegram")
+     #   st.markdown("### 📱 Receba Atualizações no Telegram")
         
-        col_tg1, col_tg2 = st.columns([3, 1])
+      #  col_tg1, col_tg2 = st.columns([3, 1])
         
-        with col_tg1:
-            st.info("""
-            🔔 **Entre no grupo do Monitor Parlamentar no Telegram!**
+       # with col_tg1:
+        #    st.info("""
+         #   🔔 **Entre no grupo do Monitor Parlamentar no Telegram!**
             
-            Receba notificações automáticas sobre:
-            - Novas tramitações de proposições da Dep. Júlia Zanatta
-            - Movimentações em projetos de lei
-            - Atualizações em requerimentos de informação (RICs)
-            """)
+          #  Receba notificações automáticas sobre:
+           # - Novas tramitações de proposições da Dep. Júlia Zanatta
+            #- Movimentações em projetos de lei
+            #- Atualizações em requerimentos de informação (RICs)
+         #   """)
         
-        with col_tg2:
-            st.markdown("")  # Espaçador
-            st.link_button(
-                "📲 Entrar no Grupo",
-                url="https://t.me/+LJUCm1ZwxoJkNDkx",
-                type="primary",
-                use_container_width=True
-            )
+       # with col_tg2:
+        #    st.markdown("")  # Espaçador
+         #   st.link_button(
+          #      "📲 Entrar no Grupo",
+           #     url="https://t.me/+LJUCm1ZwxoJkNDkx",
+            #    type="primary",
+             #   use_container_width=True
+          #  )
         
-        st.markdown("---")
+   #     st.markdown("---")
         
         # ============================================================
         # RELATÓRIO DA SEMANA (PDF consolidado)
         # ============================================================
-        st.markdown("### 📄 Relatório da Semana")
-        st.caption("Gere um relatório consolidado em PDF com análise estratégica. **A pauta da semana é buscada automaticamente.**")
+    #    st.markdown("### 📄 Relatório da Semana")
+     #   st.caption("Gere um relatório consolidado em PDF com análise estratégica. **A pauta da semana é buscada automaticamente.**")
         
-        col_rel1, col_rel2 = st.columns([2, 1])
+      #  col_rel1, col_rel2 = st.columns([2, 1])
         
-        with col_rel1:
+       # with col_rel1:
             # Verificar dados disponíveis
-            df_rics = st.session_state.get("df_rics_completo", pd.DataFrame())
+        #    df_rics = st.session_state.get("df_rics_completo", pd.DataFrame())
             
-            dados_disponiveis = []
-            dados_disponiveis.append("✅ Pauta da semana (busca automática)")
+         #   dados_disponiveis = []
+          #  dados_disponiveis.append("✅ Pauta da semana (busca automática)")
             
-            if props_autoria:
-                dados_disponiveis.append(f"✅ {len(props_autoria)} proposições de autoria")
-            else:
-                dados_disponiveis.append("⚠️ Proposições de autoria não carregadas")
+           # if props_autoria:
+            #    dados_disponiveis.append(f"✅ {len(props_autoria)} proposições de autoria")
+    #        else:
+     #           dados_disponiveis.append("⚠️ Proposições de autoria não carregadas")
+      #      
+       #     if not df_rics.empty:
+        #        dados_disponiveis.append(f"✅ {len(df_rics)} RICs")
+         #   else:
+          #      dados_disponiveis.append("⚠️ RICs (carregue na aba 7)")
             
-            if not df_rics.empty:
-                dados_disponiveis.append(f"✅ {len(df_rics)} RICs")
-            else:
-                dados_disponiveis.append("⚠️ RICs (carregue na aba 7)")
-            
-            st.caption("**Dados disponíveis:**")
-            for item in dados_disponiveis:
-                st.caption(item)
+           # st.caption("**Dados disponíveis:**")
+    #       for item in dados_disponiveis:
+     #           st.caption(item)
         
-        with col_rel2:
-            if st.button("📥 Gerar Relatório PDF", use_container_width=True, type="primary", key="btn_gerar_relatorio"):
-                with st.spinner("Gerando relatório... (buscando pauta da semana)"):
-                    try:
-                        # Gerar o relatório (busca pauta automaticamente)
-                        pdf_bytes = gerar_relatorio_semanal(
-                            nome_deputada=nome_deputada,
-                            partido=partido_deputada,
-                            uf=uf_deputada,
-                            id_deputada=id_deputada,
-                            props_autoria=props_autoria,
-                            tipos_count=tipos_count if 'tipos_count' in dir() else {},
-                            df_rics=df_rics
-                        )
-                        
-                        # Disponibilizar download
-                        st.download_button(
-                            "⬇️ Baixar Relatório PDF",
-                            data=pdf_bytes,
-                            file_name=f"relatorio_semanal_{datetime.date.today().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            key="download_relatorio_semanal"
-                        )
-                        st.success("✅ Relatório gerado com sucesso!")
-                    except Exception as e:
-                        st.error(f"Erro ao gerar relatório: {e}")
+      #  with col_rel2:
+       #     if st.button("📥 Gerar Relatório PDF", use_container_width=True, type="primary", key="btn_gerar_relatorio"):
+        #        with st.spinner("Gerando relatório... (buscando pauta da semana)"):
+         #           try:
+          #              # Gerar o relatório (busca pauta automaticamente)
+           #             pdf_bytes = gerar_relatorio_semanal(
+            #                nome_deputada=nome_deputada,
+             #               partido=partido_deputada,
+              #              uf=uf_deputada,
+               #             id_deputada=id_deputada,
+                #            props_autoria=props_autoria,
+                 #           tipos_count=tipos_count if 'tipos_count' in dir() else {},
+                  #          df_rics=df_rics
+                   #     )
+                    #    
+                     #   # Disponibilizar download
+                      #  #st.download_button(
+                            #"⬇️ Baixar Relatório PDF",
+                            #data=pdf_bytes,
+                            #file_name=f"relatorio_semanal_{datetime.date.today().strftime('%Y%m%d')}.pdf",
+                            #mime="application/pdf",
+                            #key="download_relatorio_semanal"
+                        #)
+                        #st.success("✅ Relatório gerado com sucesso!")
+                    #except Exception as e:
+                        #st.error(f"Erro ao gerar relatório: {e}")
         
-        st.markdown("---")
+        #st.markdown("---")
         
         # ============================================================
         # GLOSSÁRIO (em expander, opcional)
         # ============================================================
-        with st.expander("📚 Glossário e Ajuda do Sistema", expanded=False):
-            st.markdown("### 🎯 Funcionalidades por Aba")
+        #with st.expander("📚 Glossário e Ajuda do Sistema", expanded=False):
+            #st.markdown("### 🎯 Funcionalidades por Aba")
             
-            col1, col2 = st.columns(2)
+            #col1, col2 = st.columns(2)
             
-            with col1:
-                st.markdown("""
-**2️⃣ Autoria & Relatoria na pauta**
-- Proposições de **autoria** da deputada que estão na pauta da semana
-- Proposições onde a deputada é **relatora**
-- Filtrado pelo período selecionado
+            #with col1:
+                #st.markdown("""
+#**2️⃣ Autoria & Relatoria na pauta**
+#- Proposições de **autoria** da deputada que estão na pauta da semana
+#- Proposições onde a deputada é **relatora**
+#- Filtrado pelo período selecionado
 
-**3️⃣ Palavras-chave na pauta**
-- Busca por **palavras-chave** configuráveis
-- Identifica proposições de interesse temático em pauta na semana
+#**3️⃣ Palavras-chave na pauta**
+#- Busca por **palavras-chave** configuráveis
+#- Identifica proposições de interesse temático em pauta na semana
 
-**4️⃣ Comissões estratégicas**
-- Eventos nas comissões estratégicas
-- CDC, CCOM, CE, CREDN, CCJC
-                """)
+#**4️⃣ Comissões estratégicas**
+#- Eventos nas comissões estratégicas
+#- CDC, CCOM, CE, CREDN, CCJC
+#                """)
             
-            with col2:
-                st.markdown("""
+#            with col2:
+#                #st.markdown("""
 **5️⃣ Buscar Proposição Específica**
-- Busca livre por qualquer proposição
-- Filtros por ano e tipo
-- Detalhes completos com linha do tempo
+#- Busca livre por qualquer proposição
+#- Filtros por ano e tipo
+#- Detalhes completos com linha do tempo
 
-**6️⃣ Matérias por situação atual**
-- Visão geral com filtros avançados
-- Gráficos analíticos
+#**6️⃣ Matérias por situação atual**
+#- Visão geral com filtros avançados
+#- Gráficos analíticos
 
-**7️⃣ RICs**
-- Requerimentos de Informação
-- Prazo de 30 dias para resposta
-- Indicadores de urgência
-                """)
+#**7️⃣ RICs**
+#- Requerimentos de Informação
+#- Prazo de 30 dias para resposta
+#- Indicadores de urgência
+                #""")
             
-            st.markdown("---")
-            st.markdown("### 📋 Tipos de Proposições")
+            #st.markdown("---")
+            #st.markdown("### 📋 Tipos de Proposições")
             
-            st.markdown("""
-| Sigla | Nome | Descrição |
-|-------|------|-----------|
-| **PL** | Projeto de Lei | Lei ordinária |
-| **PLP** | Projeto de Lei Complementar | Complementa a Constituição |
-| **PEC** | Proposta de Emenda | Altera a Constituição |
-| **RIC** | Requerimento de Informação | Prazo: 30 dias |
-| **PDL** | Projeto de Decreto Legislativo | Competência do Congresso |
+            #st.markdown("""
+#| Sigla | Nome | Descrição |
+#|-------|------|-----------|
+#| **PL** | Projeto de Lei | Lei ordinária |
+#| **PLP** | Projeto de Lei Complementar | Complementa a Constituição |
+#| **PEC** | Proposta de Emenda | Altera a Constituição |
+#| **RIC** | Requerimento de Informação | Prazo: 30 dias |
+#| **PDL** | Projeto de Decreto Legislativo | Competência do Congresso |
             """)
         
-        st.markdown("---")
-        st.caption("📊 Dados: API Câmara dos Deputados | Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta")
+        #st.markdown("---")
+        #st.caption("📊 Dados: API Câmara dos Deputados | Desenvolvido por Lucas Pinheiro para o Gabinete da Dep. Júlia Zanatta")
 
     # ============================================================
     # ABA 2 - AUTORIA & RELATORIA NA PAUTA - OTIMIZADA
