@@ -3,21 +3,22 @@ name: Monitor Palavras-chave
 on:
   schedule:
     # ============================================================
-    # HORÁRIOS (Brasília → UTC)
+    # HORÁRIOS OTIMIZADOS (Brasília → UTC)
+    # Ajustados para evitar concorrência com notificar-tramitacoes
     # ============================================================
-    # 
-    # BOM DIA: 08:00 BRT = 11:00 UTC
-    - cron: '0 11 * * 1-5'
     
-    # VARREDURAS: de 3 em 3h (menos frequente que o outro bot)
+    # BOM DIA: 08:05 BRT = 11:05 UTC (10min depois do outro)
+    - cron: '5 11 * * 1-5'
+    
+    # VARREDURAS: de 3 em 3h (menos frequente, horários diferentes)
     # 09:00 BRT = 12:00 UTC
     # 12:00 BRT = 15:00 UTC
     # 15:00 BRT = 18:00 UTC
     # 18:00 BRT = 21:00 UTC
     - cron: '0 12,15,18,21 * * 1-5'
     
-    # RESUMO DO DIA: 20:00 BRT = 23:00 UTC
-    - cron: '0 23 * * 1-5'
+    # RESUMO DO DIA: 20:45 BRT = 23:45 UTC (15min depois do outro)
+    - cron: '45 23 * * 1-5'
   
   workflow_dispatch:
     inputs:
@@ -37,11 +38,12 @@ permissions:
 
 jobs:
   # ============================================================
-  # JOB: BOM DIA (08:00 BRT)
+  # JOB: BOM DIA (08:05 BRT)
   # ============================================================
   bom_dia:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 11 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'bom_dia')
+    timeout-minutes: 10
+    if: github.event.schedule == '5 11 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'bom_dia')
     
     steps:
       - name: Checkout do código
@@ -51,6 +53,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Instalar dependências
         run: pip install requests
@@ -77,6 +80,8 @@ jobs:
         run: python notificar_palavras_chave.py
       
       - name: Salvar estado no repositório
+        if: always()
+        continue-on-error: true
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -89,6 +94,7 @@ jobs:
   # ============================================================
   varredura:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event.schedule == '0 12,15,18,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'varredura')
     
     steps:
@@ -99,6 +105,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Instalar dependências
         run: pip install requests
@@ -125,6 +132,8 @@ jobs:
         run: python notificar_palavras_chave.py
       
       - name: Salvar estado no repositório
+        if: always()
+        continue-on-error: true
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -133,11 +142,12 @@ jobs:
           git push || true
 
   # ============================================================
-  # JOB: RESUMO DO DIA (20:00 BRT)
+  # JOB: RESUMO DO DIA (20:45 BRT)
   # ============================================================
   resumo:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'resumo')
+    timeout-minutes: 10
+    if: github.event.schedule == '45 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'resumo')
     
     steps:
       - name: Checkout do código
@@ -147,6 +157,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Instalar dependências
         run: pip install requests
@@ -173,6 +184,8 @@ jobs:
         run: python notificar_palavras_chave.py
       
       - name: Salvar estado no repositório
+        if: always()
+        continue-on-error: true
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
