@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 
 # Usa funções utilitárias já existentes no projeto
 from core.utils.date_utils import get_brasilia_now
+from core.config import DEPUTADA_ID_PADRAO
+
 
 
 def render_tab1(provider) -> None:
