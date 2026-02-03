@@ -63,7 +63,15 @@
       "data_tramitacao": "2026-02-02T14:27",
       "registrado_em": "2026-02-02T14:52:00.588574-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2600189_2026-02-02T15:42",
+      "proposicao_id": 2600189,
+      "sigla": "PDL 8/2026",
+      "data_tramitacao": "2026-02-02T15:42",
+      "registrado_em": "2026-02-03T11:24:57.147127-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-02T14:40:14.946924-03:00"
+  "ultima_limpeza": "2026-02-03T11:10:00.399768-03:00"
 }
