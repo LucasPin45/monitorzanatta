@@ -71,7 +71,31 @@
       "data_tramitacao": "2026-02-02T15:42",
       "registrado_em": "2026-02-03T11:24:57.147127-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2600923_2026-02-04T15:46",
+      "proposicao_id": 2600923,
+      "sigla": "PL 289/2026",
+      "data_tramitacao": "2026-02-04T15:46",
+      "registrado_em": "2026-02-04T18:58:43.057543-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2576168_2026-02-04T13:15",
+      "proposicao_id": 2576168,
+      "sigla": "PEC 38/2025",
+      "data_tramitacao": "2026-02-04T13:15",
+      "registrado_em": "2026-02-04T18:58:45.411640-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2600976_2026-02-04T17:03",
+      "proposicao_id": 2600976,
+      "sigla": "REQ 220/2026",
+      "data_tramitacao": "2026-02-04T17:03",
+      "registrado_em": "2026-02-04T18:58:47.707744-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-04T15:01:51.459091-03:00"
+  "ultima_limpeza": "2026-02-04T18:46:41.828431-03:00"
 }
