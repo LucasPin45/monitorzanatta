@@ -95,7 +95,47 @@
       "data_tramitacao": "2026-02-04T17:03",
       "registrado_em": "2026-02-04T18:58:47.707744-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2576193_2026-02-04T16:00",
+      "proposicao_id": 2576193,
+      "sigla": "PL 5421/2025",
+      "data_tramitacao": "2026-02-04T16:00",
+      "registrado_em": "2026-02-05T09:02:49.444931-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2464773_2026-02-04T10:00",
+      "proposicao_id": 2464773,
+      "sigla": "PL 4100/2024",
+      "data_tramitacao": "2026-02-04T10:00",
+      "registrado_em": "2026-02-05T09:02:52.107083-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2462129_2026-02-04T16:00",
+      "proposicao_id": 2462129,
+      "sigla": "PL 3915/2024",
+      "data_tramitacao": "2026-02-04T16:00",
+      "registrado_em": "2026-02-05T09:02:54.782112-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2456202_2026-02-04T16:00",
+      "proposicao_id": 2456202,
+      "sigla": "PL 3391/2024",
+      "data_tramitacao": "2026-02-04T16:00",
+      "registrado_em": "2026-02-05T09:02:57.865512-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2373036_2026-02-04T10:00",
+      "proposicao_id": 2373036,
+      "sigla": "PL 3462/2023",
+      "data_tramitacao": "2026-02-04T10:00",
+      "registrado_em": "2026-02-05T09:03:00.688725-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-04T20:41:44.976987-03:00"
+  "ultima_limpeza": "2026-02-05T08:49:22.123077-03:00"
 }
