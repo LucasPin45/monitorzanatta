@@ -135,7 +135,23 @@
       "data_tramitacao": "2026-02-04T10:00",
       "registrado_em": "2026-02-05T09:03:00.688725-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2516565_2026-02-04T12:50",
+      "proposicao_id": 2516565,
+      "sigla": "PL 2548/2025",
+      "data_tramitacao": "2026-02-04T12:50",
+      "registrado_em": "2026-02-05T15:17:48.860316-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2601158_2026-02-04T19:39",
+      "proposicao_id": 2601158,
+      "sigla": "REQ 4/2026",
+      "data_tramitacao": "2026-02-04T19:39",
+      "registrado_em": "2026-02-05T15:17:52.024345-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-05T12:55:58.523762-03:00"
+  "ultima_limpeza": "2026-02-05T15:02:47.230491-03:00"
 }
