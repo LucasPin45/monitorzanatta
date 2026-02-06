@@ -159,7 +159,15 @@
       "data_tramitacao": "2026-02-05T18:13",
       "registrado_em": "2026-02-05T18:56:06.693370-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2601231_2026-02-06T10:47",
+      "proposicao_id": 2601231,
+      "sigla": "RIC 125/2026",
+      "data_tramitacao": "2026-02-06T10:47",
+      "registrado_em": "2026-02-06T11:19:22.705447-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-06T08:47:26.261403-03:00"
+  "ultima_limpeza": "2026-02-06T11:07:34.074955-03:00"
 }
