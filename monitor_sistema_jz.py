@@ -8764,7 +8764,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     with tab2:
         _set_aba_atual(2)
         from modules.tabs.tab2_pauta import render_tab2
-        render_tab2(provider, exibir_detalhes_proposicao)
+        render_tab2(provider, exibir_detalhes_proposicao, id_deputada)
                
         
 # ============================================================
@@ -8773,7 +8773,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     with tab3:
         _set_aba_atual(3)
         from modules.tabs.tab3_palavras_chave import render_tab3
-        render_tab3(provider)
+        render_tab3(provider, id_deputada)
         
         
 # ============================================================
