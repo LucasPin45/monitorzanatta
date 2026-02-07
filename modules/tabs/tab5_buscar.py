@@ -218,7 +218,30 @@ def render_tab5(
         ].drop(columns=["_search"], errors="ignore")
         
         if df_rast.empty:
-            st.warning(f"⚠️ Nenhuma proposição de autoria encontrada com '{q}'")
+            # BUSCA DIRETA: Tentar buscar proposição por sigla/número/ano
+            # Permite encontrar proposições que não são de autoria mas estão no Senado
+            import re
+            match = re.match(r"([A-Z]+)\s*(\d+)/(\d{4})", q.upper())
+            if match:
+                sigla, numero, ano = match.groups()
+                
+                st.info(f"🔍 Buscando diretamente na API: {sigla} {numero}/{ano}")
+                
+                # Importar função de busca direta do monólito
+                from monitor_sistema_jz import buscar_proposicao_direta
+                
+                try:
+                    prop_direta = buscar_proposicao_direta(sigla, numero, ano)
+                    if prop_direta:
+                        # Criar DataFrame com a proposição encontrada
+                        df_rast = pd.DataFrame([prop_direta])
+                        st.success(f"✅ Encontrado: {prop_direta['Proposicao']} (não é de autoria, mas está tramitando)")
+                    else:
+                        st.warning(f"⚠️ Proposição '{q}' não encontrada na API da Câmara")
+                except Exception as e:
+                    st.error(f"❌ Erro na busca direta: {e}")
+            else:
+                st.warning(f"⚠️ Nenhuma proposição de autoria encontrada com '{q}'")
         else:
             st.caption(
                 f"🔍 Encontrado(s) {len(df_rast)} resultado(s) entre "
