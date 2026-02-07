@@ -61,10 +61,14 @@ def render_tab3(provider, id_deputada) -> None:
             dt_fim_t3 = hoje + datetime.timedelta(days=7)
     
     with col_kw_t3:
-        palavras_default = st.session_state.get(
-            "palavras_t3",
-            "\n".join(PALAVRAS_CHAVE_PADRAO)
-        )
+        # Obter palavras-chave do session_state ou usar padrão
+        palavras_salvas = st.session_state.get("palavras_t3", "")
+        
+        # Se estiver vazio, usar padrão
+        if not palavras_salvas or not palavras_salvas.strip():
+            palavras_default = "\n".join(PALAVRAS_CHAVE_PADRAO)
+        else:
+            palavras_default = palavras_salvas
         
         palavras_str_t3 = st.text_area(
             "🔑 Palavras-chave (uma por linha)",
