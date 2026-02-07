@@ -8781,7 +8781,7 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     with tab4:
         _set_aba_atual(4)
-        from modules.tabs.tab4_comissoes import render_tab
+        from modules.tabs.tab4_comissoes import render_tab4
         render_tab4(provider, id_deputada)
         
 # ============================================================
