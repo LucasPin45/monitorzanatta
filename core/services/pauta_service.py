@@ -181,6 +181,71 @@ def pauta_item_tem_relatoria_deputada(
     return True
 
 
+def pauta_item_palavras_chave(
+    item: Dict[str, Any],
+    palavras_chave_normalizadas: List[tuple],
+    id_prop: Optional[str] = None
+) -> Set[str]:
+    """
+    Busca palavras-chave na ementa e descrição do item da pauta.
+    
+    Args:
+        item: Item da pauta
+        palavras_chave_normalizadas: Lista de tuplas (palavra_normalizada, palavra_original)
+        id_prop: ID da proposição (opcional) para buscar ementa completa
+        
+    Returns:
+        Set de palavras-chave encontradas (originais)
+        
+    IMPORTANTE: Busca por PALAVRA INTEIRA para evitar falsos positivos
+    (ex: "arma" não deve casar com "Farmanguinhos")
+    """
+    textos = []
+    
+    # Buscar nos campos do item da pauta
+    for chave in ("ementa", "ementaDetalhada", "titulo", "descricao", "descricaoTipo"):
+        v = item.get(chave)
+        if v:
+            textos.append(str(v))
+    
+    # Buscar nos campos da proposição interna do item
+    prop = item.get("proposicao") or {}
+    for chave in ("ementa", "ementaDetalhada", "titulo"):
+        v = prop.get(chave)
+        if v:
+            textos.append(str(v))
+    
+    # Buscar na proposição relacionada
+    prop_rel = item.get("proposicaoRelacionada") or item.get("proposicao_") or {}
+    for chave in ("ementa", "ementaDetalhada", "titulo"):
+        v = prop_rel.get(chave)
+        if v:
+            textos.append(str(v))
+    
+    # Se tiver ID da proposição, buscar ementa completa na API
+    if id_prop:
+        info_prop = fetch_proposicao_info_cached(id_prop)
+        if info_prop and info_prop.get("ementa"):
+            textos.append(info_prop["ementa"])
+    
+    # Normalizar texto combinado
+    texto_norm = normalize_text(" ".join(textos))
+    encontradas = set()
+    
+    # Buscar cada palavra-chave usando regex para palavra inteira
+    for kw_norm, kw_original in palavras_chave_normalizadas:
+        if not kw_norm:
+            continue
+        
+        # Usar regex com word boundary para buscar palavra inteira
+        # Isso evita que "arma" case com "farmanguinhos"
+        pattern = r'\b' + re.escape(kw_norm) + r'\b'
+        if re.search(pattern, texto_norm):
+            encontradas.add(kw_original)
+    
+    return encontradas
+
+
 @lru_cache(maxsize=4096)
 def fetch_proposicao_info_cached(id_proposicao: str) -> Dict[str, Any]:
     """
@@ -229,10 +294,11 @@ def escanear_eventos(
     alvo_partido: str,
     alvo_uf: str,
     comissoes_estrategicas: List[str],
+    palavras_chave: Optional[List[str]] = None,
     ids_autoria_deputada: Optional[Set[str]] = None,
 ) -> pd.DataFrame:
     """
-    Escaneia eventos da Câmara buscando autoria e relatoria da deputada.
+    Escaneia eventos da Câmara buscando autoria, relatoria e/ou palavras-chave.
     
     Args:
         eventos: Lista de eventos (retorno de GET /eventos)
@@ -240,33 +306,28 @@ def escanear_eventos(
         alvo_partido: Partido da deputada
         alvo_uf: UF da deputada
         comissoes_estrategicas: Lista de siglas de comissões estratégicas
+        palavras_chave: Lista de palavras-chave a buscar (opcional)
         ids_autoria_deputada: Set de IDs de proposições de autoria (opcional)
         
     Returns:
-        DataFrame com eventos filtrados contendo autoria ou relatoria
+        DataFrame com eventos filtrados contendo autoria, relatoria ou palavras-chave
         
     Colunas do DataFrame:
-        - data: Data do evento (YYYY-MM-DD)
-        - hora: Hora do evento (HH:MM)
-        - orgao_id: ID do órgão
-        - orgao_sigla: Sigla do órgão
-        - orgao_nome: Nome do órgão
-        - id_evento: ID do evento
-        - tipo_evento: Tipo do evento
-        - descricao_evento: Descrição
-        - tem_relatoria_deputada: bool
-        - proposicoes_relatoria: str (separado por "; ")
-        - ids_proposicoes_relatoria: str (separado por ";")
-        - tem_autoria_deputada: bool
-        - proposicoes_autoria: str (separado por "; ")
-        - ids_proposicoes_autoria: str (separado por ";")
-        - tem_palavras_chave: bool (sempre False nesta versão)
-        - palavras_chave_encontradas: str (vazio)
-        - proposicoes_palavras_chave: str (vazio)
-        - comissao_estrategica: bool
+        - data, hora, orgao_id, orgao_sigla, orgao_nome
+        - id_evento, tipo_evento, descricao_evento
+        - tem_relatoria_deputada, proposicoes_relatoria, ids_proposicoes_relatoria
+        - tem_autoria_deputada, proposicoes_autoria, ids_proposicoes_autoria
+        - tem_palavras_chave, palavras_chave_encontradas, proposicoes_palavras_chave
+        - comissao_estrategica
     """
     if ids_autoria_deputada is None:
         ids_autoria_deputada = set()
+    
+    if palavras_chave is None:
+        palavras_chave = []
+    
+    # Normalizar palavras-chave
+    palavras_chave_norm = [(normalize_text(p), p) for p in palavras_chave if p.strip()]
     
     registros = []
     
@@ -296,11 +357,17 @@ def escanear_eventos(
         proposicoes_autoria = set()
         ids_proposicoes_autoria = set()
         ids_proposicoes_relatoria = set()
+        palavras_evento = set()
+        proposicoes_palavras_chave = set()
         
         # Processar cada item da pauta
         for item in pauta:
             # Extrair ID da proposição
             id_prop = get_proposicao_id_from_item(item)
+            
+            # Verificar palavras-chave
+            kws_item = pauta_item_palavras_chave(item, palavras_chave_norm, id_prop)
+            has_keywords = bool(kws_item)
             
             # Verificar relatoria
             relatoria_flag = pauta_item_tem_relatoria_deputada(
@@ -312,8 +379,8 @@ def escanear_eventos(
             if ids_autoria_deputada and id_prop:
                 autoria_flag = id_prop in ids_autoria_deputada
             
-            # Se não tem nem autoria nem relatoria, pular
-            if not (relatoria_flag or autoria_flag):
+            # Se não tem nem autoria, nem relatoria, nem palavras-chave, pular
+            if not (relatoria_flag or autoria_flag or has_keywords):
                 continue
             
             # Buscar informações da proposição
@@ -346,9 +413,41 @@ def escanear_eventos(
                 proposicoes_autoria.add(texto_completo)
                 if id_prop:
                     ids_proposicoes_autoria.add(str(id_prop))
+            
+            if has_keywords:
+                for kw in kws_item:
+                    palavras_evento.add(kw)
+                
+                # Pegar relator do item
+                relator_info = item.get("relator") or {}
+                relator_nome = relator_info.get("nome") or ""
+                relator_partido = relator_info.get("siglaPartido") or ""
+                relator_uf = relator_info.get("siglaUf") or ""
+                
+                if relator_nome:
+                    relator_str = f"{relator_nome} ({relator_partido}-{relator_uf})"
+                else:
+                    relator_str = "Sem relator designado"
+                
+                # Link para tramitação
+                link_tram = (
+                    f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={id_prop}" 
+                    if id_prop 
+                    else ""
+                )
+                
+                # Armazenar com formato detalhado incluindo comissão e data
+                # formato: matéria|||palavras|||ementa|||link|||relator|||comissao|||nome_comissao|||data
+                for org in orgaos:
+                    sigla_org_temp = org.get("siglaOrgao") or org.get("sigla") or ""
+                    nome_org_temp = org.get("nomeOrgao") or org.get("nome") or ""
+                    proposicoes_palavras_chave.add(
+                        f"{identificacao}|||{', '.join(kws_item)}|||{ementa_prop}|||"
+                        f"{link_tram}|||{relator_str}|||{sigla_org_temp}|||{nome_org_temp}|||{data_str}"
+                    )
         
         # Se não achou nenhuma proposição relevante, pular evento
-        if not (proposicoes_relatoria or proposicoes_autoria):
+        if not (proposicoes_relatoria or proposicoes_autoria or palavras_evento):
             continue
         
         # Criar registro para cada órgão do evento
@@ -372,9 +471,9 @@ def escanear_eventos(
                 "tem_autoria_deputada": bool(proposicoes_autoria),
                 "proposicoes_autoria": "; ".join(sorted(proposicoes_autoria)),
                 "ids_proposicoes_autoria": ";".join(sorted(ids_proposicoes_autoria)),
-                "tem_palavras_chave": False,
-                "palavras_chave_encontradas": "",
-                "proposicoes_palavras_chave": "",
+                "tem_palavras_chave": bool(palavras_evento),
+                "palavras_chave_encontradas": "; ".join(sorted(palavras_evento)),
+                "proposicoes_palavras_chave": "; ".join(sorted(proposicoes_palavras_chave)),
                 "comissao_estrategica": is_comissao_estrategica(
                     sigla_org, 
                     comissoes_estrategicas
