@@ -13,6 +13,9 @@ from core.utils import (
     to_pdf_palavras_chave,
 )
 
+# Constantes do projeto
+from core.config import PALAVRAS_CHAVE_PADRAO
+
 
 def render_tab3(provider, id_deputada) -> None:
     """
@@ -58,9 +61,6 @@ def render_tab3(provider, id_deputada) -> None:
             dt_fim_t3 = hoje + datetime.timedelta(days=7)
     
     with col_kw_t3:
-        # Obter palavras-chave padrão do provider
-        from core.config import PALAVRAS_CHAVE_PADRAO
-        
         palavras_default = st.session_state.get(
             "palavras_t3",
             "\n".join(PALAVRAS_CHAVE_PADRAO)
