@@ -8792,7 +8792,6 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         from modules.tabs.tab5_buscar import render_tab5
         render_tab5(provider, exibir_detalhes_proposicao, id_deputada)
         
-    
     # ============================================================
     # ABA 6 - MATÉRIAS POR SITUAÇÃO ATUAL (separada)
     # ============================================================
