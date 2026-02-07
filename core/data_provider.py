@@ -674,6 +674,43 @@ class DataProvider:
         # Combinar
         df = pd.concat([df1, df2], ignore_index=True)
         
+        # ===================================================================
+        # WORKAROUND: Adicionar proposições que a API não retorna (Bug da Câmara)
+        # PL 321/2023 e PLP 223/2023 são de autoria mas API não retorna!
+        # ===================================================================
+        if str(id_deputada) == "220559":  # Julia Zanatta
+            proposicoes_faltantes = [
+                {
+                    "id": "2347150",
+                    "siglaTipo": "PL",
+                    "numero": "321",
+                    "ano": "2023",
+                    "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941 (Código de Processo Penal), para prever a realização da audiência de custódia por videoconferência."
+                },
+                {
+                    "id": "2397890",
+                    "siglaTipo": "PLP",
+                    "numero": "223",
+                    "ano": "2023",
+                    "ementa": "Altera a Lei Complementar 123, de 14 de dezembro de 2006, para dispor sobre a prorrogação do prazo para o recolhimento de impostos para as Microempresas e Empresas de Pequeno Porte, em situação de decretação de estado de calamidade pública estadual ou distrital."
+                },
+            ]
+            
+            # IDs já existentes
+            ids_existentes = set(df["id"].astype(str).tolist()) if not df.empty else set()
+            
+            # Adicionar faltantes
+            rows_faltantes = []
+            for prop in proposicoes_faltantes:
+                if prop["id"] not in ids_existentes:
+                    rows_faltantes.append(prop)
+                    print(f"[WORKAROUND] ✅ Adicionada: {prop['siglaTipo']} {prop['numero']}/{prop['ano']} (ID {prop['id']})")
+            
+            if rows_faltantes:
+                df_faltantes = pd.DataFrame(rows_faltantes)
+                df = pd.concat([df, df_faltantes], ignore_index=True)
+        # ===================================================================
+        
         # Garantir coluna Proposicao
         if "Proposicao" not in df.columns:
             df["Proposicao"] = ""
@@ -933,20 +970,43 @@ class DataProvider:
         """
         Retorna lista de anos padrão para filtro.
         
-        Regra: últimos 2 anos.
+        Regra: 3 anos mais recentes + SEMPRE inclui 2023 (PL 321/2023, PLP 223/2023).
         
         Args:
             anos_disponiveis: Lista de anos disponíveis
             
         Returns:
-            Lista de anos padrão (até 2 anos mais recentes)
+            Lista de anos padrão
+            
+        Exemplo:
+            Em 2026: [2026, 2025, 2024, 2023]
         """
         if not anos_disponiveis:
             return []
         
-        # Últimos 2 anos
-        anos_sorted = sorted(anos_disponiveis, reverse=True)
-        return anos_sorted[:2]
+        # Converter para strings e limpar
+        anos_clean = [str(a).strip() for a in anos_disponiveis if str(a).strip().isdigit()]
+        if not anos_clean:
+            return []
+        
+        # Ordenar (mais recentes primeiro)
+        anos_sorted = sorted(set(anos_clean), reverse=True)
+        
+        # Pegar top 3
+        top3 = anos_sorted[:3]
+        
+        # Construir lista de defaults
+        defaults = []
+        for a in top3:
+            if a not in defaults:
+                defaults.append(a)
+        
+        # REGRA ESPECIAL: SEMPRE incluir 2023 se existir
+        # Necessário para PL 321/2023 e PLP 223/2023
+        if "2023" in anos_sorted and "2023" not in defaults:
+            defaults.append("2023")
+        
+        return defaults
 
     def clear_proposicoes_cache(self) -> None:
         """
