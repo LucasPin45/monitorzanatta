@@ -218,30 +218,61 @@ def render_tab5(
         ].drop(columns=["_search"], errors="ignore")
         
         if df_rast.empty:
-            # BUSCA DIRETA: Tentar buscar proposição por sigla/número/ano
-            # Permite encontrar proposições que não são de autoria mas estão no Senado
+            # BUSCA DIRETA INTELIGENTE
+            # Aceita tanto "PL 321/2023" quanto "PL 321" (sem ano)
             import re
-            match = re.match(r"([A-Z]+)\s*(\d+)/(\d{4})", q.upper())
-            if match:
-                sigla, numero, ano = match.groups()
+            import datetime
+            from monitor_sistema_jz import buscar_proposicao_direta
+            
+            # Padrão 1: Completo (PL 321/2023)
+            match_completo = re.match(r"([A-Z]+)\s*(\d+)/(\d{4})", q.upper())
+            
+            # Padrão 2: Parcial (PL 321)
+            match_parcial = re.match(r"([A-Z]+)\s*(\d+)$", q.upper())
+            
+            if match_completo:
+                # Busca com ano específico
+                sigla, numero, ano = match_completo.groups()
                 
-                st.info(f"🔍 Buscando diretamente na API: {sigla} {numero}/{ano}")
-                
-                # Importar função de busca direta do monólito
-                from monitor_sistema_jz import buscar_proposicao_direta
+                st.info(f"🔍 Buscando diretamente: {sigla} {numero}/{ano}")
                 
                 try:
                     prop_direta = buscar_proposicao_direta(sigla, numero, ano)
                     if prop_direta:
-                        # Criar DataFrame com a proposição encontrada
                         df_rast = pd.DataFrame([prop_direta])
-                        st.success(f"✅ Encontrado: {prop_direta['Proposicao']} (não é de autoria, mas está tramitando)")
+                        st.success(f"✅ Encontrado: {prop_direta['Proposicao']}")
                     else:
-                        st.warning(f"⚠️ Proposição '{q}' não encontrada na API da Câmara")
+                        st.warning(f"⚠️ Proposição '{q}' não encontrada")
                 except Exception as e:
-                    st.error(f"❌ Erro na busca direta: {e}")
+                    st.error(f"❌ Erro na busca: {e}")
+                    
+            elif match_parcial:
+                # Busca sem ano - tenta anos recentes
+                sigla, numero = match_parcial.groups()
+                
+                st.info(f"🔍 Buscando {sigla} {numero} (testando anos recentes...)")
+                
+                # Tentar anos: atual e 3 anteriores
+                ano_atual = datetime.datetime.now().year
+                anos_tentar = [ano_atual, ano_atual - 1, ano_atual - 2, ano_atual - 3]
+                
+                prop_encontrada = None
+                for ano in anos_tentar:
+                    try:
+                        prop = buscar_proposicao_direta(sigla, numero, str(ano))
+                        if prop:
+                            prop_encontrada = prop
+                            break
+                    except:
+                        continue
+                
+                if prop_encontrada:
+                    df_rast = pd.DataFrame([prop_encontrada])
+                    st.success(f"✅ Encontrado: {prop_encontrada['Proposicao']}")
+                else:
+                    st.warning(f"⚠️ {sigla} {numero} não encontrado nos últimos {len(anos_tentar)} anos")
             else:
-                st.warning(f"⚠️ Nenhuma proposição de autoria encontrada com '{q}'")
+                st.warning(f"⚠️ Nenhuma proposição encontrada com '{q}'")
         else:
             st.caption(
                 f"🔍 Encontrado(s) {len(df_rast)} resultado(s) entre "
@@ -646,47 +677,14 @@ def render_tab5(
     # DETALHES DA PROPOSIÇÃO SELECIONADA
     # ============================================================
     selected_id = None
-    senado_data_row = None
     
     try:
         if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
             row_idx = sel["selection"]["rows"][0]
             row_data = df_tbl.iloc[row_idx]
             selected_id = str(row_data["ID"])
-            
-            # Extrair dados do Senado corretamente (pandas Series)
-            def safe_get(series, key, default=""):
-                try:
-                    val = series.get(key, default)
-                    if pd.isna(val):
-                        return default
-                    return val
-                except:
-                    return default
-            
-            def safe_get_bool(series, key):
-                try:
-                    val = series.get(key, False)
-                    if pd.isna(val):
-                        return False
-                    return bool(val)
-                except:
-                    return False
-            
-            senado_data_row = {
-                "no_senado": safe_get_bool(row_data, "no_senado"),
-                "codigo_materia_senado": safe_get(row_data, "codigo_materia_senado", ""),
-                "id_processo_senado": safe_get(row_data, "id_processo_senado", ""),
-                "situacao_senado": safe_get(row_data, "situacao_senado", ""),
-                "url_senado": safe_get(row_data, "url_senado", ""),
-                "Relator_Senado": safe_get(row_data, "Relator_Senado", ""),
-                "Orgao_Senado_Sigla": safe_get(row_data, "Orgao_Senado_Sigla", ""),
-                "Orgao_Senado_Nome": safe_get(row_data, "Orgao_Senado_Nome", ""),
-                "UltimasMov_Senado": safe_get(row_data, "UltimasMov_Senado", ""),
-            }
     except Exception:
         selected_id = None
-        senado_data_row = None
     
     st.markdown("---")
     st.markdown("#### 📋 Detalhes da Proposição Selecionada")
@@ -694,8 +692,9 @@ def render_tab5(
     if not selected_id:
         st.info("Clique em uma proposição acima para ver detalhes completos.")
     else:
+        # Não passar senado_data - deixar função buscar internamente
+        # Isso evita bug no monólito (linha 8108: rel_sen não definido)
         exibir_detalhes_proposicao_func(
             selected_id,
-            key_prefix="tab5",
-            senado_data=senado_data_row
+            key_prefix="tab5"
         )
