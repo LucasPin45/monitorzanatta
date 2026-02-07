@@ -8,9 +8,10 @@ Camada central de dados do app.
 from __future__ import annotations
 
 import concurrent.futures
+import datetime
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
@@ -25,6 +26,12 @@ from core.utils.date_utils import (
     days_since,
     fmt_dt_br,
     parse_prazo_resposta_ric,
+)
+
+# Imports para Tab 2 - Pauta
+from core.services.pauta_service import (
+    escanear_eventos,
+    fetch_proposicao_info_cached,
 )
 
 
@@ -394,6 +401,172 @@ class DataProvider:
                     return assunto
         
         return ""
+
+    # ---------------------------------------------------------------------
+    # TAB 2 - PAUTA (EVENTOS E AUTORIA/RELATORIA)
+    # ---------------------------------------------------------------------
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _cached_get_eventos(_self, start_date: datetime.date, end_date: datetime.date) -> List[Dict[str, Any]]:
+        """
+        Busca eventos da Câmara no período especificado.
+        Cache: 1 hora (eventos podem mudar ao longo do dia).
+        """
+        import requests
+        
+        eventos = []
+        pagina = 1
+        base_url = "https://dadosabertos.camara.leg.br/api/v2"
+        
+        while True:
+            params = {
+                "dataInicio": start_date.strftime("%Y-%m-%d"),
+                "dataFim": end_date.strftime("%Y-%m-%d"),
+                "pagina": pagina,
+                "itens": 100,
+                "ordem": "ASC",
+                "ordenarPor": "dataHoraInicio",
+            }
+            
+            try:
+                response = requests.get(f"{base_url}/eventos", params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+            except Exception as e:
+                print(f"[ERRO] get_eventos: {e}")
+                break
+            
+            dados = data.get("dados", [])
+            if not dados:
+                break
+            
+            eventos.extend(dados)
+            
+            # Verificar se há próxima página
+            links = data.get("links", [])
+            if not any(link.get("rel") == "next" for link in links):
+                break
+            
+            pagina += 1
+        
+        return eventos
+
+    def get_eventos(self, start_date: datetime.date, end_date: datetime.date) -> List[Dict[str, Any]]:
+        """
+        Busca eventos da Câmara em um período.
+        
+        Args:
+            start_date: Data inicial (inclusive)
+            end_date: Data final (inclusive)
+            
+        Returns:
+            Lista de eventos (cada evento é um dict)
+        """
+        return self._cached_get_eventos(start_date, end_date)
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _cached_get_ids_autoria_deputada(_self, id_deputada: int) -> Set[str]:
+        """
+        Busca IDs de todas as proposições de autoria da deputada.
+        Cache: 1 hora.
+        """
+        import requests
+        
+        ids = set()
+        base_url = "https://dadosabertos.camara.leg.br/api/v2"
+        url = f"{base_url}/proposicoes"
+        
+        params = {
+            "idDeputadoAutor": id_deputada,
+            "itens": 100,
+            "ordem": "ASC",
+            "ordenarPor": "id"
+        }
+        
+        while True:
+            try:
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+            except Exception as e:
+                print(f"[ERRO] get_ids_autoria_deputada: {e}")
+                break
+            
+            for d in data.get("dados", []):
+                if d.get("id"):
+                    ids.add(str(d["id"]))
+            
+            # Verificar próxima página
+            next_link = None
+            for link in data.get("links", []):
+                if link.get("rel") == "next":
+                    next_link = link.get("href")
+                    break
+            
+            if not next_link:
+                break
+            
+            url = next_link
+            params = {}  # Próxima URL já tem todos os parâmetros
+        
+        return ids
+
+    def get_ids_autoria_deputada(self, id_deputada: int) -> Set[str]:
+        """
+        Retorna set de IDs de proposições de autoria da deputada.
+        
+        Args:
+            id_deputada: ID da deputada na API da Câmara
+            
+        Returns:
+            Set de IDs (strings)
+        """
+        return self._cached_get_ids_autoria_deputada(id_deputada)
+
+    def escanear_eventos_pauta(
+        self,
+        eventos: List[Dict[str, Any]],
+        nome_deputada: str,
+        partido_deputada: str,
+        uf_deputada: str,
+        ids_autoria_deputada: Optional[Set[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Escaneia eventos buscando proposições de autoria ou relatoria da deputada.
+        
+        Args:
+            eventos: Lista de eventos (retorno de get_eventos)
+            nome_deputada: Nome da deputada
+            partido_deputada: Sigla do partido
+            uf_deputada: UF
+            ids_autoria_deputada: Set de IDs de proposições de autoria (opcional)
+            
+        Returns:
+            DataFrame com eventos filtrados
+        """
+        # Importar aqui para evitar circular import
+        from core.config import COMISSOES_ESTRATEGICAS_PADRAO
+        
+        return escanear_eventos(
+            eventos=eventos,
+            alvo_nome=nome_deputada,
+            alvo_partido=partido_deputada,
+            alvo_uf=uf_deputada,
+            comissoes_estrategicas=COMISSOES_ESTRATEGICAS_PADRAO,
+            ids_autoria_deputada=ids_autoria_deputada or set(),
+        )
+
+    def get_proposicao_info(self, id_proposicao: str) -> Dict[str, Any]:
+        """
+        Busca informações básicas de uma proposição.
+        
+        Args:
+            id_proposicao: ID da proposição
+            
+        Returns:
+            Dict com: id, sigla, numero, ano, ementa
+        """
+        return fetch_proposicao_info_cached(id_proposicao)
 
     # ---------------------------------------------------------------------
     # SENADO (placeholder)
