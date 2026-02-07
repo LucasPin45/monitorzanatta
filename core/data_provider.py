@@ -593,6 +593,39 @@ class DataProvider:
             ids_autoria_deputada=ids_autoria_deputada or set(),
         )
 
+    def escanear_eventos_comissoes(
+        self,
+        eventos: List[Dict[str, Any]],
+        nome_deputada: str,
+        partido_deputada: str,
+        uf_deputada: str,
+        comissoes_estrategicas: List[str],
+        ids_autoria_deputada: Optional[Set[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Escaneia eventos buscando eventos em comissões estratégicas específicas.
+        
+        Args:
+            eventos: Lista de eventos (retorno de get_eventos)
+            nome_deputada: Nome da deputada
+            partido_deputada: Sigla do partido
+            uf_deputada: UF
+            comissoes_estrategicas: Lista de siglas de comissões estratégicas
+            ids_autoria_deputada: Set de IDs de proposições de autoria (opcional)
+            
+        Returns:
+            DataFrame com eventos das comissões estratégicas
+        """
+        return escanear_eventos(
+            eventos=eventos,
+            alvo_nome=nome_deputada,
+            alvo_partido=partido_deputada,
+            alvo_uf=uf_deputada,
+            palavras_chave=[],  # Sem palavras-chave (Tab 4)
+            comissoes_estrategicas=comissoes_estrategicas,
+            ids_autoria_deputada=ids_autoria_deputada or set(),
+        )
+
     def get_proposicao_info(self, id_proposicao: str) -> Dict[str, Any]:
         """
         Busca informações básicas de uma proposição.
