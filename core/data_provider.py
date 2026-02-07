@@ -975,6 +975,46 @@ class DataProvider:
         fetch_lista_proposicoes_autoria.clear()
         build_status_map.clear()
 
+    def processar_proposicoes_com_senado(
+        self,
+        df_proposicoes: pd.DataFrame,
+        debug: bool = False,
+        mostrar_progresso: bool = True
+    ) -> pd.DataFrame:
+        """
+        Processa lista de proposições e enriquece com dados do Senado.
+        
+        Wrapper para o serviço de integração do Senado.
+        
+        Args:
+            df_proposicoes: DataFrame com proposições
+            debug: Modo debug
+            mostrar_progresso: Mostrar barra de progresso
+            
+        Returns:
+            DataFrame enriquecido com dados do Senado
+        """
+        from core.services.senado_integration import processar_lista_com_senado
+        
+        return processar_lista_com_senado(
+            df_proposicoes,
+            debug=debug,
+            mostrar_progresso=mostrar_progresso
+        )
+
+    def clear_all_proposicoes_cache(self) -> None:
+        """
+        Limpa TODOS os caches relacionados a proposições.
+        
+        Versão estendida de clear_proposicoes_cache que também
+        limpa o cache do build_proposicoes_status_map.
+        """
+        self.clear_proposicoes_cache()
+        
+        # Limpar também o cache do status map
+        if hasattr(self.build_proposicoes_status_map, 'clear'):
+            self.build_proposicoes_status_map.clear()
+
     # ---------------------------------------------------------------------
     # SENADO (placeholder)
     # ---------------------------------------------------------------------
