@@ -32,10 +32,10 @@ DEPUTADA_ID_PADRAO = 220559
 
 PALAVRAS_CHAVE_PADRAO = [
     "Vacina", "Vacinas", "Armas", "Arma", "Armamento", "Aborto", "Conanda", 
-    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística"
+    "Violência", "PIX", "DREX", "Imposto de Renda", "IRPF", "Logística", "Plano de Saude",
 ]
 
-COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CCOM", "CE", "CREDN", "CCJC"]
+COMISSOES_ESTRATEGICAS_PADRAO = ["CDC", "CSAUDE", "CCJC"]
 
 TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 
