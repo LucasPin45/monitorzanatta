@@ -2199,6 +2199,26 @@ TIPOS_CARTEIRA_PADRAO = ["PL", "PLP", "PDL", "PEC", "PRC", "PLV", "MPV", "RIC"]
 # ============================================================
 PROPOSICOES_FALTANTES_API = {
     "220559": [  # Julia Zanatta - Projetos que a API não retorna corretamente
+        
+        # === PROJETOS NO SENADO (PRINCIPAIS) ===
+        {
+            "id": "2347150",
+            "siglaTipo": "PL",
+            "numero": "321",
+            "ano": "2023",
+            "ementa": "Altera o Decreto-Lei nº 3.689, de 3 de outubro de 1941 (Código de Processo Penal), para prever a realização da audiência de custódia por videoconferência."
+        },
+        {
+            "id": "2397890",
+            "siglaTipo": "PLP",
+            "numero": "223",
+            "ano": "2023",
+            "ementa": "Altera a Lei Complementar 123, de 14 de dezembro de 2006, para dispor sobre a prorrogação do prazo para o recolhimento de impostos para as Microempresas e Empresas de Pequeno Porte, em situação de decretação de estado de calamidade pública estadual ou distrital."
+        },
+        
+        # === OUTROS PROJETOS FALTANTES ===
+        {"id": "2381193", "siglaTipo": "PL", "numero": "4045", "ano": "2023"},   # PL 4045/2023
+        
         # === PROJETOS APENSADOS (24 total) ===
         {"id": "2570510", "siglaTipo": "PL", "numero": "5072", "ano": "2025"},   # PL 5072/2025
         {"id": "2571359", "siglaTipo": "PL", "numero": "5128", "ano": "2025"},   # PL 5128/2025
@@ -2224,9 +2244,6 @@ PROPOSICOES_FALTANTES_API = {
         {"id": "2390075", "siglaTipo": "PDL", "numero": "337", "ano": "2023"},   # PDL 337/2023
         {"id": "2361454", "siglaTipo": "PL", "numero": "2472", "ano": "2023"},   # PL 2472/2023
         {"id": "2365600", "siglaTipo": "PL", "numero": "2815", "ano": "2023"},   # PL 2815/2023
-        # === OUTROS PROJETOS FALTANTES ===
-        {"id": "2347150", "siglaTipo": "PL", "numero": "321", "ano": "2023"},    # PL 321/2023 (no Senado)
-        {"id": "2381193", "siglaTipo": "PL", "numero": "4045", "ano": "2023"},   # PL 4045/2023
     ]
 }
 
