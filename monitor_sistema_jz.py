@@ -8764,8 +8764,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     with tab2:
         _set_aba_atual(2)
         from modules.tabs.tab2_pauta import render_tab2
-        render_tab2(provider, exibir_detalhes_proposicao
-        
+        render_tab2(provider, exibir_detalhes_proposicao)
+               
         
 # ============================================================
     # ABA 3 - PALAVRAS-CHAVE
