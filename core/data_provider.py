@@ -639,6 +639,343 @@ class DataProvider:
         return fetch_proposicao_info_cached(id_proposicao)
 
     # ---------------------------------------------------------------------
+    # TAB 5 - BUSCAR PROPOSIÇÕES
+    # ---------------------------------------------------------------------
+
+    def fetch_proposicoes_autoria(self, id_deputada: int) -> pd.DataFrame:
+        """
+        Busca proposições de autoria da deputada.
+        
+        Combina proposições gerais e RICs em um único DataFrame.
+        
+        Args:
+            id_deputada: ID da deputada
+            
+        Returns:
+            DataFrame com: id, Proposicao, siglaTipo, numero, ano, ementa
+        """
+        # Importar funções necessárias
+        from core.functions import (
+            fetch_lista_proposicoes_autoria_geral,
+            fetch_rics_por_autor,
+            format_sigla_num_ano
+        )
+        
+        # Buscar proposições gerais
+        df1 = fetch_lista_proposicoes_autoria_geral(id_deputada)
+        # Buscar RICs
+        df2 = fetch_rics_por_autor(id_deputada)
+        
+        if df1.empty and df2.empty:
+            return pd.DataFrame(
+                columns=["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa"]
+            )
+        
+        # Combinar
+        df = pd.concat([df1, df2], ignore_index=True)
+        
+        # Garantir coluna Proposicao
+        if "Proposicao" not in df.columns:
+            df["Proposicao"] = ""
+        
+        # Preencher Proposicao vazia
+        mask = df["Proposicao"].isna() | (df["Proposicao"].astype(str).str.strip() == "")
+        if mask.any():
+            df.loc[mask, "Proposicao"] = df.loc[mask].apply(
+                lambda r: format_sigla_num_ano(
+                    r.get("siglaTipo"),
+                    r.get("numero"),
+                    r.get("ano")
+                ),
+                axis=1
+            )
+        
+        # Remover duplicatas
+        df = df.drop_duplicates(subset=["id"], keep="first")
+        
+        # Garantir colunas
+        cols = ["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa"]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        
+        return df[cols]
+
+    @st.cache_data(show_spinner=False, ttl=900)
+    def build_proposicoes_status_map(_self, ids: List[str]) -> Dict:
+        """
+        Constrói mapa de status para proposições.
+        
+        Busca status, andamento, relator, órgão para cada proposição.
+        Para RICs, busca também informações de prazo.
+        
+        Args:
+            ids: Lista de IDs de proposições
+            
+        Returns:
+            Dict mapeando ID → dados de status
+        """
+        # Importar funções necessárias
+        from core.functions import (
+            fetch_proposicao_completa,
+            canonical_situacao,
+            parse_prazo_resposta_ric,
+            extrair_ministerio_ric,
+            extrair_assunto_ric
+        )
+        import concurrent.futures
+        
+        out: Dict = {}
+        ids = [str(x) for x in (ids or []) if str(x).strip()]
+        if not ids:
+            return out
+        
+        def _one(pid: str):
+            dados_completos = fetch_proposicao_completa(pid)
+            
+            situacao = canonical_situacao(
+                dados_completos.get("status_descricaoSituacao", "")
+            )
+            andamento = dados_completos.get("status_descricaoTramitacao", "")
+            relator_info = dados_completos.get("relator", {})
+            tramitacoes = dados_completos.get("tramitacoes", [])
+            sigla_tipo = dados_completos.get("sigla", "")
+            ementa = dados_completos.get("ementa", "")
+            
+            # Formatar relator
+            relator_txt = ""
+            relator_id = ""
+            if relator_info and relator_info.get("nome"):
+                nome = relator_info.get("nome", "")
+                partido = relator_info.get("partido", "")
+                uf = relator_info.get("uf", "")
+                relator_id = str(relator_info.get("id_deputado", ""))
+                if partido or uf:
+                    relator_txt = f"{nome} ({partido}/{uf})".replace(
+                        "//", "/"
+                    ).replace("(/", "(").replace("/)", ")")
+                else:
+                    relator_txt = nome
+            
+            # Resultado base
+            resultado = {
+                "situacao": situacao,
+                "andamento": andamento,
+                "status_dataHora": dados_completos.get("status_dataHora", ""),
+                "siglaOrgao": dados_completos.get("status_siglaOrgao", ""),
+                "relator": relator_txt,
+                "relator_id": relator_id,
+                "sigla_tipo": sigla_tipo,
+                "ementa": ementa,
+            }
+            
+            # Se for RIC, extrair informações adicionais
+            if sigla_tipo == "RIC":
+                prazo_info = parse_prazo_resposta_ric(tramitacoes, situacao)
+                resultado.update({
+                    "ric_data_remessa": prazo_info.get("data_remessa"),
+                    "ric_inicio_contagem": prazo_info.get("inicio_contagem"),
+                    "ric_prazo_inicio": prazo_info.get("prazo_inicio"),
+                    "ric_prazo_fim": prazo_info.get("prazo_fim"),
+                    "ric_prazo_str": prazo_info.get("prazo_str", ""),
+                    "ric_dias_restantes": prazo_info.get("dias_restantes"),
+                    "ric_fonte_prazo": prazo_info.get("fonte_prazo", ""),
+                    "ric_status_resposta": prazo_info.get("status_resposta"),
+                    "ric_data_resposta": prazo_info.get("data_resposta"),
+                    "ric_respondido": prazo_info.get("respondido", False),
+                    "ric_ministerio": extrair_ministerio_ric(ementa, tramitacoes),
+                    "ric_assunto": extrair_assunto_ric(ementa),
+                })
+            
+            return pid, resultado
+        
+        max_workers = 10 if len(ids) >= 40 else 6
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for pid, payload in ex.map(_one, ids):
+                out[str(pid)] = payload
+        
+        return out
+
+    def enrich_proposicoes_with_status(
+        self,
+        df_base: pd.DataFrame,
+        status_map: Dict
+    ) -> pd.DataFrame:
+        """
+        Enriquece DataFrame de proposições com informações de status.
+        
+        Args:
+            df_base: DataFrame base com proposições
+            status_map: Mapa de status (retorno de build_proposicoes_status_map)
+            
+        Returns:
+            DataFrame enriquecido com colunas de status
+        """
+        # Importar funções necessárias
+        from core.functions import (
+            canonical_situacao,
+            camara_link_deputado,
+            get_proposicao_principal_id,
+            fetch_proposicao_completa,
+            format_relator_text
+        )
+        import datetime
+        
+        df = df_base.copy()
+        
+        # Mapear campos básicos
+        df["Situação atual"] = df["id"].astype(str).map(
+            lambda x: canonical_situacao(status_map.get(str(x), {}).get("situacao", ""))
+        )
+        df["Andamento (status)"] = df["id"].astype(str).map(
+            lambda x: status_map.get(str(x), {}).get("andamento", "")
+        )
+        df["Data do status (raw)"] = df["id"].astype(str).map(
+            lambda x: status_map.get(str(x), {}).get("status_dataHora", "")
+        )
+        df["Órgão (sigla)"] = df["id"].astype(str).map(
+            lambda x: status_map.get(str(x), {}).get("siglaOrgao", "")
+        )
+        df["Relator(a)"] = df["id"].astype(str).map(
+            lambda x: status_map.get(str(x), {}).get("relator", "—")
+        )
+        df["Relator_ID"] = df["id"].astype(str).map(
+            lambda x: status_map.get(str(x), {}).get("relator_id", "")
+        )
+        
+        # Normalizações
+        _SITUACOES_INTERNA = {
+            "Despacho de Apensação",
+            "Distribuição",
+            "Publicação de Despacho",
+            "Notificacao para Publicação Intermediária",
+            "Notificações",
+            "Ratificação de Parecer",
+        }
+        
+        # Unificar variações
+        df["Situação atual"] = df["Situação atual"].replace({
+            "Aguardando Parecer do Relator(a)": "Aguardando Parecer",
+            "Aguardando Parecer do Relator(a).": "Aguardando Parecer",
+        })
+        df.loc[
+            df["Situação atual"].astype(str).str.startswith("Aguardando Parecer", na=False),
+            "Situação atual"
+        ] = "Aguardando Parecer"
+        
+        # Tratar vazios como "Em providência Interna"
+        def _is_blankish(v):
+            if pd.isna(v):
+                return True
+            s = str(v).strip()
+            return s in ("", "-", "—", "–")
+        
+        df.loc[
+            df["Situação atual"].apply(_is_blankish),
+            "Situação atual"
+        ] = "Em providência Interna"
+        df.loc[
+            df["Situação atual"].isin(_SITUACOES_INTERNA),
+            "Situação atual"
+        ] = "Em providência Interna"
+        
+        # Preencher relator quando aguardando designação
+        mask_aguardando_relator = df["Situação atual"].isin([
+            "Aguardando Designação de Relator(a)",
+            "Aguardando Designacao de Relator(a)",
+        ])
+        df.loc[
+            mask_aguardando_relator & df["Relator(a)"].apply(_is_blankish),
+            "Relator(a)"
+        ] = "Aguardando"
+        
+        # Preencher relator para "Tramitando em Conjunto"
+        mask_conjunto = df["Situação atual"].eq("Tramitando em Conjunto")
+        if mask_conjunto.any():
+            def _fill_relator_conjunto(row):
+                if not _is_blankish(row.get("Relator(a)", "")):
+                    return row.get("Relator(a)", "—")
+                pid = str(row.get("id", "") or "").strip()
+                if not pid:
+                    return row.get("Relator(a)", "—")
+                principal_id = get_proposicao_principal_id(pid)
+                if not principal_id or str(principal_id) == pid:
+                    return row.get("Relator(a)", "—")
+                dados_principal = fetch_proposicao_completa(str(principal_id))
+                rel_txt, _ = format_relator_text(dados_principal.get("relator", {}) or {})
+                return rel_txt if rel_txt else row.get("Relator(a)", "—")
+            
+            df.loc[mask_conjunto, "Relator(a)"] = df.loc[mask_conjunto].apply(
+                _fill_relator_conjunto, axis=1
+            )
+        
+        # Link do relator
+        def _link_relator(row):
+            relator_id = row.get("Relator_ID", "")
+            if relator_id and str(relator_id).strip() not in ('', 'nan', 'None'):
+                return camara_link_deputado(relator_id)
+            return ""
+        
+        df["LinkRelator"] = df.apply(_link_relator, axis=1)
+        
+        # Processar data
+        dt = pd.to_datetime(df["Data do status (raw)"], errors="coerce")
+        df["DataStatus_dt"] = dt
+        df["Data do status"] = dt.dt.strftime("%d/%m/%Y %H:%M").where(dt.notna(), "")
+        
+        # Calcular dias parados
+        now = datetime.datetime.now()
+        df["Parado (dias)"] = (now - dt).dt.days
+        
+        return df
+
+    def get_default_anos_filter(self, anos_disponiveis: List[int]) -> List[int]:
+        """
+        Retorna lista de anos padrão para filtro.
+        
+        Regra: últimos 2 anos.
+        
+        Args:
+            anos_disponiveis: Lista de anos disponíveis
+            
+        Returns:
+            Lista de anos padrão (até 2 anos mais recentes)
+        """
+        if not anos_disponiveis:
+            return []
+        
+        # Últimos 2 anos
+        anos_sorted = sorted(anos_disponiveis, reverse=True)
+        return anos_sorted[:2]
+
+    def clear_proposicoes_cache(self) -> None:
+        """
+        Limpa cache de proposições.
+        
+        Limpa os caches de:
+        - fetch_proposicao_completa
+        - fetch_lista_proposicoes_autoria_geral
+        - fetch_rics_por_autor
+        - fetch_lista_proposicoes_autoria
+        - build_status_map
+        """
+        # Importar funções
+        from core.functions import (
+            fetch_proposicao_completa,
+            fetch_lista_proposicoes_autoria_geral,
+            fetch_rics_por_autor,
+            fetch_lista_proposicoes_autoria,
+            build_status_map
+        )
+        
+        # Limpar caches
+        fetch_proposicao_completa.clear()
+        fetch_lista_proposicoes_autoria_geral.clear()
+        fetch_rics_por_autor.clear()
+        fetch_lista_proposicoes_autoria.clear()
+        build_status_map.clear()
+
+    # ---------------------------------------------------------------------
     # SENADO (placeholder)
     # ---------------------------------------------------------------------
 
