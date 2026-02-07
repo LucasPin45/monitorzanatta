@@ -655,7 +655,7 @@ class DataProvider:
             DataFrame com: id, Proposicao, siglaTipo, numero, ano, ementa
         """
         # Importar funções necessárias
-        from core.functions import (
+        from monitor_sistema_jz import (
             fetch_lista_proposicoes_autoria_geral,
             fetch_rics_por_autor,
             format_sigla_num_ano
@@ -716,7 +716,7 @@ class DataProvider:
             Dict mapeando ID → dados de status
         """
         # Importar funções necessárias
-        from core.functions import (
+        from monitor_sistema_jz import (
             fetch_proposicao_completa,
             canonical_situacao,
             parse_prazo_resposta_ric,
@@ -812,7 +812,7 @@ class DataProvider:
             DataFrame enriquecido com colunas de status
         """
         # Importar funções necessárias
-        from core.functions import (
+        from monitor_sistema_jz import (
             canonical_situacao,
             camara_link_deputado,
             get_proposicao_principal_id,
@@ -960,7 +960,7 @@ class DataProvider:
         - build_status_map
         """
         # Importar funções
-        from core.functions import (
+        from monitor_sistema_jz import (
             fetch_proposicao_completa,
             fetch_lista_proposicoes_autoria_geral,
             fetch_rics_por_autor,
