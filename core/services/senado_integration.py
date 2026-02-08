@@ -277,14 +277,15 @@ def buscar_tramitacao_senado_mesmo_numero(
         return None
 
 
-def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional[Dict]:
+def buscar_detalhes_senado(codigo_materia: str = "", id_processo: str = "", debug: bool = False) -> Optional[Dict]:
     """
-    Busca Relator e Órgão atuais no SENADO pelo CodigoMateria.
+    Busca Relator e Órgão atuais no SENADO pelo CodigoMateria ou idProcesso.
 
-    Usa o endpoint: /dadosabertos/processo/relatoria?codigoMateria=...
+    Usa o endpoint: /dadosabertos/processo/relatoria
 
     Args:
         codigo_materia: Código da matéria no Senado
+        id_processo: ID do processo no Senado (preferencial)
         debug: Modo debug
         
     Returns:
@@ -295,7 +296,8 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
       - relator_nome, relator_partido, relator_uf
       - orgao_senado_sigla (ex: "CAE"), orgao_senado_nome
     """
-    if not codigo_materia:
+    # Preferir idProcesso
+    if not (codigo_materia or id_processo):
         return None
 
     resultado = {
@@ -307,12 +309,15 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
         "orgao_senado_nome": "",
     }
 
-    # Endpoint (Swagger) — aceita codigoMateria e (opcional) dataReferencia
-    data_ref = datetime.date.today().isoformat()
-    url = (
-        f"https://legis.senado.leg.br/dadosabertos/processo/relatoria"
-        f"?codigoMateria={codigo_materia}&dataReferencia={data_ref}&v=1"
-    )
+    # Usar idProcesso quando disponível (mais confiável)
+    if id_processo:
+        url = f"https://legis.senado.leg.br/dadosabertos/processo/relatoria?idProcesso={id_processo}"
+    else:
+        data_ref = datetime.date.today().isoformat()
+        url = (
+            f"https://legis.senado.leg.br/dadosabertos/processo/relatoria"
+            f"?codigoMateria={codigo_materia}&dataReferencia={data_ref}&v=1"
+        )
 
     print(f"[SENADO-RELATORIA] Buscando relatoria: {url}")
     if debug:
@@ -803,7 +808,11 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
         # 2. Buscar detalhes em endpoints separados (/relatorias)
         codigo_materia = dados_senado.get("codigo_senado", "")
         if codigo_materia:
-            detalhes = buscar_detalhes_senado(codigo_materia, debug=debug)
+            detalhes = buscar_detalhes_senado(
+                codigo_materia=codigo_materia,
+                id_processo=id_proc_sen,
+                debug=debug
+            )
             if detalhes:
                 resultado["Relator_Senado"] = detalhes.get("relator_senado", "")
                 resultado["Orgao_Senado_Sigla"] = detalhes.get("orgao_senado_sigla", "")
