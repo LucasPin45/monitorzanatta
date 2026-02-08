@@ -1,9 +1,16 @@
-# monitor_sistema_jz.py - v41 PADRONIZAÇÃO FINAL UX
-# 
-# ALTERAÇÕES v41 - Dividir para Conquistar:
-# Dividir as abas em um sistema só para não ter um monstro de mais de 10000 linhas
+# monitor_sistema_jz.py - v50 FASE DE INTEGRAÇÃO
 #
-# ALTERAÇÕES v40 - PADRONIZAÇÃO FINAL UX:
+# ALTERAÇÕES v50 - Cleanup Legacy (08/02/2026):
+#   - Todas as 9 abas extraídas para modules/tabs/tab{1-9}_*.py
+#   - Removidas 68 funções mortas (_legacy_*, PDFs, gráficos, análises)
+#   - Removido MINISTERIOS_CANONICOS duplicado (já em core/utils/text_utils.py)
+#   - Removidas constantes duplicadas (STATUS_PREDEFINIDOS, MESES_PT, PARTIDOS_RELATOR_ADVERSARIO)
+#   - Adicionados re-exports de core/utils para compatibilidade com data_provider
+#   - Monólito reduzido de 8.874 → 4.120 linhas (-54%)
+#   - Este arquivo agora é o "maestro": login, constantes, funções compartilhadas e main()
+#   - Próximas fases: extrair services/senado.py, services/apensados.py, services/proposicao.py
+#
+# ALTERAÇÕES v41 - Dividir para Conquistar:
 #
 # 🔧 ABA 9 - EMOJI PADRONIZADO:
 #   - CORRIGIDO: Usa padrão do sistema
@@ -249,6 +256,14 @@ from typing import Optional, Dict, List, Tuple
 import streamlit as st
 
 from core.data_provider import DataProvider
+
+# RE-EXPORTS: core/utils → data_provider compatibility
+from core.utils.formatters import format_sigla_num_ano
+from core.utils.formatters import format_relator_text
+from core.utils.text_utils import canonical_situacao
+from core.utils.date_utils import parse_prazo_resposta_ric
+from core.utils.links import camara_link_deputado
+
 
 
 @st.cache_resource(show_spinner=False)
@@ -1204,6 +1219,10 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
     return resultado
 
 
+matplotlib.use('Agg')  # Backend não-interativo
+
+
+# Função para cadastrar email via GitHub API
 def cadastrar_email_github(novo_email: str) -> tuple[bool, str]:
     """
     Adiciona um novo email à lista de destinatários no repositório GitHub.
@@ -1571,6 +1590,179 @@ def validar_resposta_api(response) -> tuple[bool, str]:
     except ValueError as e:
         return False, f"Resposta não é JSON válido: {str(e)}"
 
+
+st.set_page_config(
+    page_title="Monitor Legislativo – Dep. Júlia Zanatta",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# ============================================================
+# CONTROLE DE ACESSO — ACESSO RESTRITO AO GABINETE
+# ============================================================
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+    st.session_state.usuario_logado = None
+
+if not st.session_state.autenticado:
+    # CSS para tela de login profissional
+    st.markdown("""
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .login-container {
+        background: white;
+        padding: 3rem 2rem;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        max-width: 450px;
+        margin: 4rem auto;
+    }
+    .login-icon {
+        text-align: center;
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+    .login-title {
+        text-align: center;
+        color: #2d3748;
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    .login-subtitle {
+        text-align: center;
+        color: #FFD700;
+        font-size: 1rem;
+        margin-bottom: 2rem;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+    }
+    .stTextInput input {
+        border-radius: 10px;
+        border: 2px solid #e2e8f0;
+        padding: 12px;
+        font-size: 1rem;
+    }
+    .stTextInput input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    .stButton button {
+        width: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    }
+    .block-container {
+        padding-top: 2rem;
+    }
+    .login-footer {
+        text-align: center;
+        color: white;
+        margin-top: 2rem;
+        font-size: 0.9rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="login-icon">🏛️</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-title">Monitor Parlamentar</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-subtitle">Deputada Júlia Zanatta</div>', unsafe_allow_html=True)
+    
+    # Configuração de autenticação
+    auth_config = st.secrets.get("auth", {})
+    usuarios_config = auth_config.get("usuarios", {})
+    senhas_lista = list(auth_config.get("senhas", []))
+    senha_unica = auth_config.get("senha")
+    
+    if not usuarios_config and not senhas_lista and not senha_unica:
+        st.error("Erro de configuração: defina [auth.usuarios], [auth].senhas ou [auth].senha em Settings → Secrets.")
+        st.stop()
+    
+    with st.form("login_form", clear_on_submit=False):
+        usuario_input = st.text_input(
+            "👤 Usuário",
+            placeholder="Digite seu usuário",
+            key="input_usuario"
+        )
+        
+        senha = st.text_input(
+            "🔒 Senha",
+            type="password",
+            placeholder="Digite sua senha",
+            key="input_senha"
+        )
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            submit = st.form_submit_button("🚀 Entrar", use_container_width=True)
+        
+        if submit:
+            # v39: OBRIGATÓRIO informar usuário E senha
+            if not usuario_input or not usuario_input.strip():
+                st.error("⚠️ Por favor, informe seu usuário")
+            elif not senha:
+                st.error("⚠️ Por favor, preencha a senha")
+            else:
+                usuario_encontrado = None
+                autenticado = False
+                
+                # Verificar usuários nomeados
+                for nome_usuario, senha_usuario in usuarios_config.items():
+                    if senha == senha_usuario:
+                        usuario_encontrado = nome_usuario
+                        autenticado = True
+                        break
+                
+                # Verificar lista de senhas (usar usuario_input informado)
+                if not autenticado and senha in senhas_lista:
+                    usuario_encontrado = usuario_input.strip()
+                    autenticado = True
+                
+                # Verificar senha única (usar usuario_input informado)
+                if not autenticado and senha_unica and senha == senha_unica:
+                    usuario_encontrado = usuario_input.strip()
+                    autenticado = True
+                
+                if autenticado:
+                    st.session_state.autenticado = True
+                    st.session_state.usuario_logado = usuario_encontrado
+                    
+                    # Registrar login
+                    registrar_login(usuario_encontrado)
+                    
+                    st.success("✅ Login realizado com sucesso!")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("❌ Senha incorreta")
+    
+    st.markdown("""
+    <div class="login-footer">
+        💡 <b>Desenvolvido por Lucas Pinheiro</b><br>
+        Gabinete da Deputada Júlia Zanatta
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.stop()
+
+
+# ============================================================
+# TIMEZONE DE BRASÍLIA
+# ============================================================
 
 TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
@@ -2167,15 +2359,31 @@ def buscar_projetos_apensados_automatico(id_deputado: int) -> list:
     return buscar_projetos_apensados_completo(id_deputado)
 
 
+STATUS_PREDEFINIDOS = [
+    "Arquivada",
+    "Aguardando Despacho do Presidente da Câmara dos Deputados",
+    "Aguardando Designação de Relator(a)",
+    "Aguardando Parecer de Relator(a)",
+    "Tramitando em Conjunto",
+    "Pronta para Pauta",
+    "Aguardando Deliberação",
+    "Aguardando Apreciação",
+    "Aguardando Distribuição",
+    "Aguardando Designação",
+    "Aguardando Votação",
+]
 
+MESES_PT = {
+    1: "Jan", 2: "Fev", 3: "Mar", 4: "Abr", 5: "Mai", 6: "Jun",
+    7: "Jul", 8: "Ago", 9: "Set", 10: "Out", 11: "Nov", 12: "Dez"
+}
 
+PARTIDOS_RELATOR_ADVERSARIO = {"PT", "PV", "PSB", "PCDOB", "PSOL", "REDE"}
 
 # ============================================================
 # NORMALIZAÇÃO DE MINISTÉRIOS (nomes canônicos)
 # ============================================================
 # Mapeamento de variações textuais para nomes canônicos únicos
-
-
 
 
 # Palavras-chave para detectar resposta em RICs
@@ -2259,6 +2467,10 @@ TEMAS_CATEGORIAS = {
         "importacao", "importação", "alfandega", "alfândega", "comercio exterior", "comércio exterior"
     ],
 }
+
+# ============================================================
+# UTILITÁRIOS
+# ============================================================
 
 def telegram_enviar_mensagem(bot_token: str, chat_id: str, mensagem: str, parse_mode: str = "HTML") -> dict:
     """
@@ -2569,6 +2781,37 @@ def safe_get(url, params=None):
 # ============================================================
 # APENSAÇÕES / TRAMITAÇÃO EM CONJUNTO — utilitários
 # ============================================================
+def get_proposicao_principal_id(id_proposicao: str):
+    """Descobre a proposição principal à qual esta está apensada (se houver)."""
+    dados = fetch_proposicao_relacionadas(str(id_proposicao))
+    if not dados:
+        return None
+
+    # Preferir campos explícitos de principal
+    for item in dados:
+        prop_princ = item.get("proposicaoPrincipal") or item.get("proposicao_principal")
+        if isinstance(prop_princ, dict):
+            uri = prop_princ.get("uri") or prop_princ.get("uriProposicao") or prop_princ.get("uriProposicaoPrincipal")
+            if uri:
+                pid = extract_id_from_uri(uri)
+                if pid:
+                    return pid
+
+        for chave_uri in ("uriProposicaoPrincipal", "uriProposicao_principal", "uriPrincipal"):
+            if item.get(chave_uri):
+                pid = extract_id_from_uri(item.get(chave_uri))
+                if pid:
+                    return pid
+
+    # Fallback: usar helper genérico (melhor que ficar em branco)
+    for item in dados:
+        pid = get_proposicao_id_from_item(item)
+        if pid:
+            return pid
+
+    return None
+
+
 def fetch_proposicao_completa(id_proposicao: str) -> dict:
     """
     FUNÇÃO CENTRAL: Busca TODAS as informações da proposição de uma vez.
@@ -2875,6 +3118,302 @@ def fetch_proposicao_info(id_proposicao):
         "ano": str(d.get("ano") or "").strip(),
         "ementa": (d.get("ementa") or "").strip(),
     }
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_lista_proposicoes_autoria_geral(id_deputada):
+    rows = []
+    url = f"{BASE_URL}/proposicoes"
+    params = {"idDeputadoAutor": id_deputada, "itens": 100, "ordem": "DESC", "ordenarPor": "ano"}
+
+    while True:
+        data = safe_get(url, params=params)
+        if data is None or "__error__" in data:
+            break
+
+        for d in data.get("dados", []):
+            rows.append(
+                {
+                    "id": str(d.get("id") or ""),
+                    "siglaTipo": (d.get("siglaTipo") or "").strip(),
+                    "numero": str(d.get("numero") or "").strip(),
+                    "ano": str(d.get("ano") or "").strip(),
+                    "ementa": (d.get("ementa") or "").strip(),
+                }
+            )
+
+        next_link = None
+        for link in data.get("links", []):
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+
+        if not next_link:
+            break
+        url = next_link
+        params = {}
+
+    # WORKAROUND v33: Adicionar proposições que a API não retorna (bug da Câmara)
+    id_str = str(id_deputada)
+    if id_str in PROPOSICOES_FALTANTES_API:
+        ids_existentes = {r["id"] for r in rows}
+        for prop_faltante in PROPOSICOES_FALTANTES_API[id_str]:
+            if prop_faltante["id"] not in ids_existentes:
+                rows.append(prop_faltante)
+                print(f"[API-WORKAROUND] ✅ Adicionada proposição faltante: {prop_faltante['siglaTipo']} {prop_faltante['numero']}/{prop_faltante['ano']} (ID {prop_faltante['id']})")
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Proposicao"] = df.apply(lambda r: format_sigla_num_ano(r["siglaTipo"], r["numero"], r["ano"]), axis=1)
+    return df
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def buscar_proposicao_direta(sigla_tipo: str, numero: str, ano: str) -> Optional[Dict]:
+    """
+    Busca proposição diretamente na API da Câmara por sigla/número/ano.
+    Não depende de autoria - busca QUALQUER proposição.
+    
+    NOVO v32.2: Permite buscar proposições que a deputada acompanha
+    mas não é autora.
+    
+    Args:
+        sigla_tipo: PL, PLP, PEC, etc.
+        numero: Número da proposição
+        ano: Ano (4 dígitos)
+        
+    Returns:
+        Dict com dados da proposição ou None
+    """
+    
+    sigla = (sigla_tipo or "").strip().upper()
+    num = (numero or "").strip()
+    ano_str = (ano or "").strip()
+    
+    if not (sigla and num and ano_str):
+        return None
+    
+    url = f"{BASE_URL}/proposicoes"
+    params = {
+        "siglaTipo": sigla,
+        "numero": num,
+        "ano": ano_str,
+        "itens": 5,
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        dados = data.get("dados", [])
+        
+        if not dados:
+            return None
+        
+        # Pegar o primeiro resultado que bate exatamente
+        for d in dados:
+            if (str(d.get("numero", "")).strip() == num and 
+                str(d.get("ano", "")).strip() == ano_str and
+                (d.get("siglaTipo", "")).strip().upper() == sigla):
+                return {
+                    "id": str(d.get("id") or ""),
+                    "siglaTipo": (d.get("siglaTipo") or "").strip(),
+                    "numero": str(d.get("numero") or "").strip(),
+                    "ano": str(d.get("ano") or "").strip(),
+                    "ementa": (d.get("ementa") or "").strip(),
+                    "Proposicao": format_sigla_num_ano(d.get("siglaTipo"), d.get("numero"), d.get("ano")),
+                }
+        
+        # Se não achou exato, retorna o primeiro
+        d = dados[0]
+        return {
+            "id": str(d.get("id") or ""),
+            "siglaTipo": (d.get("siglaTipo") or "").strip(),
+            "numero": str(d.get("numero") or "").strip(),
+            "ano": str(d.get("ano") or "").strip(),
+            "ementa": (d.get("ementa") or "").strip(),
+            "Proposicao": format_sigla_num_ano(d.get("siglaTipo"), d.get("numero"), d.get("ano")),
+        }
+        
+    except Exception as e:
+        print(f"[BUSCA-DIRETA] Erro: {e}")
+        return None
+
+
+def parse_proposicao_input(texto: str) -> Optional[Tuple[str, str, str]]:
+    """
+    Extrai sigla, número e ano de uma string de proposição.
+    
+    Exemplos aceitos:
+    - "PL 321/2023"
+    - "PL321/2023" 
+    - "pl 321 2023"
+    - "PLP 223/2023"
+    
+    Returns:
+        Tuple (sigla, numero, ano) ou None
+    """
+    
+    texto = (texto or "").strip().upper()
+    if not texto:
+        return None
+    
+    # Padrão: SIGLA NUMERO/ANO ou SIGLA NUMERO ANO
+    padrao = r"^(PL|PLP|PEC|PDL|PRC|PLV|MPV|RIC|REQ|PDS|PRS)\s*(\d+)\s*[/\s]\s*(\d{4})$"
+    match = re.match(padrao, texto)
+    
+    if match:
+        return (match.group(1), match.group(2), match.group(3))
+    
+    return None
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_rics_por_autor(id_deputada):
+    rows = []
+    url = f"{BASE_URL}/proposicoes"
+    params = {
+        "siglaTipo": "RIC",
+        "idDeputadoAutor": id_deputada,
+        "itens": 100,
+        "ordem": "DESC",
+        "ordenarPor": "ano",
+    }
+
+    while True:
+        data = safe_get(url, params=params)
+        if data is None or "__error__" in data:
+            break
+
+        for d in data.get("dados", []):
+            rows.append(
+                {
+                    "id": str(d.get("id") or ""),
+                    "siglaTipo": (d.get("siglaTipo") or "").strip(),
+                    "numero": str(d.get("numero") or "").strip(),
+                    "ano": str(d.get("ano") or "").strip(),
+                    "ementa": (d.get("ementa") or "").strip(),
+                    "Proposicao": format_sigla_num_ano(d.get("siglaTipo"), d.get("numero"), d.get("ano")),
+                }
+            )
+
+        next_link = None
+        for link in data.get("links", []):
+            if link.get("rel") == "next":
+                next_link = link.get("href")
+                break
+        if not next_link:
+            break
+
+        url = next_link
+        params = {}
+
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_lista_proposicoes_autoria(id_deputada):
+    df1 = fetch_lista_proposicoes_autoria_geral(id_deputada)
+    df2 = fetch_rics_por_autor(id_deputada)
+
+    if df1.empty and df2.empty:
+        return pd.DataFrame(columns=["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa"])
+
+    df = pd.concat([df1, df2], ignore_index=True)
+
+    if "Proposicao" not in df.columns:
+        df["Proposicao"] = ""
+    mask = df["Proposicao"].isna() | (df["Proposicao"].astype(str).str.strip() == "")
+    if mask.any():
+        df.loc[mask, "Proposicao"] = df.loc[mask].apply(
+            lambda r: format_sigla_num_ano(r.get("siglaTipo"), r.get("numero"), r.get("ano")),
+            axis=1
+        )
+
+    df = df.drop_duplicates(subset=["id"], keep="first")
+
+    cols = ["id", "Proposicao", "siglaTipo", "numero", "ano", "ementa"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    df = df[cols]
+    return df
+
+
+# ============================================================
+# STATUS MAP
+# ============================================================
+
+@st.cache_data(show_spinner=False, ttl=900)
+def build_status_map(ids: list[str]) -> dict:
+    out: dict = {}
+    ids = [str(x) for x in (ids or []) if str(x).strip()]
+    if not ids:
+        return out
+
+    def _one(pid: str):
+        dados_completos = fetch_proposicao_completa(pid)
+        
+        situacao = canonical_situacao(dados_completos.get("status_descricaoSituacao", ""))
+        andamento = dados_completos.get("status_descricaoTramitacao", "")
+        relator_info = dados_completos.get("relator", {})
+        tramitacoes = dados_completos.get("tramitacoes", [])
+        sigla_tipo = dados_completos.get("sigla", "")
+        ementa = dados_completos.get("ementa", "")
+        
+        # Formatar relator
+        relator_txt = ""
+        relator_id = ""
+        if relator_info and relator_info.get("nome"):
+            nome = relator_info.get("nome", "")
+            partido = relator_info.get("partido", "")
+            uf = relator_info.get("uf", "")
+            relator_id = str(relator_info.get("id_deputado", ""))
+            if partido or uf:
+                relator_txt = f"{nome} ({partido}/{uf})".replace("//", "/").replace("(/", "(").replace("/)", ")")
+            else:
+                relator_txt = nome
+        
+        # Resultado base
+        resultado = {
+            "situacao": situacao,
+            "andamento": andamento,
+            "status_dataHora": dados_completos.get("status_dataHora", ""),
+            "siglaOrgao": dados_completos.get("status_siglaOrgao", ""),
+            "relator": relator_txt,
+            "relator_id": relator_id,
+            "sigla_tipo": sigla_tipo,
+            "ementa": ementa,
+        }
+        
+        # Se for RIC, extrair informações adicionais de prazo de resposta
+        if sigla_tipo == "RIC":
+            prazo_info = parse_prazo_resposta_ric(tramitacoes, situacao)
+            resultado.update({
+                "ric_data_remessa": prazo_info.get("data_remessa"),
+                "ric_inicio_contagem": prazo_info.get("inicio_contagem"),
+                "ric_prazo_inicio": prazo_info.get("prazo_inicio"),
+                "ric_prazo_fim": prazo_info.get("prazo_fim"),
+                "ric_prazo_str": prazo_info.get("prazo_str", ""),  # String formatada para exibição
+                "ric_dias_restantes": prazo_info.get("dias_restantes"),
+                "ric_fonte_prazo": prazo_info.get("fonte_prazo", ""),
+                "ric_status_resposta": prazo_info.get("status_resposta"),
+                "ric_data_resposta": prazo_info.get("data_resposta"),
+                "ric_respondido": prazo_info.get("respondido", False),
+                "ric_ministerio": extrair_ministerio_ric(ementa, tramitacoes),
+                "ric_assunto": extrair_assunto_ric(ementa),
+            })
+        
+        return pid, resultado
+
+    max_workers = 10 if len(ids) >= 40 else 6
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for pid, payload in ex.map(_one, ids):
+            out[str(pid)] = payload
+
+    return out
 
 
 def estrategia_por_situacao(situacao: str) -> list[str]:
@@ -3409,7 +3948,7 @@ def main():
     # TÍTULO DO SISTEMA (sem foto - foto fica no card abaixo)
     # ============================================================
     st.title("📡 Monitor Legislativo – Dep. Júlia Zanatta")
-    st.caption("v41⚠️ - SISTEMA EM INTEGRAÇÃO E MANUTENÇÃO - PODE FICAR INSTÁVEL")
+    st.caption("v50 ⚠️ - SISTEMA EM INTEGRAÇÃO E MANUTENÇÃO - PODE FICAR INSTÁVEL")
 
     if "status_click_sel" not in st.session_state:
         st.session_state["status_click_sel"] = None
@@ -3581,3 +4120,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
 
 if __name__ == "__main__":
     main()
+    
+    # ============================================================
+    # NOTA:
+    # FORAM EXTRAÍDAS E INTEGRADAS TODAS AS ABAS.
+    # ============================================================
