@@ -402,6 +402,32 @@ def render_tab5(
         
         df_no_senado = df_no_senado.apply(aplicar_cache_senado, axis=1)
         
+        # ============================================================
+        # CRITICAL FIX: Aplicar cache do Senado de volta ao df_tbl!
+        # Sem isso, df_tbl nunca recebe colunas como no_senado,
+        # Relator_Senado, etc., e toda a integração é ignorada.
+        # ============================================================
+        df_tbl = df_tbl.apply(aplicar_cache_senado, axis=1)
+        
+        # Garantir que colunas do Senado existam com defaults para linhas sem dados
+        _senado_defaults = {
+            "no_senado": False,
+            "Relator_Senado": "",
+            "Orgao_Senado_Sigla": "",
+            "Orgao_Senado_Nome": "",
+            "situacao_senado": "",
+            "url_senado": "",
+            "codigo_materia_senado": "",
+            "id_processo_senado": "",
+            "UltimasMov_Senado": "",
+            "tipo_numero_senado": "",
+        }
+        for col_name, col_default in _senado_defaults.items():
+            if col_name not in df_tbl.columns:
+                df_tbl[col_name] = col_default
+            else:
+                df_tbl[col_name] = df_tbl[col_name].fillna(col_default)
+        
         # Exibir tabela com dados do Senado
         colunas_senado = [
             "Proposição", "Tipo", "Situação atual", "Órgão (sigla)", "Relator(a)", 
@@ -422,6 +448,35 @@ def render_tab5(
         )
         
         st.markdown("---")
+    
+    # ============================================================
+    # GARANTIA: Aplicar cache do Senado ao df_tbl em TODOS os reruns
+    # (o bloco acima pode não executar se df_no_senado estiver vazio neste ciclo,
+    # mas o cache do session_state persiste entre reruns do Streamlit)
+    # ============================================================
+    if st.session_state.get("senado_cache_por_id") and "no_senado" not in df_tbl.columns:
+        def _aplicar_cache_rerun(row):
+            id_prop = str(row.get("ID", ""))
+            cache_data = st.session_state["senado_cache_por_id"].get(id_prop, {})
+            if cache_data:
+                for key, value in cache_data.items():
+                    if key not in ["ID", "Proposição", "Ementa"]:
+                        row[key] = value
+            return row
+        
+        df_tbl = df_tbl.apply(_aplicar_cache_rerun, axis=1)
+        
+        _senado_defaults_rerun = {
+            "no_senado": False, "Relator_Senado": "", "Orgao_Senado_Sigla": "",
+            "Orgao_Senado_Nome": "", "situacao_senado": "", "url_senado": "",
+            "codigo_materia_senado": "", "id_processo_senado": "",
+            "UltimasMov_Senado": "", "tipo_numero_senado": "",
+        }
+        for col_name, col_default in _senado_defaults_rerun.items():
+            if col_name not in df_tbl.columns:
+                df_tbl[col_name] = col_default
+            else:
+                df_tbl[col_name] = df_tbl[col_name].fillna(col_default)
     
     # ============================================================
     # INTEGRAÇÃO DE DADOS CÂMARA + SENADO
