@@ -474,19 +474,25 @@ def render_tab5(
             return ""
         
         def _parado_sf(row):
-            movs = str(row.get("UltimasMov_Senado", ""))
-            if movs and movs != "Sem movimentações disponíveis" and " | " in movs:
-                primeira = movs.split("\n")[0]
-                partes = primeira.split(" | ")
-                if partes:
-                    data_str = partes[0].strip()
-                    for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
-                        try:
-                            dt = datetime.datetime.strptime(data_str[:16], fmt)
-                            return (datetime.datetime.now() - dt).days
-                        except Exception:
-                            continue
-            return ""
+            # Tentar calcular a partir da Data SF (já extraída das movimentações)
+            data_str = _data_sf(row)
+            if data_str:
+                for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
+                    try:
+                        dt = datetime.datetime.strptime(data_str[:16].strip(), fmt)
+                        return (datetime.datetime.now() - dt).days
+                    except Exception:
+                        continue
+            # Fallback: usar Data do status original (Câmara) se não tiver do SF
+            data_cam = str(row.get("Data do status", "")).strip()
+            if data_cam:
+                for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        dt = datetime.datetime.strptime(data_cam[:19].strip(), fmt)
+                        return (datetime.datetime.now() - dt).days
+                    except Exception:
+                        continue
+            return None
         
         df_senado_view["Relator SF"] = df_senado_view.apply(_rel_sf, axis=1)
         df_senado_view["Órgão SF"] = df_senado_view.apply(_orgao_sf, axis=1)
