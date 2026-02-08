@@ -1193,7 +1193,12 @@ def enriquecer_proposicao_com_senado(proposicao_dict: Dict, debug: bool = False)
         # 2. Buscar detalhes em endpoints separados (/relatorias e /situacao)
         codigo_materia = dados_senado.get("codigo_senado", "")
         if codigo_materia:
-            detalhes = buscar_detalhes_senado(codigo_materia, debug=debug)
+            detalhes = buscar_detalhes_senado(
+                codigo_materia=codigo_materia,
+                id_processo=id_proc_sen,
+                debug=debug
+            )
+            
             if detalhes:
                 resultado["Relator_Senado"] = detalhes.get("relator_senado", "")
                 resultado["Orgao_Senado_Sigla"] = detalhes.get("orgao_senado_sigla", "")
