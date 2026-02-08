@@ -8767,8 +8767,9 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
         "5️⃣ Buscar Proposição Específica",
         "6️⃣ Matérias por situação atual",
         "7️⃣ RICs (Requerimentos de Informação)",
-        "📧 Receber Notificações",
-        "📎 Projetos Apensados"
+        "📎 Projetos Apensados",
+        "📧 Receber Notificações"
+        
     ])
 
     # ============================================================
