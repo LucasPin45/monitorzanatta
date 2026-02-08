@@ -504,7 +504,7 @@ def buscar_tramitacao_senado_mesmo_numero(
             st.error(f"Erro ao consultar Senado: {e}")
         return None
 
-def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional[Dict]:
+def buscar_detalhes_senado(codigo_materia: str = "", id_processo: str = "", debug: bool = False) -> Optional[Dict]:
     """
     Busca Relator e Órgão atuais no SENADO pelo CodigoMateria.
 
@@ -520,7 +520,7 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
     import xml.etree.ElementTree as ET
     # datetime já importado no topo
 
-    if not codigo_materia:
+    if not (codigo_materia or id_processo):
         return None
 
     resultado = {
@@ -531,6 +531,11 @@ def buscar_detalhes_senado(codigo_materia: str, debug: bool = False) -> Optional
         "orgao_senado_sigla": "",
         "orgao_senado_nome": "",
     }
+    if id_processo:
+        url = f"https://legis.senado.leg.br/dadosabertos/processo/relatoria?idProcesso={id_processo}"
+    else:
+        data_ref = datetime.date.today().isoformat()
+        url = f"https://legis.senado.leg.br/dadosabertos/processo/relatoria?codigoMateria={codigo_materia}&dataReferencia={data_ref}&v=1"
 
     # Endpoint (Swagger) — aceita codigoMateria e (opcional) dataReferencia
     # Alguns ambientes ignoram Accept e retornam XML; suportar ambos.
@@ -8121,7 +8126,12 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
                                     prop["Orgao_Senado_Nome"] = status_sen.get("orgao_senado_nome", "")
                             
                             # Buscar relator do Senado
-                            rel_sen_dict = buscar_detalhes_senado(prop.get("codigo_materia_senado", ""), debug=False)
+                            rel_sen_dict = buscar_detalhes_senado(
+                                codigo_materia=prop.get("codigo_materia_senado", ""),
+                                id_processo=prop.get("id_processo_senado", ""),
+                                debug=False
+                            )
+                            
                             if rel_sen_dict and rel_sen_dict.get("relator_senado"):
                                 prop["Relator_Senado"] = rel_sen_dict.get("relator_senado", "")
                             
