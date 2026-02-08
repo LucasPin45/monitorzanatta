@@ -8957,8 +8957,8 @@ e a políticas que, em sua visão, ampliam a intervenção governamental na econ
     # ============================================================
     with tab8:
         _set_aba_atual(8)
-         from modules.tabs.tab8_apensados import render_tab8
-         render_tab8(provider, exibir_detalhes_proposicao, id_deputada)
+        from modules.tabs.tab8_apensados import render_tab8
+        render_tab8(provider, exibir_detalhes_proposicao, id_deputada)
         
                
         
