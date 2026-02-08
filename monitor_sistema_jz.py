@@ -2781,6 +2781,20 @@ def safe_get(url, params=None):
 # ============================================================
 # APENSAÇÕES / TRAMITAÇÃO EM CONJUNTO — utilitários
 # ============================================================
+def fetch_proposicao_relacionadas(id_proposicao: str) -> list:
+    """Retorna relações/apensações da proposição (API Câmara /relacionadas)."""
+    if not id_proposicao:
+        return []
+    url = f"{BASE_URL}/proposicoes/{id_proposicao}/relacionadas"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        if r.status_code == 200:
+            return r.json().get("dados", []) or []
+        return []
+    except Exception:
+        return []
+
+
 def get_proposicao_principal_id(id_proposicao: str):
     """Descobre a proposição principal à qual esta está apensada (se houver)."""
     dados = fetch_proposicao_relacionadas(str(id_proposicao))
