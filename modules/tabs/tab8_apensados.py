@@ -1,5 +1,5 @@
 # modules/tabs/tab8_apensados.py
-# v1 08/02/2025 17:00 (Brasília)
+# v2 08/02/2025 17:30 (Brasília)
 """
 Tab 8 – Projetos Apensados (ex-Aba 9)
 
@@ -53,20 +53,14 @@ def _parse_data_br(data_str: str) -> datetime.datetime:
 
 
 def _format_parado(dias: int) -> str:
-    """Formata dias parado em texto legível."""
+    """Formata dias parado — sempre em dias exatos."""
     if dias < 0:
         return "—"
     if dias == 0:
         return "Hoje"
     if dias == 1:
         return "1 dia"
-    if dias < 30:
-        return f"{dias} dias"
-    if dias < 365:
-        m = dias // 30
-        return f"{m} {'mês' if m == 1 else 'meses'}"
-    a = dias // 365
-    return f"{a} {'ano' if a == 1 else 'anos'}"
+    return f"{dias} dias"
 
 
 def _sinal_alerta(dias: int) -> str:
@@ -313,7 +307,15 @@ def render_tab8(
             if relator_nome and relator_nome != "—":
                 try:
                     rel_dict = fetch_relator_atual(ap.get("id_raiz", ""))
-                    rel_id = rel_dict.get("id") if rel_dict else None
+                    # O dict retorna "id_deputado" (não "id")
+                    rel_id = None
+                    if rel_dict:
+                        rel_id = (
+                            rel_dict.get("id_deputado")
+                            or rel_dict.get("id")
+                            or rel_dict.get("idDeputado")
+                            or ""
+                        )
                     if rel_id:
                         foto_rel_url = f"https://www.camara.leg.br/internet/deputado/bandep/{rel_id}.jpg"
                         st.image(foto_rel_url, width=100)
