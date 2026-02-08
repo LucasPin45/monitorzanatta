@@ -393,6 +393,97 @@ def buscar_detalhes_senado(codigo_materia: str = "", id_processo: str = "", debu
             print(f"[SENADO-RELATORIA] Falha parse XML: {e}")
 
     if not relatorias:
+        # ============================================================
+        # FALLBACK: endpoint /materia/relatorias/{codigoMateria}
+        # Confirmado retornando dados reais (ex: Izalci Lucas / PLP 223/2023)
+        # ============================================================
+        if codigo_materia:
+            url_fb = f"https://legis.senado.leg.br/dadosabertos/materia/relatorias/{codigo_materia}"
+            print(f"[SENADO-RELATORIA] Tentando fallback: {url_fb}")
+            if debug:
+                st.write(f"🔎 Fallback relatoria: {url_fb}")
+            try:
+                resp_fb = requests.get(
+                    url_fb, timeout=20,
+                    headers={"User-Agent": "Monitor-Zanatta/1.0", "Accept": "application/json"},
+                    verify=_REQUESTS_VERIFY,
+                )
+                if resp_fb.status_code == 200 and resp_fb.content:
+                    # --- JSON ---
+                    try:
+                        d2 = resp_fb.json()
+                    except Exception:
+                        d2 = None
+                    
+                    if isinstance(d2, dict):
+                        container = (
+                            (d2.get("MateriaRelatorias") or d2).get("Relatorias") or
+                            (d2.get("MateriaRelatorias") or d2).get("relatorias") or {}
+                        )
+                        rels = container.get("Relatoria") or container.get("relatoria") or []
+                        if isinstance(rels, dict):
+                            rels = [rels]
+                        for ri in rels:
+                            if not isinstance(ri, dict):
+                                continue
+                            ident = ri.get("IdentificacaoParlamentar") or ri
+                            nome_p = (
+                                ident.get("NomeParlamentar") or
+                                ri.get("nomeParlamentar") or ""
+                            ).strip()
+                            if nome_p:
+                                relatorias.append({
+                                    "dataDestituicao": ri.get("DataDestituicao") or ri.get("dataDestituicao"),
+                                    "descricaoTipoRelator": ri.get("DescricaoTipoRelator") or ri.get("descricaoTipoRelator"),
+                                    "dataDesignacao": ri.get("DataDesignacao") or ri.get("dataDesignacao"),
+                                    "nomeParlamentar": nome_p,
+                                    "siglaPartidoParlamentar": (
+                                        ident.get("SiglaPartidoParlamentar") or
+                                        ri.get("siglaPartidoParlamentar") or ""
+                                    ).strip(),
+                                    "ufParlamentar": (
+                                        ident.get("UfParlamentar") or
+                                        ri.get("ufParlamentar") or ""
+                                    ).strip(),
+                                    "siglaColegiado": (ri.get("SiglaColegiado") or ri.get("siglaColegiado") or "").strip(),
+                                    "nomeColegiado": (ri.get("NomeColegiado") or ri.get("nomeColegiado") or "").strip(),
+                                })
+                    
+                    # --- XML fallback ---
+                    if not relatorias:
+                        try:
+                            root_fb = ET.fromstring(resp_fb.content)
+                            def _sn(tag):
+                                return tag.split("}", 1)[-1] if "}" in tag else tag
+                            for el in root_fb.iter():
+                                if _sn(el.tag).lower() == "relatoria":
+                                    vals = {}
+                                    for ch in el.iter():
+                                        t = _sn(ch.tag)
+                                        if ch.text and ch.text.strip():
+                                            vals[t] = ch.text.strip()
+                                    n = vals.get("NomeParlamentar") or vals.get("nomeParlamentar")
+                                    if n:
+                                        relatorias.append({
+                                            "dataDestituicao": vals.get("DataDestituicao") or vals.get("dataDestituicao"),
+                                            "descricaoTipoRelator": vals.get("DescricaoTipoRelator") or vals.get("descricaoTipoRelator"),
+                                            "dataDesignacao": vals.get("DataDesignacao") or vals.get("dataDesignacao"),
+                                            "nomeParlamentar": n.strip(),
+                                            "siglaPartidoParlamentar": (vals.get("SiglaPartidoParlamentar") or vals.get("siglaPartidoParlamentar") or "").strip(),
+                                            "ufParlamentar": (vals.get("UfParlamentar") or vals.get("ufParlamentar") or "").strip(),
+                                            "siglaColegiado": (vals.get("SiglaColegiado") or vals.get("siglaColegiado") or "").strip(),
+                                            "nomeColegiado": (vals.get("NomeColegiado") or vals.get("nomeColegiado") or "").strip(),
+                                        })
+                        except Exception:
+                            pass
+                    
+                    if relatorias:
+                        print(f"[SENADO-RELATORIA] ✅ Fallback encontrou {len(relatorias)} relatoria(s)")
+            except Exception as e_fb:
+                print(f"[SENADO-RELATORIA] Fallback falhou: {e_fb}")
+
+    if not relatorias:
+        print(f"[SENADO-RELATORIA] ⚠️ Nenhuma relatoria encontrada")
         return resultado
 
     # Escolher relatoria "ativa"
