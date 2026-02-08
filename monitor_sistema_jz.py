@@ -8122,7 +8122,7 @@ def exibir_detalhes_proposicao(selected_id: str, key_prefix: str = "", senado_da
                             
                             # Buscar relator do Senado
                             rel_sen_dict = buscar_detalhes_senado(prop.get("codigo_materia_senado", ""), debug=False)
-                            if rel_sen_dict:
+                            if rel_sen_dict and rel_sen_dict.get("relator_senado"):
                                 prop["Relator_Senado"] = rel_sen_dict.get("relator_senado", "")
                             
                             # Buscar movimentações
