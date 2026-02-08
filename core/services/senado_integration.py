@@ -1020,3 +1020,163 @@ def processar_lista_com_senado(
         st.warning(f"⚠️ {erros_api} proposição(ões) com falha na consulta ao Senado")
     
     return df_enriquecido
+
+
+# ============================================================
+# FUNÇÕES DE APOIO — FOTO, CÓDIGO, UNIFICAÇÃO
+# Adicionadas v50 (extraídas do monólito)
+# ============================================================
+
+def buscar_codigo_senador_por_nome(nome_senador: str) -> Optional[str]:
+    """
+    Busca o código do senador pelo nome para obter a foto.
+    
+    Endpoint: https://legis.senado.leg.br/dadosabertos/senador/lista/atual
+    
+    Returns:
+        Código do senador ou None
+    """
+    if not nome_senador:
+        return None
+    
+    nome_busca = nome_senador.lower().strip()
+    for prefixo in ["senador ", "senadora "]:
+        if nome_busca.startswith(prefixo):
+            nome_busca = nome_busca[len(prefixo):]
+    
+    url = "https://legis.senado.leg.br/dadosabertos/senador/lista/atual"
+    
+    try:
+        resp = requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "Monitor-Zanatta/1.0", "Accept": "application/json"},
+            verify=_REQUESTS_VERIFY,
+        )
+        
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        
+        parlamentares = []
+        if isinstance(data, dict):
+            lista = data.get("ListaParlamentarEmExercicio", {})
+            parls = lista.get("Parlamentares", {})
+            parlamentares = parls.get("Parlamentar", [])
+            if not isinstance(parlamentares, list):
+                parlamentares = [parlamentares] if parlamentares else []
+        
+        for p in parlamentares:
+            ident = p.get("IdentificacaoParlamentar", {})
+            nome_parl = (ident.get("NomeParlamentar") or "").lower()
+            nome_completo = (ident.get("NomeCompletoParlamentar") or "").lower()
+            codigo = ident.get("CodigoParlamentar")
+            
+            if nome_busca in nome_parl or nome_busca in nome_completo or nome_parl in nome_busca:
+                return str(codigo)
+        
+        return None
+        
+    except Exception as e:
+        print(f"[SENADOR-FOTO] Erro ao buscar código: {e}")
+        return None
+
+
+def get_foto_senador(nome_senador: str, codigo_senador: str = None) -> Optional[str]:
+    """
+    Retorna a URL da foto do senador.
+    Tenta primeiro pelo código, depois busca pelo nome.
+    """
+    if not codigo_senador and nome_senador:
+        codigo_senador = buscar_codigo_senador_por_nome(nome_senador)
+    
+    if codigo_senador:
+        return f"https://www.senado.leg.br/senadores/img/fotos-oficiais/senador{codigo_senador}.jpg"
+    
+    return None
+
+
+def unificar_tramitacoes_camara_senado(
+    df_tramitacoes_camara: pd.DataFrame,
+    movimentacoes_senado: List[Dict],
+    limite: int = 10
+) -> pd.DataFrame:
+    """
+    Unifica tramitações da Câmara e Senado em uma única lista ordenada por data.
+    
+    Args:
+        df_tramitacoes_camara: DataFrame com tramitações da Câmara
+        movimentacoes_senado: Lista de dicts com movimentações do Senado
+        limite: Número máximo de tramitações a retornar
+        
+    Returns:
+        DataFrame unificado com coluna 'Casa' indicando origem
+    """
+    todas_tramitacoes = []
+    
+    # Processar tramitações da Câmara
+    if not df_tramitacoes_camara.empty:
+        for _, row in df_tramitacoes_camara.iterrows():
+            data_str = str(row.get("Data", "") or row.get("data", ""))
+            hora_str = str(row.get("Hora", "") or row.get("hora", "") or "")
+            descricao = str(
+                row.get("Tramitação", "") or row.get("Descrição", "")
+                or row.get("descricao", "") or row.get("descricaoTramitacao", "")
+            )
+            orgao = str(row.get("Órgão", "") or row.get("orgao", "") or row.get("siglaOrgao", ""))
+            
+            dt_sort = None
+            for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%Y-%m-%dT%H:%M:%S"]:
+                try:
+                    dt_sort = datetime.datetime.strptime(data_str[:19], fmt)
+                    break
+                except Exception:
+                    continue
+            
+            todas_tramitacoes.append({
+                "Data": data_str,
+                "Hora": hora_str,
+                "Casa": "🏛️ CD",
+                "Órgão": orgao,
+                "Tramitação": descricao[:200] if descricao else "",
+                "_sort": dt_sort or datetime.datetime.min
+            })
+    
+    # Processar movimentações do Senado
+    for mov in movimentacoes_senado:
+        data_str = mov.get("data", "")
+        hora = mov.get("hora", "")
+        orgao = mov.get("orgao", "")
+        descricao = mov.get("descricao", "")
+        
+        dt_sort = None
+        data_completa = f"{data_str} {hora}".strip() if hora else data_str
+        for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"]:
+            try:
+                dt_sort = datetime.datetime.strptime(data_completa[:16], fmt)
+                break
+            except Exception:
+                continue
+        
+        todas_tramitacoes.append({
+            "Data": data_str,
+            "Hora": hora,
+            "Casa": "🏛️ SF",
+            "Órgão": orgao,
+            "Tramitação": descricao[:200] if descricao else "",
+            "_sort": dt_sort or datetime.datetime.min
+        })
+    
+    if not todas_tramitacoes:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(todas_tramitacoes)
+    df = df.sort_values("_sort", ascending=False)
+    df = df.drop(columns=["_sort"])
+    df = df.head(limite)
+    
+    cols_order = ["Data", "Hora", "Casa", "Órgão", "Tramitação"]
+    df = df[[c for c in cols_order if c in df.columns]]
+    
+    return df
