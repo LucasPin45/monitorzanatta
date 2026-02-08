@@ -1,4 +1,5 @@
 # modules/tabs/tab5_buscar.py
+# v10 08/02 14:15 (Brasília)
 """
 Tab 5 - Buscar Proposição Específica
 
@@ -473,25 +474,19 @@ def render_tab5(
                     return partes[0].strip()
             return ""
         
-        def _parado_sf(row):
-            # Tentar calcular a partir da Data SF (já extraída das movimentações)
-            data_str = _data_sf(row)
-            if data_str:
-                for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
-                    try:
-                        dt = datetime.datetime.strptime(data_str[:16].strip(), fmt)
-                        return (datetime.datetime.now() - dt).days
-                    except Exception:
-                        continue
-            # Fallback: usar Data do status original (Câmara) se não tiver do SF
-            data_cam = str(row.get("Data do status", "")).strip()
-            if data_cam:
-                for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
-                    try:
-                        dt = datetime.datetime.strptime(data_cam[:19].strip(), fmt)
-                        return (datetime.datetime.now() - dt).days
-                    except Exception:
-                        continue
+        def _parado_sf(data_sf_str):
+            """Calcula dias parado a partir da data SF já extraída."""
+            if not data_sf_str or (isinstance(data_sf_str, float) and pd.isna(data_sf_str)):
+                return None
+            data_sf_str = str(data_sf_str).strip()
+            if not data_sf_str:
+                return None
+            for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
+                try:
+                    dt = datetime.datetime.strptime(data_sf_str[:16].strip(), fmt)
+                    return (datetime.datetime.now() - dt).days
+                except Exception:
+                    continue
             return None
         
         df_senado_view["Relator SF"] = df_senado_view.apply(_rel_sf, axis=1)
@@ -499,7 +494,8 @@ def render_tab5(
         df_senado_view["Situação SF"] = df_senado_view.apply(_sit_sf, axis=1)
         df_senado_view["Último andamento SF"] = df_senado_view.apply(_andamento_sf, axis=1)
         df_senado_view["Data SF"] = df_senado_view.apply(_data_sf, axis=1)
-        df_senado_view["Parado (dias)"] = df_senado_view.apply(_parado_sf, axis=1)
+        # Parado: calcula a partir da coluna "Data SF" já computada
+        df_senado_view["Parado (dias)"] = df_senado_view["Data SF"].apply(_parado_sf)
         
         colunas_exibir = [
             "Proposição", "Tipo", "Relator SF", "Último andamento SF",
