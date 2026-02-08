@@ -677,14 +677,48 @@ def render_tab5(
     # DETALHES DA PROPOSIÇÃO SELECIONADA
     # ============================================================
     selected_id = None
+    senado_data_row = None
     
     try:
         if sel and isinstance(sel, dict) and sel.get("selection") and sel["selection"].get("rows"):
             row_idx = sel["selection"]["rows"][0]
             row_data = df_tbl.iloc[row_idx]
             selected_id = str(row_data["ID"])
+            
+            # Construir senado_data para Linha do Tempo Unificada funcionar
+            # (Após correção do bug rel_sen no monólito, isso é seguro)
+            def safe_get(series, key, default=""):
+                try:
+                    val = series.get(key, default)
+                    if pd.isna(val):
+                        return default
+                    return val
+                except:
+                    return default
+            
+            def safe_get_bool(series, key):
+                try:
+                    val = series.get(key, False)
+                    if pd.isna(val):
+                        return False
+                    return bool(val)
+                except:
+                    return False
+            
+            senado_data_row = {
+                "no_senado": safe_get_bool(row_data, "no_senado"),
+                "codigo_materia_senado": safe_get(row_data, "codigo_materia_senado", ""),
+                "id_processo_senado": safe_get(row_data, "id_processo_senado", ""),
+                "situacao_senado": safe_get(row_data, "situacao_senado", ""),
+                "url_senado": safe_get(row_data, "url_senado", ""),
+                "Relator_Senado": safe_get(row_data, "Relator_Senado", ""),
+                "Orgao_Senado_Sigla": safe_get(row_data, "Orgao_Senado_Sigla", ""),
+                "Orgao_Senado_Nome": safe_get(row_data, "Orgao_Senado_Nome", ""),
+                "UltimasMov_Senado": safe_get(row_data, "UltimasMov_Senado", ""),
+            }
     except Exception:
         selected_id = None
+        senado_data_row = None
     
     st.markdown("---")
     st.markdown("#### 📋 Detalhes da Proposição Selecionada")
@@ -692,9 +726,10 @@ def render_tab5(
     if not selected_id:
         st.info("Clique em uma proposição acima para ver detalhes completos.")
     else:
-        # Não passar senado_data - deixar função buscar internamente
-        # Isso evita bug no monólito (linha 8108: rel_sen não definido)
+        # Passar senado_data para Linha do Tempo Unificada funcionar
+        # Bug do rel_sen foi corrigido no monólito (linha 8125)
         exibir_detalhes_proposicao_func(
             selected_id,
-            key_prefix="tab5"
+            key_prefix="tab5",
+            senado_data=senado_data_row
         )
