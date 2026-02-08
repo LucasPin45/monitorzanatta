@@ -428,23 +428,93 @@ def render_tab5(
             else:
                 df_tbl[col_name] = df_tbl[col_name].fillna(col_default)
         
-        # Exibir tabela com dados do Senado
-        colunas_senado = [
-            "Proposição", "Tipo", "Situação atual", "Órgão (sigla)", "Relator(a)", 
-            "Último andamento", "Data do status", "Parado (dias)"
+        # Exibir tabela com dados do Senado (APENAS dados do SF!)
+        # Montar colunas derivadas do Senado para exibição limpa
+        df_senado_view = df_no_senado.copy()
+        
+        # Relator SF: preferir Relator_Senado, fallback "Aguardando designação"
+        def _rel_sf(row):
+            r = str(row.get("Relator_Senado", "")).strip()
+            return r if r else "Aguardando designação"
+        
+        # Órgão SF: preferir Orgao_Senado_Sigla, fallback de movimentações
+        def _orgao_sf(row):
+            o = str(row.get("Orgao_Senado_Sigla", "")).strip()
+            if o:
+                return o
+            movs = str(row.get("UltimasMov_Senado", ""))
+            if movs and " | " in movs:
+                partes = movs.split("\n")[0].split(" | ")
+                if len(partes) >= 2 and partes[1].strip():
+                    return partes[1].strip()
+            return "MESA"
+        
+        # Situação SF
+        def _sit_sf(row):
+            s = str(row.get("situacao_senado", "")).strip()
+            return s if s else "AGUARDANDO DESPACHO"
+        
+        # Último andamento SF + Data SF + Parado SF
+        def _andamento_sf(row):
+            movs = str(row.get("UltimasMov_Senado", ""))
+            if movs and movs != "Sem movimentações disponíveis" and " | " in movs:
+                primeira = movs.split("\n")[0]
+                partes = primeira.split(" | ")
+                if len(partes) >= 3:
+                    return partes[2][:80]
+            return ""
+        
+        def _data_sf(row):
+            movs = str(row.get("UltimasMov_Senado", ""))
+            if movs and movs != "Sem movimentações disponíveis" and " | " in movs:
+                primeira = movs.split("\n")[0]
+                partes = primeira.split(" | ")
+                if partes:
+                    return partes[0].strip()
+            return ""
+        
+        def _parado_sf(row):
+            movs = str(row.get("UltimasMov_Senado", ""))
+            if movs and movs != "Sem movimentações disponíveis" and " | " in movs:
+                primeira = movs.split("\n")[0]
+                partes = primeira.split(" | ")
+                if partes:
+                    data_str = partes[0].strip()
+                    for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y"]:
+                        try:
+                            dt = datetime.datetime.strptime(data_str[:16], fmt)
+                            return (datetime.datetime.now() - dt).days
+                        except Exception:
+                            continue
+            return ""
+        
+        df_senado_view["Relator SF"] = df_senado_view.apply(_rel_sf, axis=1)
+        df_senado_view["Órgão SF"] = df_senado_view.apply(_orgao_sf, axis=1)
+        df_senado_view["Situação SF"] = df_senado_view.apply(_sit_sf, axis=1)
+        df_senado_view["Último andamento SF"] = df_senado_view.apply(_andamento_sf, axis=1)
+        df_senado_view["Data SF"] = df_senado_view.apply(_data_sf, axis=1)
+        df_senado_view["Parado (dias)"] = df_senado_view.apply(_parado_sf, axis=1)
+        
+        colunas_exibir = [
+            "Proposição", "Tipo", "Relator SF", "Último andamento SF",
+            "Data SF", "Órgão SF", "Situação SF", "Parado (dias)",
         ]
-        
-        # Adicionar colunas do Senado se existirem
-        for col in ["Relator_Senado", "Orgao_Senado_Sigla", "situacao_senado"]:
-            if col in df_no_senado.columns:
-                colunas_senado.append(col)
-        
-        colunas_exibir = [c for c in colunas_senado if c in df_no_senado.columns]
+        colunas_exibir = [c for c in colunas_exibir if c in df_senado_view.columns]
         
         st.dataframe(
-            df_no_senado[colunas_exibir],
+            df_senado_view[colunas_exibir],
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Proposição": st.column_config.TextColumn("Proposição", width="small"),
+                "Tipo": st.column_config.TextColumn("Tipo", width="small"),
+                "Relator SF": st.column_config.TextColumn("Relator (Senado)", width="medium"),
+                "Último andamento SF": st.column_config.TextColumn("Último andamento (SF)", width="large"),
+                "Data SF": st.column_config.TextColumn("Data (SF)", width="small"),
+                "Órgão SF": st.column_config.TextColumn("Órgão (SF)", width="small"),
+                "Situação SF": st.column_config.TextColumn("Situação (SF)", width="medium"),
+                "Parado (dias)": st.column_config.NumberColumn("Parado (dias)", width="small"),
+            }
         )
         
         st.markdown("---")
