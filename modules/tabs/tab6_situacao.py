@@ -1,5 +1,5 @@
 # modules/tabs/tab6_situacao.py
-# v1 08/02/2025 15:30 (Brasília)
+# v2 08/02/2025 16:15 (Brasília)
 """
 Tab 6 – Matérias por Situação Atual (Câmara)
 
@@ -61,6 +61,8 @@ STATUS_PREDEFINIDOS = [
     "Aguardando Designação",
     "Aguardando Votação",
     "Apreciação pelo Senado Federal",
+    "Aguardando Remessa ao Arquivo",
+    "Em providência Interna",
 ]
 
 MESES_PT = {
@@ -288,29 +290,30 @@ def _render_resumo_executivo(df: pd.DataFrame):
 
     c1, c2, c3, c4 = st.columns(4)
 
-    def _cnt(mn, mx=None):
+    def _cnt_dias(mx_dias):
+        """Conta proposições com Parado (dias) <= mx_dias (tramitou recentemente)."""
         try:
             col = pd.to_numeric(df["Parado (dias)"], errors="coerce")
-            return int(((col >= mn) & (col < mx)).sum()) if mx else int((col >= mn).sum())
+            return int((col.notna() & (col <= mx_dias)).sum())
         except Exception:
             return 0
-
-    with c1:
-        st.metric("📋 Total de Matérias", len(df))
-    with c2:
-        st.metric("🔴 Críticas (≥30 d)", _cnt(30))
-    with c3:
-        st.metric("🟠 Atenção (15-29 d)", _cnt(15, 30))
-    with c4:
-        st.metric("🟡 Monitorar (7-14 d)", _cnt(7, 15))
-
-    st.markdown("#### 📌 Por Situação-Chave")
-    s1, s2, s3, s4 = st.columns(4)
 
     def _cs(termo):
         if "Situação atual" not in df.columns:
             return 0
         return int(df["Situação atual"].fillna("").str.lower().str.contains(termo.lower()).sum())
+
+    with c1:
+        st.metric("📋 Total de Matérias", len(df))
+    with c2:
+        st.metric("🕐 Tramitou no último mês", _cnt_dias(30))
+    with c3:
+        st.metric("📨 Aguard. Despacho Presidente", _cs("aguardando despacho do presidente"))
+    with c4:
+        st.metric("🏛️ Apreciação pelo Senado", _cs("aprecia"))
+
+    st.markdown("#### 📌 Por Situação-Chave")
+    s1, s2, s3 = st.columns(3)
 
     with s1:
         st.metric("🔍 Aguard. Relator", _cs("aguardando designa"))
@@ -318,8 +321,6 @@ def _render_resumo_executivo(df: pd.DataFrame):
         st.metric("📝 Aguard. Parecer", _cs("aguardando parecer"))
     with s3:
         st.metric("📅 Pronta p/ Pauta", _cs("pronta para pauta"))
-    with s4:
-        st.metric("🗳️ Aguard. Deliberação", _cs("aguardando delibera"))
 
     st.markdown("#### 🏛️ Top 3 Órgãos e Situações")
     co, cs = st.columns(2)
@@ -341,19 +342,27 @@ def _render_atencao_deputada(df: pd.DataFrame):
     st.caption("Matérias que exigem decisão ou ação imediata")
 
     dfp = df.copy()
+    # Garantir colunas
+    if "Proposição" not in dfp.columns and "Proposicao" in dfp.columns:
+        dfp["Proposição"] = dfp["Proposicao"]
+    if "LinkTramitacao" not in dfp.columns and "id" in dfp.columns:
+        dfp["LinkTramitacao"] = dfp["id"].astype(str).apply(camara_link_tramitacao)
     dfp["_pri"] = dfp.apply(_calcular_prioridade, axis=1)
     dfp["Ação Sugerida"] = dfp.apply(_gerar_acao_sugerida, axis=1)
 
     for idx, (_, r) in enumerate(dfp.nlargest(5, "_pri").iterrows(), 1):
         prop = r.get("Proposição", r.get("Proposicao", ""))
         dias = r.get("Parado (dias)", "—")
+        link = r.get("LinkTramitacao", "")
         try:
             d = int(dias)
             sn = "🔴" if d >= 30 else "🟠" if d >= 15 else "🟡" if d >= 7 else "🟢"
         except (ValueError, TypeError):
             sn = "⚪"
+        # Prop com link clicável
+        prop_display = f"[{prop}]({link})" if link and str(link).startswith("http") else prop
         st.markdown(
-            f"**{idx}. {sn} {prop}** | {r.get('Órgão (sigla)', '—')} | {dias} dias  \n"
+            f"**{idx}. {sn} {prop_display}** | {r.get('Órgão (sigla)', '—')} | {dias} dias  \n"
             f"*Situação:* {str(r.get('Situação atual', '—'))[:50]}  \n"
             f"*→ Ação:* **{r.get('Ação Sugerida', '—')}**"
         )
@@ -367,6 +376,9 @@ def _render_prioridades_gabinete(df: pd.DataFrame):
     st.caption("Para distribuição de tarefas e acompanhamento")
 
     dfp = df.copy()
+    # Garantir coluna Proposição existe
+    if "Proposição" not in dfp.columns and "Proposicao" in dfp.columns:
+        dfp["Proposição"] = dfp["Proposicao"]
     dfp["_pri"] = dfp.apply(_calcular_prioridade, axis=1)
     dfp["Ação Sugerida"] = dfp.apply(_gerar_acao_sugerida, axis=1)
     top = dfp.nlargest(20, "_pri")
@@ -623,6 +635,19 @@ def render_tab6(
             df_status = provider.enrich_proposicoes_with_status(
                 df_base.head(n_props), status_map
             )
+
+            # ----- UNIFICAÇÃO DE SITUAÇÕES -----
+            if "Situação atual" in df_status.columns:
+                df_status["Situação atual"] = df_status["Situação atual"].replace({
+                    "Aguardando Devolução de Relator(a) que deixou de ser Membro": "Aguardando Designação de Relator(a)",
+                    "Aguardando Apreciação pelo Senado Federal": "Apreciação pelo Senado Federal",
+                })
+                # Relator = "Aguardando" quando aguardando designação
+                mask_aguard = df_status["Situação atual"].str.contains(
+                    "Aguardando Designação de Relator", case=False, na=False
+                )
+                if "Relator(a)" in df_status.columns:
+                    df_status.loc[mask_aguard, "Relator(a)"] = "Aguardando"
 
             # Colunas extras (provider pode não adicioná-las)
             if "Data do status (raw)" in df_status.columns:
