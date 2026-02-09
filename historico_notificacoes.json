@@ -175,7 +175,15 @@
       "data_tramitacao": "2026-02-09T09:44",
       "registrado_em": "2026-02-09T11:32:27.015949-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2601494_2026-02-09T12:44",
+      "proposicao_id": 2601494,
+      "sigla": "RIC 142/2026",
+      "data_tramitacao": "2026-02-09T12:44",
+      "registrado_em": "2026-02-09T13:23:18.312627-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-09T11:18:42.304913-03:00"
+  "ultima_limpeza": "2026-02-09T13:09:45.585355-03:00"
 }
