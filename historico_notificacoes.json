@@ -1,62 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "camara_2589352_2026-02-02T00:00",
-      "proposicao_id": 2589352,
-      "sigla": "PL 6029/2025",
-      "data_tramitacao": "2026-02-02T00:00",
-      "registrado_em": "2026-02-02T14:51:46.309504-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2582524_2026-02-02T00:00",
-      "proposicao_id": 2582524,
-      "sigla": "PL 5737/2025",
-      "data_tramitacao": "2026-02-02T00:00",
-      "registrado_em": "2026-02-02T14:51:48.634090-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2582078_2026-02-02T00:00",
-      "proposicao_id": 2582078,
-      "sigla": "PL 5701/2025",
-      "data_tramitacao": "2026-02-02T00:00",
-      "registrado_em": "2026-02-02T14:51:50.817118-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2571359_2026-02-02T00:00",
-      "proposicao_id": 2571359,
-      "sigla": "PL 5128/2025",
-      "data_tramitacao": "2026-02-02T00:00",
-      "registrado_em": "2026-02-02T14:51:53.466252-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2589468_2026-02-02T14:27",
-      "proposicao_id": 2589468,
-      "sigla": "RIC 8004/2025",
-      "data_tramitacao": "2026-02-02T14:27",
-      "registrado_em": "2026-02-02T14:51:55.963223-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2583384_2026-02-02T14:27",
-      "proposicao_id": 2583384,
-      "sigla": "RIC 7623/2025",
-      "data_tramitacao": "2026-02-02T14:27",
-      "registrado_em": "2026-02-02T14:51:58.350184-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2582530_2026-02-02T14:27",
-      "proposicao_id": 2582530,
-      "sigla": "RIC 7590/2025",
-      "data_tramitacao": "2026-02-02T14:27",
-      "registrado_em": "2026-02-02T14:52:00.588574-03:00",
-      "origem": "camara"
-    },
-    {
       "chave": "camara_2600189_2026-02-02T15:42",
       "proposicao_id": 2600189,
       "sigla": "PDL 8/2026",
@@ -183,7 +127,15 @@
       "data_tramitacao": "2026-02-09T12:44",
       "registrado_em": "2026-02-09T13:23:18.312627-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2455562_2026-02-09T00:00",
+      "proposicao_id": 2455562,
+      "sigla": "PL 3338/2024",
+      "data_tramitacao": "2026-02-09T00:00",
+      "registrado_em": "2026-02-09T15:16:11.054888-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-09T13:09:45.585355-03:00"
+  "ultima_limpeza": "2026-02-09T15:02:39.943945-03:00"
 }
