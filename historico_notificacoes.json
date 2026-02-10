@@ -143,7 +143,15 @@
       "data_tramitacao": "2026-02-09T18:21",
       "registrado_em": "2026-02-09T19:09:31.366361-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2436763_2026-02-10T15:49",
+      "proposicao_id": 2436763,
+      "sigla": "PL 2098/2024",
+      "data_tramitacao": "2026-02-10T15:49",
+      "registrado_em": "2026-02-10T17:16:46.594389-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-10T15:13:12.993216-03:00"
+  "ultima_limpeza": "2026-02-10T17:04:52.969021-03:00"
 }
