@@ -151,7 +151,23 @@
       "data_tramitacao": "2026-02-10T15:49",
       "registrado_em": "2026-02-10T17:16:46.594389-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2503242_2026-02-10T11:00",
+      "proposicao_id": 2503242,
+      "sigla": "PL 2030/2025",
+      "data_tramitacao": "2026-02-10T11:00",
+      "registrado_em": "2026-02-11T09:09:55.819066-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2377463_2026-02-10T11:00",
+      "proposicao_id": 2377463,
+      "sigla": "PEC 34/2023",
+      "data_tramitacao": "2026-02-10T11:00",
+      "registrado_em": "2026-02-11T09:09:59.341747-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-10T20:53:33.691633-03:00"
+  "ultima_limpeza": "2026-02-11T08:56:41.235056-03:00"
 }
