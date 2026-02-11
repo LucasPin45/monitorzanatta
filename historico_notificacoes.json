@@ -167,7 +167,15 @@
       "data_tramitacao": "2026-02-10T11:00",
       "registrado_em": "2026-02-11T09:09:59.341747-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2578996_2026-02-11T10:52",
+      "proposicao_id": 2578996,
+      "sigla": "PEC 40/2025",
+      "data_tramitacao": "2026-02-11T10:52",
+      "registrado_em": "2026-02-11T11:31:15.619370-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-11T08:56:41.235056-03:00"
+  "ultima_limpeza": "2026-02-11T11:19:23.696888-03:00"
 }
