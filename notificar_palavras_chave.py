@@ -5,10 +5,18 @@ notificar_palavras_chave.py
 ========================================
 Monitor de PAUTAS por PALAVRAS-CHAVE
 
+v8.1:
+- OTIMIZAÇÕES DE PERFORMANCE
+- Plenário: reduzido para 3 dias (era 7)
+- Senado: limite de 30 proposições
+- Logs detalhados com tempo de execução
+- Timeout aumentado para 45 minutos
+
 v8:
 - PAUTA DO PLENÁRIO incluída
 - Horário da varredura nas notificações
 - Notificação quando pauta do Plenário disponível
+- Detecção de mudanças na pauta do mesmo dia
 - INTEGRAÇÃO COM SENADO
 - Quando projeto está no Senado: 🔵 ZANATTA NO SENADO
 - Monitora movimentações de proposições no Senado 
@@ -419,8 +427,8 @@ def verificar_pauta_plenario_disponivel():
     """
     hoje = datetime.now(FUSO_BRASILIA).date()
     
-    # Verificar hoje e próximos 7 dias
-    for i in range(8):
+    # Verificar hoje e próximos 3 dias (otimizado para performance)
+    for i in range(4):
         data_verificar = hoje + timedelta(days=i)
         
         # Pular finais de semana
@@ -723,7 +731,13 @@ def buscar_proposicoes_no_senado(ids_autoria):
     """
     proposicoes_senado = []
     
-    for prop_id in ids_autoria:
+    # Limitar a 30 proposições para evitar timeout (otimização de performance)
+    ids_limitados = list(ids_autoria)[:30]
+    
+    if len(ids_autoria) > 30:
+        print(f"   ⚠️ Limitando verificação do Senado a 30 proposições (total: {len(ids_autoria)})")
+    
+    for prop_id in ids_limitados:
         try:
             # Buscar informações da proposição
             prop_info = fetch_proposicao_info(prop_id)
@@ -1353,7 +1367,9 @@ def executar_varredura():
     end_date = start_date + timedelta(days=21)
     
     print(f"\n📅 Buscando eventos de {start_date.strftime('%d/%m')} até {end_date.strftime('%d/%m')}...")
+    tempo_inicio = time.time()
     eventos = fetch_eventos(start_date, end_date)
+    tempo_eventos = time.time() - tempo_inicio
     
     if not eventos:
         print("⚠️ Nenhum evento encontrado")
@@ -1362,10 +1378,12 @@ def executar_varredura():
         salvar_resumo_dia(resumo)
         return
     
-    print(f"✅ {len(eventos)} evento(s) encontrado(s)\n")
+    print(f"✅ {len(eventos)} evento(s) encontrado(s) em {tempo_eventos:.1f}s\n")
     
     print("🔎 Buscando IDs de autoria...")
+    tempo_inicio = time.time()
     ids_autoria = fetch_ids_autoria_deputada(DEPUTADA_ID)
+    tempo_autoria = time.time() - tempo_inicio
     
     if not ids_autoria:
         print("⚠️ Nenhuma proposição de autoria encontrada")
@@ -1374,7 +1392,10 @@ def executar_varredura():
         salvar_resumo_dia(resumo)
         return
     
-    print("\n🔍 Analisando pautas...\n")
+    print(f"✅ {len(ids_autoria)} proposições em {tempo_autoria:.1f}s\n")
+    
+    print("\n🔍 Analisando pautas...")
+    tempo_inicio_analise = time.time()
     
     palavras_norm = preparar_palavras_chave()
     
@@ -1455,8 +1476,12 @@ def executar_varredura():
         
         time.sleep(0.1)
     
+    tempo_analise = time.time() - tempo_inicio_analise
+    print(f"\n⏱️ Análise de pautas concluída em {tempo_analise:.1f}s")
+    
     # ====== PARTE 3: MOVIMENTAÇÕES NO SENADO ======
     print("\n🔵 Verificando movimentações no Senado...")
+    tempo_inicio_senado = time.time()
     itens_senado = []
     
     proposicoes_senado = buscar_proposicoes_no_senado(ids_autoria)
@@ -1474,6 +1499,9 @@ def executar_varredura():
                 "sigla": sigla,
                 "chave": chave_senado
             })
+    
+    tempo_senado = time.time() - tempo_inicio_senado
+    print(f"⏱️ Verificação do Senado concluída em {tempo_senado:.1f}s")
     
     total_novos = len(itens_autoria) + len(itens_relatoria) + len(itens_palavras_chave) + len(itens_senado)
     
@@ -1555,9 +1583,10 @@ def executar_varredura():
 
 def main():
     print("=" * 60)
-    print("🔑 MONITOR DE PAUTAS v8")
+    print("🔑 MONITOR DE PAUTAS v8.1")
     print("    Autoria + Relatoria + Palavras-chave")
     print("    🏛️ Plenário + 📋 Comissões + 🔵 Senado")
+    print("    ⚡ Otimizado para Performance")
     print("=" * 60)
     print()
     
