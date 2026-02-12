@@ -111,7 +111,15 @@
       "data_tramitacao": "2026-02-11T10:52",
       "registrado_em": "2026-02-11T11:31:15.619370-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2601407_2026-02-12T00:00",
+      "proposicao_id": 2601407,
+      "sigla": "REQ 296/2026",
+      "data_tramitacao": "2026-02-12T00:00",
+      "registrado_em": "2026-02-12T15:20:25.335328-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-12T13:07:33.257457-03:00"
+  "ultima_limpeza": "2026-02-12T15:06:57.588106-03:00"
 }
