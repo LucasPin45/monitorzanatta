@@ -119,7 +119,23 @@
       "data_tramitacao": "2026-02-12T16:43",
       "registrado_em": "2026-02-12T17:07:41.542458-03:00",
       "origem": "camara"
+    },
+    {
+      "chave": "camara_2601494_2026-02-12T17:09",
+      "proposicao_id": 2601494,
+      "sigla": "RIC 142/2026",
+      "data_tramitacao": "2026-02-12T17:09",
+      "registrado_em": "2026-02-12T19:02:08.442629-03:00",
+      "origem": "camara"
+    },
+    {
+      "chave": "camara_2601231_2026-02-12T17:09",
+      "proposicao_id": 2601231,
+      "sigla": "RIC 125/2026",
+      "data_tramitacao": "2026-02-12T17:09",
+      "registrado_em": "2026-02-12T19:02:11.363227-03:00",
+      "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-12T16:53:07.039339-03:00"
+  "ultima_limpeza": "2026-02-12T18:48:51.999821-03:00"
 }
