@@ -5,7 +5,10 @@ notificar_palavras_chave.py
 ========================================
 Monitor de PAUTAS por PALAVRAS-CHAVE
 
-v7: 
+v8:
+- PAUTA DO PLENÁRIO incluída
+- Horário da varredura nas notificações
+- Notificação quando pauta do Plenário disponível
 - INTEGRAÇÃO COM SENADO
 - Quando projeto está no Senado: 🔵 ZANATTA NO SENADO
 - Monitora movimentações de proposições no Senado 
@@ -129,6 +132,7 @@ PALAVRAS_CHAVE = {
 ESTADO_FILE = Path("estado_palavras_chave.json")
 HISTORICO_FILE = Path("historico_palavras_chave.json")
 RESUMO_DIA_FILE = Path("resumo_palavras_chave.json")
+PAUTA_PLENARIO_FILE = Path("ultima_pauta_plenario.json")
 
 DIAS_MANTER_HISTORICO = 7
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
@@ -299,6 +303,35 @@ def adicionar_ao_resumo(resumo, sigla, categoria):
 
 
 # ============================================================
+# GERENCIAMENTO PAUTA PLENÁRIO
+# ============================================================
+
+def carregar_ultima_pauta_plenario():
+    """Carrega informações sobre a última pauta do Plenário verificada"""
+    try:
+        if PAUTA_PLENARIO_FILE.exists():
+            with open(PAUTA_PLENARIO_FILE, "r") as f:
+                return json.load(f)
+    except:
+        pass
+    return {"ultima_data": None, "num_proposicoes": 0, "ultima_verificacao": None}
+
+
+def salvar_pauta_plenario(data_pauta, num_proposicoes):
+    """Salva informações sobre a pauta do Plenário"""
+    try:
+        agora = datetime.now(FUSO_BRASILIA).isoformat()
+        with open(PAUTA_PLENARIO_FILE, "w") as f:
+            json.dump({
+                "ultima_data": data_pauta,
+                "num_proposicoes": num_proposicoes,
+                "ultima_verificacao": agora
+            }, f)
+    except:
+        pass
+
+
+# ============================================================
 # API DA CÂMARA
 # ============================================================
 
@@ -336,6 +369,70 @@ def fetch_eventos(start_date, end_date):
         pagina += 1
         time.sleep(0.1)
     return eventos
+
+
+def fetch_pauta_dia_plenario(data):
+    """
+    Busca a pauta do Plenário para uma data específica.
+    Retorna None se não houver pauta ou lista de proposições
+    """
+    try:
+        # Endpoint para pauta do dia do Plenário
+        data_str = data.strftime("%Y-%m-%d")
+        url = f"{BASE_URL}/pautas/orgaos/180/datas/{data_str}"
+        
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        
+        # Se retornar 404, não há pauta para esse dia
+        if resp.status_code == 404:
+            return None
+            
+        resp.raise_for_status()
+        data_json = resp.json()
+        
+        if not data_json:
+            return None
+        
+        # Buscar proposições na pauta
+        dados = data_json.get("dados", {})
+        proposicoes = dados.get("proposicoes", [])
+        
+        if not proposicoes or len(proposicoes) == 0:
+            return None
+            
+        return proposicoes
+        
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            return None
+        print(f"   ⚠️ Erro HTTP ao buscar pauta do Plenário: {e}")
+        return None
+    except Exception as e:
+        print(f"   ⚠️ Erro ao buscar pauta do Plenário: {e}")
+        return None
+
+
+def verificar_pauta_plenario_disponivel():
+    """
+    Verifica se há pauta do Plenário disponível para os próximos dias
+    Retorna (tem_pauta, data_pauta, proposicoes) ou (False, None, None)
+    """
+    hoje = datetime.now(FUSO_BRASILIA).date()
+    
+    # Verificar hoje e próximos 7 dias
+    for i in range(8):
+        data_verificar = hoje + timedelta(days=i)
+        
+        # Pular finais de semana
+        if data_verificar.weekday() >= 5:  # 5=sábado, 6=domingo
+            continue
+        
+        proposicoes = fetch_pauta_dia_plenario(data_verificar)
+        
+        if proposicoes and len(proposicoes) > 0:
+            return True, data_verificar.strftime("%Y-%m-%d"), proposicoes
+    
+    return False, None, None
 
 
 def fetch_pauta_evento(event_id):
@@ -684,12 +781,13 @@ def buscar_proposicoes_no_senado(ids_autoria):
 def formatar_mensagem_bom_dia():
     return """☀️ <b>Bom dia!</b>
 
-Sou o <b>Monitor de Pautas</b>, sistema que busca matérias de interesse nas pautas das comissões.
+Sou o <b>Monitor de Pautas</b>, sistema que busca matérias de interesse nas pautas das comissões e do Plenário.
 
 🔍 <b>O que monitoro:</b>
 • 📝 Projetos de <b>autoria</b> da deputada
 • 📋 Projetos com <b>relatoria</b> da deputada
 • 🔑 Matérias com <b>palavras-chave</b>
+• 🏛️ Pauta do <b>Plenário</b>
 • 🔵 Tramitações no <b>Senado</b>
 
 Ao longo do dia, enviarei notificações a cada novidade encontrada.
@@ -711,7 +809,10 @@ O monitoramento será retomado automaticamente quando as sessões voltarem. 🇧
 
 
 def formatar_mensagem_sem_novidades_completa():
-    return """✅ <b>Tudo tranquilo por aqui!</b>
+    horario = obter_data_hora_brasilia()
+    return f"""✅ <b>Tudo tranquilo por aqui!</b>
+
+🕐 <b>Varredura:</b> {horario}
 
 Fiz uma varredura nas pautas das próximas sessões e não encontrei:
 • Novos projetos de autoria
@@ -723,7 +824,102 @@ Continuo monitorando e aviso assim que aparecer algo! 👀"""
 
 
 def formatar_mensagem_sem_novidades_curta():
-    return "✅ Sem novidades no momento."
+    horario = obter_data_hora_brasilia()
+    return f"✅ Sem novidades no momento. ({horario})"
+
+
+def formatar_mensagem_pauta_plenario_disponivel(data_pauta, proposicoes):
+    """Formata mensagem quando pauta do Plenário fica disponível"""
+    
+    # Formatar data
+    try:
+        dt = datetime.strptime(data_pauta, "%Y-%m-%d")
+        data_br = dt.strftime("%d/%m/%Y")
+    except:
+        data_br = data_pauta
+    
+    texto = f"""🏛️ <b>PAUTA DO PLENÁRIO DISPONÍVEL</b>
+
+📅 <b>Data da Sessão:</b> {data_br}
+📊 <b>Total de proposições:</b> {len(proposicoes)}
+
+<b>Principais itens na pauta:</b>
+"""
+    
+    # Listar até 10 proposições principais
+    for i, prop in enumerate(proposicoes[:10], 1):
+        sigla = prop.get("siglaTipo", "")
+        numero = prop.get("numero", "")
+        ano = prop.get("ano", "")
+        ementa = prop.get("ementa", "")[:80]
+        
+        if sigla and numero:
+            texto += f"\n{i}. <b>{sigla} {numero}/{ano}</b>"
+            if ementa:
+                texto += f"\n   {escapar_html(ementa)}..."
+    
+    if len(proposicoes) > 10:
+        texto += f"\n\n... e mais {len(proposicoes) - 10} proposições."
+    
+    texto += f"\n\n🔗 Acesse o painel para detalhes: {LINK_PAINEL}"
+    
+    return texto
+
+
+def formatar_mensagem_pauta_plenario_atualizada(data_pauta, proposicoes, num_anterior, num_atual):
+    """Formata mensagem quando pauta do Plenário é atualizada no mesmo dia"""
+    
+    # Formatar data
+    try:
+        dt = datetime.strptime(data_pauta, "%Y-%m-%d")
+        data_br = dt.strftime("%d/%m/%Y")
+    except:
+        data_br = data_pauta
+    
+    # Calcular diferença
+    if num_atual > num_anterior:
+        diferenca = num_atual - num_anterior
+        tipo_mudanca = f"<b>+{diferenca} nova(s) proposição(ões) adicionada(s)</b>"
+        emoji = "📈"
+    elif num_atual < num_anterior:
+        diferenca = num_anterior - num_atual
+        tipo_mudanca = f"<b>-{diferenca} proposição(ões) removida(s)</b>"
+        emoji = "📉"
+    else:
+        tipo_mudanca = "<b>Conteúdo alterado</b>"
+        emoji = "🔄"
+    
+    horario = obter_data_hora_brasilia()
+    
+    texto = f"""🔄 <b>PAUTA DO PLENÁRIO ATUALIZADA</b>
+
+📅 <b>Data da Sessão:</b> {data_br}
+🕐 <b>Atualização detectada:</b> {horario}
+
+{emoji} {tipo_mudanca}
+📊 <b>Total atual:</b> {num_atual} proposições (antes: {num_anterior})
+
+<b>Principais itens na pauta atual:</b>
+"""
+    
+    # Listar até 10 proposições principais
+    for i, prop in enumerate(proposicoes[:10], 1):
+        sigla = prop.get("siglaTipo", "")
+        numero = prop.get("numero", "")
+        ano = prop.get("ano", "")
+        ementa = prop.get("ementa", "")[:80]
+        
+        if sigla and numero:
+            texto += f"\n{i}. <b>{sigla} {numero}/{ano}</b>"
+            if ementa:
+                texto += f"\n   {escapar_html(ementa)}..."
+    
+    if len(proposicoes) > 10:
+        texto += f"\n\n... e mais {len(proposicoes) - 10} proposições."
+    
+    texto += f"\n\n🔗 Acesse o painel para detalhes: {LINK_PAINEL}"
+    
+    return texto
 
 
 def formatar_mensagem_resumo_dia(resumo):
@@ -919,7 +1115,7 @@ def telegram_para_email_html(mensagem_telegram, assunto):
                                 🔑 Monitor de Pautas
                             </h1>
                             <p style="margin: 5px 0 0 0; color: #c8e6a5; font-size: 14px;">
-                                Palavras-chave • Autoria • Relatoria
+                                Palavras-chave • Autoria • Relatoria • Plenário
                             </p>
                         </td>
                     </tr>
@@ -1099,47 +1295,88 @@ def executar_varredura():
     print()
     
     if esta_em_recesso():
-        print("🏖️ Congresso em RECESSO - pulando varredura")
+        print("🏖️ Congresso em RECESSO")
+        notificar_telegram_apenas(formatar_mensagem_recesso())
         return
+    
+    historico = carregar_historico()
+    agora_dt = datetime.now(FUSO_BRASILIA)
+    if not historico.get("ultima_limpeza") or \
+       (agora_dt - datetime.fromisoformat(historico["ultima_limpeza"])).days >= 1:
+        print("🧹 Limpando histórico antigo...")
+        historico = limpar_historico_antigo(historico)
+    
+    resumo = carregar_resumo_dia()
+    if resumo.get("data") != agora_dt.strftime("%Y-%m-%d"):
+        resumo = inicializar_resumo_dia()
     
     estado = carregar_estado()
     ultima_teve_novidade = estado.get("ultima_novidade", True)
     
-    historico = carregar_historico()
-    historico = limpar_historico_antigo(historico)
-    print(f"📂 Histórico: {len(historico.get('notificadas', []))} itens")
+    # ====== PARTE 1: VERIFICAR PAUTA DO PLENÁRIO ======
+    print("🏛️ Verificando pauta do Plenário...")
     
-    resumo = carregar_resumo_dia()
-    agora = datetime.now(FUSO_BRASILIA)
-    data_hoje = agora.strftime("%Y-%m-%d")
-    if resumo.get("data") != data_hoje:
-        resumo = {"data": data_hoje, "tramitacoes": [], "por_categoria": {}}
+    info_pauta_plenario = carregar_ultima_pauta_plenario()
+    tem_pauta, data_pauta, proposicoes_plenario = verificar_pauta_plenario_disponivel()
     
-    palavras_norm = preparar_palavras_chave()
-    print(f"🔑 Palavras-chave: {len(palavras_norm)} termos")
+    if tem_pauta:
+        num_proposicoes_atual = len(proposicoes_plenario)
+        print(f"   ✅ Pauta do Plenário disponível para {data_pauta}")
+        print(f"   📊 {num_proposicoes_atual} proposições")
+        
+        # Verificar se precisa notificar:
+        # 1. Data diferente (pauta nova)
+        # 2. Mesma data mas número de proposições mudou (pauta atualizada)
+        data_anterior = info_pauta_plenario.get("ultima_data")
+        num_anterior = info_pauta_plenario.get("num_proposicoes", 0)
+        
+        if data_pauta != data_anterior:
+            # Pauta de uma data diferente
+            print("   📤 Nova pauta detectada! Enviando notificação...")
+            mensagem = formatar_mensagem_pauta_plenario_disponivel(data_pauta, proposicoes_plenario)
+            notificar_ambos(mensagem, f"🏛️ Pauta do Plenário - {data_pauta}")
+            salvar_pauta_plenario(data_pauta, num_proposicoes_atual)
+        elif num_proposicoes_atual != num_anterior:
+            # Mesma data mas pauta foi atualizada (número de proposições mudou)
+            print(f"   🔄 Pauta atualizada! ({num_anterior} → {num_proposicoes_atual} proposições)")
+            print("   📤 Enviando notificação de atualização...")
+            mensagem = formatar_mensagem_pauta_plenario_atualizada(data_pauta, proposicoes_plenario, num_anterior, num_proposicoes_atual)
+            notificar_ambos(mensagem, f"🔄 Pauta do Plenário Atualizada - {data_pauta}")
+            salvar_pauta_plenario(data_pauta, num_proposicoes_atual)
+        else:
+            print(f"   ℹ️ Pauta sem alterações ({num_proposicoes_atual} proposições)")
+    else:
+        print("   ℹ️ Nenhuma pauta do Plenário disponível nos próximos dias")
     
-    ids_autoria = fetch_ids_autoria_deputada(DEPUTADA_ID)
+    # ====== PARTE 2: BUSCAR EVENTOS E PAUTAS DE COMISSÕES ======
+    start_date = agora_dt.date()
+    end_date = start_date + timedelta(days=21)
     
-    start_date = agora
-    end_date = agora + timedelta(days=7)
-    
-    print(f"\n📆 Buscando eventos de {start_date.strftime('%d/%m')} a {end_date.strftime('%d/%m')}...")
+    print(f"\n📅 Buscando eventos de {start_date.strftime('%d/%m')} até {end_date.strftime('%d/%m')}...")
     eventos = fetch_eventos(start_date, end_date)
-    print(f"✅ {len(eventos)} eventos encontrados")
     
     if not eventos:
         print("⚠️ Nenhum evento encontrado")
-        print("\n📤 Enviando status (apenas Telegram)...")
-        if ultima_teve_novidade:
-            notificar_telegram_apenas(formatar_mensagem_sem_novidades_completa())
-        else:
-            notificar_telegram_apenas(formatar_mensagem_sem_novidades_curta())
+        salvar_estado(False)
+        salvar_historico(historico)
+        salvar_resumo_dia(resumo)
+        return
+    
+    print(f"✅ {len(eventos)} evento(s) encontrado(s)\n")
+    
+    print("🔎 Buscando IDs de autoria...")
+    ids_autoria = fetch_ids_autoria_deputada(DEPUTADA_ID)
+    
+    if not ids_autoria:
+        print("⚠️ Nenhuma proposição de autoria encontrada")
         salvar_estado(False)
         salvar_historico(historico)
         salvar_resumo_dia(resumo)
         return
     
     print("\n🔍 Analisando pautas...\n")
+    
+    palavras_norm = preparar_palavras_chave()
     
     itens_palavras_chave = []
     itens_autoria = []
@@ -1218,7 +1455,7 @@ def executar_varredura():
         
         time.sleep(0.1)
     
-    # ====== PARTE 2: MOVIMENTAÇÕES NO SENADO ======
+    # ====== PARTE 3: MOVIMENTAÇÕES NO SENADO ======
     print("\n🔵 Verificando movimentações no Senado...")
     itens_senado = []
     
@@ -1241,7 +1478,7 @@ def executar_varredura():
     total_novos = len(itens_autoria) + len(itens_relatoria) + len(itens_palavras_chave) + len(itens_senado)
     
     print(f"\n{'=' * 60}")
-    print(f"📊 RESUMO:")
+    print(f"📊 RESUMO DA VARREDURA ({data_hora}):")
     print(f"   Eventos: {len(eventos)}")
     print(f"   Itens de pauta: {total_itens_pauta}")
     print(f"   AUTORIA: {len(itens_autoria)}")
@@ -1318,9 +1555,9 @@ def executar_varredura():
 
 def main():
     print("=" * 60)
-    print("🔑 MONITOR DE PAUTAS v7")
+    print("🔑 MONITOR DE PAUTAS v8")
     print("    Autoria + Relatoria + Palavras-chave")
-    print("    📍 Câmara + 🔵 Senado")
+    print("    🏛️ Plenário + 📋 Comissões + 🔵 Senado")
     print("=" * 60)
     print()
     
