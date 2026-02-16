@@ -1,22 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "camara_2601552_2026-02-09T16:26",
-      "proposicao_id": 2601552,
-      "sigla": "PL 396/2026",
-      "data_tramitacao": "2026-02-09T16:26",
-      "registrado_em": "2026-02-09T17:18:21.171296-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2578996_2026-02-09T18:21",
-      "proposicao_id": 2578996,
-      "sigla": "PEC 40/2025",
-      "data_tramitacao": "2026-02-09T18:21",
-      "registrado_em": "2026-02-09T19:09:31.366361-03:00",
-      "origem": "camara"
-    },
-    {
       "chave": "camara_2436763_2026-02-10T15:49",
       "proposicao_id": 2436763,
       "sigla": "PL 2098/2024",
@@ -145,5 +129,5 @@
       "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-16T16:44:44.109666-03:00"
+  "ultima_limpeza": "2026-02-16T20:43:42.721861-03:00"
 }
