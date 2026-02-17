@@ -1,14 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "camara_2436763_2026-02-10T15:49",
-      "proposicao_id": 2436763,
-      "sigla": "PL 2098/2024",
-      "data_tramitacao": "2026-02-10T15:49",
-      "registrado_em": "2026-02-10T17:16:46.594389-03:00",
-      "origem": "camara"
-    },
-    {
       "chave": "camara_2503242_2026-02-10T11:00",
       "proposicao_id": 2503242,
       "sigla": "PL 2030/2025",
@@ -129,5 +121,5 @@
       "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-17T16:51:06.658902-03:00"
+  "ultima_limpeza": "2026-02-17T18:47:53.814192-03:00"
 }
