@@ -1,14 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "camara_2578996_2026-02-11T10:52",
-      "proposicao_id": 2578996,
-      "sigla": "PEC 40/2025",
-      "data_tramitacao": "2026-02-11T10:52",
-      "registrado_em": "2026-02-11T11:31:15.619370-03:00",
-      "origem": "camara"
-    },
-    {
       "chave": "camara_2601407_2026-02-12T00:00",
       "proposicao_id": 2601407,
       "sigla": "REQ 296/2026",
@@ -105,5 +97,5 @@
       "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-18T11:11:50.899323-03:00"
+  "ultima_limpeza": "2026-02-18T13:07:05.737281-03:00"
 }
