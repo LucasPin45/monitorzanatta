@@ -1,5 +1,11 @@
 {
   "data": "2026-02-19",
-  "tramitacoes": [],
-  "por_categoria": {}
+  "tramitacoes": [
+    "PL 296/2025"
+  ],
+  "por_categoria": {
+    "Armas e Seguran\u00e7a": [
+      "PL 296/2025"
+    ]
+  }
 }
