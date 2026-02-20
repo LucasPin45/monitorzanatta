@@ -1,14 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "camara_2600064_2026-02-13T11:12",
-      "proposicao_id": 2600064,
-      "sigla": "RIC 46/2026",
-      "data_tramitacao": "2026-02-13T11:12",
-      "registrado_em": "2026-02-13T13:11:21.808555-03:00",
-      "origem": "camara"
-    },
-    {
       "chave": "camara_2603153_2026-02-18T15:59",
       "proposicao_id": 2603153,
       "sigla": "RIC 233/2026",
@@ -33,5 +25,5 @@
       "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-20T12:52:20.436585-03:00"
+  "ultima_limpeza": "2026-02-20T14:54:47.019400-03:00"
 }
