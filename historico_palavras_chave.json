@@ -1,12 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "pc_palavras_palavras_81038_2537739",
-      "sigla": "PLP 152/2025",
-      "categoria": "Armas e Seguran\u00e7a",
-      "registrado_em": "2026-02-12T18:31:42.956990-03:00"
-    },
-    {
       "chave": "pc_palavras_palavras_80956_2483068",
       "sigla": "PL 296/2025",
       "categoria": "Armas e Seguran\u00e7a",
@@ -101,7 +95,25 @@
       "sigla": "REQ 8/2025",
       "categoria": "Vida e Fam\u00edlia",
       "registrado_em": "2026-02-19T18:31:24.195844-03:00"
+    },
+    {
+      "chave": "pc_palavras_palavras_81026_2216555",
+      "sigla": "PL 4617/2019",
+      "categoria": "Armas e Seguran\u00e7a",
+      "registrado_em": "2026-02-20T12:37:05.818084-03:00"
+    },
+    {
+      "chave": "pc_palavras_palavras_81037_2417775",
+      "sigla": "PL 240/2024",
+      "categoria": "Vida e Fam\u00edlia",
+      "registrado_em": "2026-02-20T12:37:08.072574-03:00"
+    },
+    {
+      "chave": "pc_palavras_palavras_81038_2537739",
+      "sigla": "PLP 152/2025",
+      "categoria": "Armas e Seguran\u00e7a",
+      "registrado_em": "2026-02-20T12:37:10.364274-03:00"
     }
   ],
-  "ultima_limpeza": "2026-02-19T10:00:13.024767-03:00"
+  "ultima_limpeza": "2026-02-20T12:35:20.162558-03:00"
 }

@@ -1,5 +1,17 @@
 {
   "data": "2026-02-20",
-  "tramitacoes": [],
-  "por_categoria": {}
+  "tramitacoes": [
+    "PL 4617/2019",
+    "PL 240/2024",
+    "PLP 152/2025"
+  ],
+  "por_categoria": {
+    "Armas e Seguran\u00e7a": [
+      "PL 4617/2019",
+      "PLP 152/2025"
+    ],
+    "Vida e Fam\u00edlia": [
+      "PL 240/2024"
+    ]
+  }
 }
