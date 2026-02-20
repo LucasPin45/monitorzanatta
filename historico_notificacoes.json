@@ -1,54 +1,6 @@
 {
   "notificadas": [
     {
-      "chave": "camara_2603082_2026-02-13T10:37",
-      "proposicao_id": 2603082,
-      "sigla": "RIC 217/2026",
-      "data_tramitacao": "2026-02-13T10:37",
-      "registrado_em": "2026-02-13T11:19:18.971344-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2601494_2026-02-12T19:26",
-      "proposicao_id": 2601494,
-      "sigla": "RIC 142/2026",
-      "data_tramitacao": "2026-02-12T19:26",
-      "registrado_em": "2026-02-13T11:19:21.544210-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2601231_2026-02-12T19:26",
-      "proposicao_id": 2601231,
-      "sigla": "RIC 125/2026",
-      "data_tramitacao": "2026-02-12T19:26",
-      "registrado_em": "2026-02-13T11:19:24.264205-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2598979_2026-02-13T11:09",
-      "proposicao_id": 2598979,
-      "sigla": "RIC 8219/2025",
-      "data_tramitacao": "2026-02-13T11:09",
-      "registrado_em": "2026-02-13T11:19:26.670629-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2598596_2026-02-13T10:48",
-      "proposicao_id": 2598596,
-      "sigla": "RIC 8167/2025",
-      "data_tramitacao": "2026-02-13T10:48",
-      "registrado_em": "2026-02-13T11:19:29.198322-03:00",
-      "origem": "camara"
-    },
-    {
-      "chave": "camara_2598544_2026-02-13T10:48",
-      "proposicao_id": 2598544,
-      "sigla": "RIC 8166/2025",
-      "data_tramitacao": "2026-02-13T10:48",
-      "registrado_em": "2026-02-13T11:19:31.631447-03:00",
-      "origem": "camara"
-    },
-    {
       "chave": "camara_2600064_2026-02-13T11:12",
       "proposicao_id": 2600064,
       "sigla": "RIC 46/2026",
@@ -81,5 +33,5 @@
       "origem": "camara"
     }
   ],
-  "ultima_limpeza": "2026-02-20T11:04:49.427283-03:00"
+  "ultima_limpeza": "2026-02-20T12:52:20.436585-03:00"
 }
